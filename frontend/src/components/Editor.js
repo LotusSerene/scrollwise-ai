@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.title}
+              {chapter.content.slice(0, 100)}...
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
