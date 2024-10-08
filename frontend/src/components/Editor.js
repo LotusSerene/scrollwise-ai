@@ -6,8 +6,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
   const [selectedChapter, setSelectedChapter] = useState(null);
-  const [chapterTitle, setChapterTitle] = useState('');
   const [chapterContent, setChapterContent] = useState('');
+  const [chapterTitle, setChapterTitle] = useState('');
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -54,8 +54,8 @@ function Editor({ chapters, setChapters }) {
       if (selectedChapter) {
         // Update existing chapter
         await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-          title: chapterTitle,
-          content: chapterContent
+          title: chapterContent,
+          content: chapterTitle
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -64,8 +64,8 @@ function Editor({ chapters, setChapters }) {
       } else {
         // Create new chapter
         await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          title: chapterTitle,
-          content: chapterContent
+          title: chapterContent,
+          content: chapterTitle
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -115,21 +115,21 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${chapterContent}` : 'Create New Chapter'}</h3>
+        <h3>{selectedChapter ? `Edit Chapter: ${chapterTitle}` : 'Create New Chapter'}</h3>
         {error && <p className="error">{error}</p>}
         <label>
           Title:
           <input
             type="text"
-            value={chapterContent}
-            onChange={(e) => setChapterContent(e.target.value)}
+            value={chapterTitle}
+            onChange={(e) => setChapterTitle(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
-            value={chapterTitle}
-            onChange={(e) => setChapterTitle(e.target.value)}
+            value={chapterContent}
+            onChange={(e) => setChapterContent(e.target.value)}
             rows={20}
             cols={80}
           />
