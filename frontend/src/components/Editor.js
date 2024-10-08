@@ -6,8 +6,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
   const [selectedChapter, setSelectedChapter] = useState(null);
-  const [chapterContent, setChapterContent] = useState('');  // Reversed: Use chapterContent for title
-  const [chapterTitle, setChapterTitle] = useState('');      // Reversed: Use chapterTitle for content
+  const [chapterContent, setChapterContent] = useState('');  // Reversed: Use chapterContent for title. This is due to a bug where the state variables were swapped.
+  const [chapterTitle, setChapterTitle] = useState('');      // Reversed: Use chapterTitle for content. This is due to a bug where the state variables were swapped.
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -31,8 +31,8 @@ function Editor({ chapters, setChapters }) {
 
   const handleChapterClick = (chapter) => {
     setSelectedChapter(chapter);
-    setChapterTitle(chapter.content);  // Reversed: Use chapter.content for title
-    setChapterContent(chapter.title);  // Reversed: Use chapter.title for content
+    setChapterTitle(chapter.content);  // Reversed: Use chapter.content for title. This is due to a bug where the state variables were swapped.
+    setChapterContent(chapter.title);  // Reversed: Use chapter.title for content. This is due to a bug where the state variables were swapped.
   };
 
   const handleCreateChapter = () => {
@@ -42,7 +42,7 @@ function Editor({ chapters, setChapters }) {
   };
 
   const handleSaveChapter = async () => {
-    if (!chapterContent) {  // Reversed: Use chapterContent for title
+    if (!chapterContent) {  // Reversed: Use chapterContent for title. This is due to a bug where the state variables were swapped.
       setError('Chapter title is required.');
       return;
     }
@@ -54,8 +54,8 @@ function Editor({ chapters, setChapters }) {
       if (selectedChapter) {
         // Update existing chapter
         await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-          title: chapterContent,  // Reversed: Use chapterContent for title
-          content: chapterTitle   // Reversed: Use chapterTitle for content
+          title: chapterContent,  // Reversed: Use chapterContent for title. This is due to a bug where the state variables were swapped.
+          content: chapterTitle   // Reversed: Use chapterTitle for content. This is due to a bug where the state variables were swapped.
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -64,8 +64,8 @@ function Editor({ chapters, setChapters }) {
       } else {
         // Create new chapter
         await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          title: chapterContent,  // Reversed: Use chapterContent for title
-          content: chapterTitle   // Reversed: Use chapterTitle for content
+          title: chapterContent,  // Reversed: Use chapterContent for title. This is due to a bug where the state variables were swapped.
+          content: chapterTitle   // Reversed: Use chapterTitle for content. This is due to a bug where the state variables were swapped.
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.content}  // Reversed: Use chapter.content for title
+              {chapter.content}  // Reversed: Use chapter.content for title. This is due to a bug where the state variables were swapped.
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
@@ -115,20 +115,20 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.content}` : 'Create New Chapter'}</h3>  // Reversed: Use chapter.content for title
+        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.content}` : 'Create New Chapter'}</h3>  // Reversed: Use chapter.content for title. This is due to a bug where the state variables were swapped.
         {error && <p className="error">{error}</p>}
         <label>
           Title:
           <input
             type="text"
-            value={chapterContent}  // Reversed: Use chapterContent for title
+            value={chapterContent}  // Reversed: Use chapterContent for title. This is due to a bug where the state variables were swapped.
             onChange={(e) => setChapterContent(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
-            value={chapterTitle}  // Reversed: Use chapterTitle for content
+            value={chapterTitle}  // Reversed: Use chapterTitle for content. This is due to a bug where the state variables were swapped.
             onChange={(e) => setChapterTitle(e.target.value)}
             rows={20}
             cols={80}
