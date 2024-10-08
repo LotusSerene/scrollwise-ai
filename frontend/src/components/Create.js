@@ -147,7 +147,13 @@ function Create({ onChapterGenerated, previousChapters }) {
         <label>
           Characters:
           <button onClick={handleAddCharacter}>Add Character</button>
-          <pre>{JSON.stringify(characters, null, 2)}</pre>
+          <ul>
+            {Object.entries(characters).map(([name, description]) => (
+              <li key={name}>
+                <strong>Name:</strong> {name}, <strong>Description:</strong> {description}
+              </li>
+            ))}
+          </ul>
         </label>
         <button onClick={handleGenerateChapter}>Generate Chapter</button>
         <button onClick={handleSaveChapter}>Save Chapter</button>
