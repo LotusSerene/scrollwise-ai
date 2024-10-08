@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.title}
+              {chapter.content}
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
@@ -115,21 +115,21 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${chapterContent}` : 'Create New Chapter'}</h3>
+        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.content}` : 'Create New Chapter'}</h3>
         {error && <p className="error">{error}</p>}
         <label>
           Title:
           <input
             type="text"
             value={chapterContent}
-            onChange={(e) => setChapterContent(e.target.value)}
+            onChange={(e) => setChapterTitle(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
             value={chapterTitle}
-            onChange={(e) => setChapterTitle(e.target.value)}
+            onChange={(e) => setChapterContent(e.target.value)}
             rows={20}
             cols={80}
           />
