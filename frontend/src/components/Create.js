@@ -5,7 +5,7 @@ import { getAuthToken } from '../utils/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 function Create({ onChapterGenerated, previousChapters }) {
-  const [chapterNumber, setChapterNumber] = useState(1);
+  const [numChapters, setNumChapters] = useState(1);
   const [plot, setPlot] = useState('');
   const [writingStyle, setWritingStyle] = useState('');
   const [instructions, setInstructions] = useState('');
@@ -18,7 +18,7 @@ function Create({ onChapterGenerated, previousChapters }) {
   const handleGenerateChapter = async () => {
     const token = getAuthToken();
     const data = {
-      numChapters: 1,
+      numChapters,
       plot,
       writingStyle,
       instructions,
@@ -36,11 +36,13 @@ function Create({ onChapterGenerated, previousChapters }) {
       });
 
       if (response.data.chapters && response.data.chapters.length > 0) {
-        const newChapter = response.data.chapters[0];
-        setChapterContent(newChapter.chapter);
-        onChapterGenerated(newChapter);
+        const newChapters = response.data.chapters;
+        newChapters.forEach((newChapter) => {
+          setChapterContent(newChapter.chapter);
+          onChapterGenerated(newChapter);
+        });
       } else {
-        setError('No chapter generated. Please try again.');
+        setError('No chapters generated. Please try again.');
       }
     } catch (error) {
       console.error('Error generating chapter:', error);
@@ -59,9 +61,9 @@ function Create({ onChapterGenerated, previousChapters }) {
 
     try {
       await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-        name: `Chapter ${chapterNumber}`,
+        name: `Chapter ${numChapters}`,
         content: chapterContent,
-        title: `Chapter ${chapterNumber}`
+        title: `Chapter ${numChapters}`
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -69,7 +71,7 @@ function Create({ onChapterGenerated, previousChapters }) {
       });
 
       setError(null);
-      setChapterNumber(chapterNumber + 1);
+      setNumChapters(numChapters + 1);
       setChapterContent('');
     } catch (error) {
       console.error('Error saving chapter:', error);
@@ -85,17 +87,25 @@ function Create({ onChapterGenerated, previousChapters }) {
     }
   };
 
+  const handleRemoveCharacter = (name) => {
+    setCharacters((prevCharacters) => {
+      const newCharacters = { ...prevCharacters };
+      delete newCharacters[name];
+      return newCharacters;
+    });
+  };
+
   return (
     <div className="create-container">
       <div className="input-section">
         <h3>Create New Chapter</h3>
         {error && <p className="error">{error}</p>}
         <label>
-          Chapter Number:
+          Number of Chapters:
           <input
             type="number"
-            value={chapterNumber}
-            onChange={(e) => setChapterNumber(e.target.value)}
+            value={numChapters}
+            onChange={(e) => setNumChapters(e.target.value)}
             min={1}
           />
         </label>
@@ -151,6 +161,7 @@ function Create({ onChapterGenerated, previousChapters }) {
             {Object.entries(characters).map(([name, description]) => (
               <li key={name}>
                 <strong>Name:</strong> {name}, <strong>Description:</strong> {description}
+                <button onClick={() => handleRemoveCharacter(name)}>Remove</button>
               </li>
             ))}
           </ul>
