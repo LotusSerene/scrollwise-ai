@@ -115,7 +115,7 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.content}` : 'Create New Chapter'}</h3>
+        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.title}` : 'Create New Chapter'}</h3>
         {error && <p className="error">{error}</p>}
         <label>
           Title:
