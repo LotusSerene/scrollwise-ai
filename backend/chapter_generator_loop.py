@@ -20,7 +20,7 @@ class ChapterGeneratorLoop:
         context_manager = ContextManager()
         self.add_context(context_manager, plot, writing_style, instructions, characters)
         context = context_manager.get_context()
-        chapter, chapter_title, validity = chapter_generator.generate_chapter(instructions, context, chapter_number, previous_chapters)  # Remove user_id
+        chapter, chapter_title, validity = chapter_generator.generate_chapter(chapter_number, plot, writing_style, instructions, characters, previous_chapters)
         return chapter, chapter_title, validity
 
     def add_context(self, context_manager: ContextManager, plot: str, writing_style: str, instructions: Dict[str, Any], characters: Dict[str, Any]):
