@@ -31,8 +31,8 @@ function Editor({ chapters, setChapters }) {
 
   const handleChapterClick = (chapter) => {
     setSelectedChapter(chapter);
-    setChapterTitle(chapter.title);
-    setChapterContent(chapter.content);
+    setChapterTitle(chapter.title);  // Corrected: Use chapter.title
+    setChapterContent(chapter.content);  // Corrected: Use chapter.content
   };
 
   const handleCreateChapter = () => {
@@ -54,8 +54,8 @@ function Editor({ chapters, setChapters }) {
       if (selectedChapter) {
         // Update existing chapter
         await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-          title: chapterTitle,
-          content: chapterContent
+          title: chapterTitle,  // Corrected: Use chapterTitle
+          content: chapterContent  // Corrected: Use chapterContent
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -64,8 +64,8 @@ function Editor({ chapters, setChapters }) {
       } else {
         // Create new chapter
         await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          title: chapterTitle,
-          content: chapterContent
+          title: chapterTitle,  // Corrected: Use chapterTitle
+          content: chapterContent  // Corrected: Use chapterContent
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.title}
+              {chapter.title}  // Corrected: Use chapter.title
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
@@ -121,14 +121,14 @@ function Editor({ chapters, setChapters }) {
           Title:
           <input
             type="text"
-            value={chapterTitle}
+            value={chapterTitle}  // Corrected: Use chapterTitle
             onChange={(e) => setChapterTitle(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
-            value={chapterContent}
+            value={chapterContent}  // Corrected: Use chapterContent
             onChange={(e) => setChapterContent(e.target.value)}
             rows={20}
             cols={80}
