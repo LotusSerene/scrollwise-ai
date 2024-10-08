@@ -22,6 +22,20 @@ class ChapterGenerator:
         self.MAX_OUTPUT_TOKENS = 8192
         self.logger = logging.getLogger(__name__)
 
+    def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], characters: Dict[str, Any], previous_chapters_content: Optional[str]) -> str:
+        context = f"Plot: {plot}\nWriting Style: {writing_style}\n"
+        if previous_chapters_content:
+            context += f"Previous Chapters: {previous_chapters_content}\n"
+        if characters:
+            context += "Characters:\n"
+            for name, description in characters.items():
+                context += f"{name}: {description}\n"
+        if instructions:
+            context += "Instructions:\n"
+            for key, value in instructions.items():
+                context += f"{key}: {value}\n"
+        return context
+
     def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, instructions: Dict[str, Any], characters: Dict[str, Any], previous_chapters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, Any]]:
         min_word_count = instructions.get('min_word_count', 0)  # Get min_word_count from instructions
         try:
@@ -35,157 +49,6 @@ class ChapterGenerator:
             previous_chapters_content = self.get_existing_chapter_content(chapter_number, previous_chapters)
             
             context = self._construct_context(plot, writing_style, instructions, characters, previous_chapters_content)
-            
-            prompt = self._construct_prompt(instructions, context, previous_chapters_content)
-            
-            self.logger.debug(f"Generated prompt for chapter {chapter_number}")
-            
-            generation_config = genai.GenerationConfig(
-                max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                temperature=1,
-            )
-            
-            response = self.generation_model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                stream=True
-            )   
-            
-            chapter = ""
-            for chunk in response:
-                chapter += chunk.text
-            
-            self.logger.info(f"Chapter {chapter_number} generation completed.")
-            
-            # Extend the chapter if it's too short
-            if len(chapter.split()) < min_word_count:
-                self.logger.info(f"Extending chapter {chapter_number} as it is below the minimum word count...")
-                chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
-            
-            # Run checks *after* potential extension
-            self.logger.info(f"Checking chapter {chapter_number}...")
-            is_valid, feedback = self.check_chapter(chapter, instructions, previous_chapters_content)
-            
-            review_feedback = self.review_chapter(chapter, instructions, previous_chapters_content)
-            
-            style_guide = instructions.get('style_guide', '')
-            adheres_to_style_guide, style_guide_feedback = self.enforce_style_guide(chapter, style_guide)
-            
-            continuity = True
-            continuity_feedback = "No previous chapters available for continuity check."
-            if previous_chapters_content:
-                continuity, continuity_feedback = self.check_continuity(chapter, previous_chapters_content)
-            
-            test_results = self.run_tests(chapter, instructions, previous_chapters_content)
-            
-            validity = {
-                'is_valid': is_valid,
-                'feedback': feedback,
-                'review_feedback': review_feedback,
-                'style_guide_feedback': style_guide_feedback,
-                'continuity_feedback': continuity_feedback,
-                'test_results': test_results,
-                'adheres_to_style_guide': adheres_to_style_guide,
-                'continuity': continuity
-            }
-            
-            self.save_validity_feedback(validity, chapter_number)
-            
-            # Save the final chapter to the database
-            chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
-            self.save_response(chapter, chapter_number, chapter_title)
-            
-            return chapter, chapter_title, validity
-
-        except Exception as e:
-            self.logger.error(f"Error generating chapter {chapter_number}: {e}")
-            self.logger.error(traceback.format_exc())
-            return f"Error generating chapter: {str(e)}", {}
-        min_word_count = instructions.get('min_word_count', 0)  # Get min_word_count from instructions
-        try:
-            self.logger.info(f"Generating chapter {chapter_number}...")
-
-            # Ensure previous_chapters is a list
-            if not isinstance(previous_chapters, list):
-                previous_chapters = []
-
-            # Get previous chapters content
-            previous_chapters_content = self.get_existing_chapter_content(chapter_number, previous_chapters)
-            
-            context = self._construct_context(plot, writing_style, instructions, characters, previous_chapters_content)
-            
-            prompt = self._construct_prompt(instructions, context, previous_chapters_content)
-            
-            self.logger.debug(f"Generated prompt for chapter {chapter_number}")
-            
-            generation_config = genai.GenerationConfig(
-                max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                temperature=1,
-            )
-            
-            response = self.generation_model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                stream=True
-            )   
-            
-            chapter = ""
-            for chunk in response:
-                chapter += chunk.text
-            
-            self.logger.info(f"Chapter {chapter_number} generation completed.")
-            
-            # Extend the chapter if it's too short
-            if len(chapter.split()) < min_word_count:
-                self.logger.info(f"Extending chapter {chapter_number} as it is below the minimum word count...")
-                chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
-            
-            # Run checks *after* potential extension
-            self.logger.info(f"Checking chapter {chapter_number}...")
-            is_valid, feedback = self.check_chapter(chapter, instructions, previous_chapters_content)
-            
-            review_feedback = self.review_chapter(chapter, instructions, previous_chapters_content)
-            
-            style_guide = instructions.get('style_guide', '')
-            adheres_to_style_guide, style_guide_feedback = self.enforce_style_guide(chapter, style_guide)
-            
-            continuity = True
-            continuity_feedback = "No previous chapters available for continuity check."
-            if previous_chapters_content:
-                continuity, continuity_feedback = self.check_continuity(chapter, previous_chapters_content)
-            
-            test_results = self.run_tests(chapter, instructions, previous_chapters_content)
-            
-            validity = {
-                'is_valid': is_valid,
-                'feedback': feedback,
-                'review_feedback': review_feedback,
-                'style_guide_feedback': style_guide_feedback,
-                'continuity_feedback': continuity_feedback,
-                'test_results': test_results,
-                'adheres_to_style_guide': adheres_to_style_guide,
-                'continuity': continuity
-            }
-            
-            self.save_validity_feedback(validity, chapter_number)
-            
-            # Save the final chapter to the database
-            chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
-            self.save_response(chapter, chapter_number, chapter_title)
-            
-            return chapter, chapter_title, validity
-
-        except Exception as e:
-            self.logger.error(f"Error generating chapter {chapter_number}: {e}")
-            self.logger.error(traceback.format_exc())
-            return f"Error generating chapter: {str(e)}", {}
-
-            # Ensure previous_chapters is a list
-            if not isinstance(previous_chapters, list):
-                previous_chapters = []
-
-            # Get previous chapters content
-            previous_chapters_content = self.get_existing_chapter_content(chapter_number, previous_chapters)
             
             prompt = self._construct_prompt(instructions, context, previous_chapters_content)
             
