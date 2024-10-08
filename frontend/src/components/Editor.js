@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.content}
+              {chapter.title}
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
@@ -121,14 +121,14 @@ function Editor({ chapters, setChapters }) {
           Title:
           <input
             type="text"
-            value={chapterContent}
+            value={chapterTitle}
             onChange={(e) => setChapterTitle(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
-            value={chapterTitle}
+            value={chapterContent}
             onChange={(e) => setChapterContent(e.target.value)}
             rows={20}
             cols={80}
