@@ -164,6 +164,20 @@ def update_chapter(chapter_id):
         logging.error(f"Chapter ID: {chapter_id}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/chapters', methods=['POST'])
+def create_chapter():
+    try:
+        data = request.json
+        chapter_id = uuid.uuid4().hex
+        chapter_name = data.get('name', 'New Chapter')
+        chapter_content = data.get('content', '')
+        chapter_title = data.get('title', '')
+        db.create_user_chapter(chapter_name, chapter_content, chapter_title)
+        return jsonify({'id': chapter_id, 'name': chapter_name, 'content': chapter_content, 'title': chapter_title}), 201
+    except Exception as e:
+        logging.error(f"Error creating chapter: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/chapters/<chapter_id>', methods=['DELETE'])
 def delete_chapter(chapter_id):
     try:
