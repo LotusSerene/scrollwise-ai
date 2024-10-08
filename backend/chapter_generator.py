@@ -379,8 +379,10 @@ class ChapterGenerator:
 
     def get_existing_chapter_content(self, chapter_number: int, previous_chapters: List[Dict[str, Any]]) -> Optional[str]:
         def extract_chapter_number(filename):
+            if not filename:
+                return 1  # Default to chapter 1 if filename is None or empty
             match = re.search(r'\d+', filename)
-            return int(match.group()) if match else -1
+            return int(match.group()) if match else 1
 
         existing_content = ""
         total_tokens = 0
