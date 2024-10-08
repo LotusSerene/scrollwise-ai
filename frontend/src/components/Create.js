@@ -12,7 +12,6 @@ function Create({ onChapterGenerated, previousChapters }) {
   const [styleGuide, setStyleGuide] = useState('');
   const [minWordCount, setMinWordCount] = useState(1000);
   const [characters, setCharacters] = useState({});
-  const [chapterTitle, setChapterTitle] = useState('');
   const [chapterContent, setChapterContent] = useState('');
   const [error, setError] = useState(null);
 
@@ -26,7 +25,6 @@ function Create({ onChapterGenerated, previousChapters }) {
       styleGuide,
       minWordCount,
       characters: JSON.stringify(characters),
-      chapterTitle,
       previousChapters: JSON.stringify(previousChapters)
     };
 
@@ -40,7 +38,6 @@ function Create({ onChapterGenerated, previousChapters }) {
       if (response.data.chapters && response.data.chapters.length > 0) {
         const newChapter = response.data.chapters[0];
         setChapterContent(newChapter.chapter);
-        setChapterTitle(newChapter.title);
         onChapterGenerated(newChapter);
       } else {
         setError('No chapter generated. Please try again.');
@@ -52,8 +49,8 @@ function Create({ onChapterGenerated, previousChapters }) {
   };
 
   const handleSaveChapter = async () => {
-    if (!chapterTitle || !chapterContent) {
-      setError('Chapter title and content are required.');
+    if (!chapterContent) {
+      setError('Chapter content is required.');
       return;
     }
 
@@ -64,7 +61,7 @@ function Create({ onChapterGenerated, previousChapters }) {
       await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
         name: `Chapter ${chapterNumber}`,
         content: chapterContent,
-        title: chapterTitle
+        title: `Chapter ${chapterNumber}`
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -74,10 +71,17 @@ function Create({ onChapterGenerated, previousChapters }) {
       setError(null);
       setChapterNumber(chapterNumber + 1);
       setChapterContent('');
-      setChapterTitle('');
     } catch (error) {
       console.error('Error saving chapter:', error);
       setError('Error saving chapter. Please try again later.');
+    }
+  };
+
+  const handleAddCharacter = () => {
+    const name = prompt("Enter character name:");
+    const description = prompt("Enter character description:");
+    if (name && description) {
+      setCharacters((prevCharacters) => ({ ...prevCharacters, [name]: description }));
     }
   };
 
@@ -142,20 +146,8 @@ function Create({ onChapterGenerated, previousChapters }) {
         </label>
         <label>
           Characters:
-          <textarea
-            value={JSON.stringify(characters, null, 2)}
-            onChange={(e) => setCharacters(JSON.parse(e.target.value))}
-            rows={5}
-            cols={40}
-          />
-        </label>
-        <label>
-          Chapter Title:
-          <input
-            type="text"
-            value={chapterTitle}
-            onChange={(e) => setChapterTitle(e.target.value)}
-          />
+          <button onClick={handleAddCharacter}>Add Character</button>
+          <pre>{JSON.stringify(characters, null, 2)}</pre>
         </label>
         <button onClick={handleGenerateChapter}>Generate Chapter</button>
         <button onClick={handleSaveChapter}>Save Chapter</button>
