@@ -12,6 +12,7 @@ import tempfile
 import json
 import jwt
 import datetime
+import uuid  # Add this import
 from database import db
 
 # Configure logging
