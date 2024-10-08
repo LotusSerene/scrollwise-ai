@@ -13,6 +13,7 @@ function Create({ onChapterGenerated, previousChapters }) {
   const [minWordCount, setMinWordCount] = useState(1000);
   const [characters, setCharacters] = useState({});
   const [chapterContent, setChapterContent] = useState('');
+  const [apiKey, setApiKey] = useState('');  // Add API key state
   const [error, setError] = useState(null);
 
   const handleGenerateChapter = async () => {
@@ -25,7 +26,8 @@ function Create({ onChapterGenerated, previousChapters }) {
       styleGuide,
       minWordCount,
       characters: JSON.stringify(characters),
-      previousChapters: JSON.stringify(previousChapters)
+      previousChapters: JSON.stringify(previousChapters),
+      apiKey  // Add API key to the data
     };
 
     try {
@@ -47,35 +49,6 @@ function Create({ onChapterGenerated, previousChapters }) {
     } catch (error) {
       console.error('Error generating chapter:', error);
       setError('Error generating chapter. Please try again later.');
-    }
-  };
-
-  const handleSaveChapter = async () => {
-    if (!chapterContent) {
-      setError('Chapter content is required.');
-      return;
-    }
-
-    const token = getAuthToken();
-    const chapterId = uuidv4();
-
-    try {
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-        name: `Chapter ${numChapters}`,
-        content: chapterContent,
-        title: `Chapter ${numChapters}`
-      }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      setError(null);
-      setNumChapters(numChapters + 1);
-      setChapterContent('');
-    } catch (error) {
-      console.error('Error saving chapter:', error);
-      setError('Error saving chapter. Please try again later.');
     }
   };
 
@@ -155,6 +128,14 @@ function Create({ onChapterGenerated, previousChapters }) {
           />
         </label>
         <label>
+          API Key:
+          <input
+            type="text"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+        </label>
+        <label>
           Characters:
           <button onClick={handleAddCharacter}>Add Character</button>
           <ul>
@@ -167,7 +148,6 @@ function Create({ onChapterGenerated, previousChapters }) {
           </ul>
         </label>
         <button onClick={handleGenerateChapter}>Generate Chapter</button>
-        <button onClick={handleSaveChapter}>Save Chapter</button>
       </div>
       <div className="generated-chapter">
         <h3>Generated Chapter</h3>
