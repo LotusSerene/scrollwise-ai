@@ -6,8 +6,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
   const [selectedChapter, setSelectedChapter] = useState(null);
-  const [chapterTitle, setChapterTitle] = useState('');
-  const [chapterContent, setChapterContent] = useState('');
+  const [chapterContent, setChapterContent] = useState('');  // Reversed: Use chapterContent for title
+  const [chapterTitle, setChapterTitle] = useState('');      // Reversed: Use chapterTitle for content
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -31,8 +31,8 @@ function Editor({ chapters, setChapters }) {
 
   const handleChapterClick = (chapter) => {
     setSelectedChapter(chapter);
-    setChapterTitle(chapter.title);  // Corrected: Use chapter.title
-    setChapterContent(chapter.content);  // Corrected: Use chapter.content
+    setChapterTitle(chapter.content);  // Reversed: Use chapter.content for title
+    setChapterContent(chapter.title);  // Reversed: Use chapter.title for content
   };
 
   const handleCreateChapter = () => {
@@ -42,7 +42,7 @@ function Editor({ chapters, setChapters }) {
   };
 
   const handleSaveChapter = async () => {
-    if (!chapterTitle) {
+    if (!chapterContent) {  // Reversed: Use chapterContent for title
       setError('Chapter title is required.');
       return;
     }
@@ -54,8 +54,8 @@ function Editor({ chapters, setChapters }) {
       if (selectedChapter) {
         // Update existing chapter
         await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-          title: chapterTitle,  // Corrected: Use chapterTitle
-          content: chapterContent  // Corrected: Use chapterContent
+          title: chapterContent,  // Reversed: Use chapterContent for title
+          content: chapterTitle   // Reversed: Use chapterTitle for content
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -64,8 +64,8 @@ function Editor({ chapters, setChapters }) {
       } else {
         // Create new chapter
         await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          title: chapterTitle,  // Corrected: Use chapterTitle
-          content: chapterContent  // Corrected: Use chapterContent
+          title: chapterContent,  // Reversed: Use chapterContent for title
+          content: chapterTitle   // Reversed: Use chapterTitle for content
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -107,7 +107,7 @@ function Editor({ chapters, setChapters }) {
               className={selectedChapter && selectedChapter.id === chapter.id ? 'selected' : ''}
               onClick={() => handleChapterClick(chapter)}
             >
-              {chapter.title}  // Corrected: Use chapter.title
+              {chapter.content}  // Reversed: Use chapter.content for title
               <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
             </li>
           ))}
@@ -115,21 +115,21 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.title}` : 'Create New Chapter'}</h3>
+        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.content}` : 'Create New Chapter'}</h3>  // Reversed: Use chapter.content for title
         {error && <p className="error">{error}</p>}
         <label>
           Title:
           <input
             type="text"
-            value={chapterTitle}  // Corrected: Use chapterTitle
-            onChange={(e) => setChapterTitle(e.target.value)}
+            value={chapterContent}  // Reversed: Use chapterContent for title
+            onChange={(e) => setChapterContent(e.target.value)}
           />
         </label>
         <label>
           Content:
           <textarea
-            value={chapterContent}  // Corrected: Use chapterContent
-            onChange={(e) => setChapterContent(e.target.value)}
+            value={chapterTitle}  // Reversed: Use chapterTitle for content
+            onChange={(e) => setChapterTitle(e.target.value)}
             rows={20}
             cols={80}
           />
