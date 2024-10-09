@@ -186,7 +186,9 @@ class AgentManager:
             validity_dict = json.loads(result)
         except json.JSONDecodeError as e:
             self.logger.error(f"Could not parse validity result as JSON: {e}")
-            validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check."}
+            validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check.",
+                             "review": "N/A", "style_guide_adherence": False, "style_guide_feedback": "N/A",
+                             "continuity": False, "continuity_feedback": "N/A", "test_results": "N/A"}
 
         return validity_dict
 

@@ -50,9 +50,9 @@ function Validity() {
     return {
       ...check,
       review: check.review || 'N/A',
-      style_guide_adherence: check.style_guide_adherence || false,
+      style_guide_adherence: check.style_guide_adherence ? 'Yes' : 'No',
       style_guide_feedback: check.style_guide_feedback || 'N/A',
-      continuity: check.continuity || false,
+      continuity: check.continuity ? 'Yes' : 'No',
       continuity_feedback: check.continuity_feedback || 'N/A',
       test_results: check.test_results || 'N/A'
     };
@@ -85,9 +85,9 @@ function Validity() {
               <p><strong>Validity:</strong> {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
               <p><strong>Feedback:</strong> {selectedCheck.feedback}</p>
               <p><strong>Review:</strong> {formatCheck(selectedCheck).review}</p>
-              <p><strong>Style Guide Adherence:</strong> {formatCheck(selectedCheck).style_guide_adherence ? 'Yes' : 'No'}</p>
+              <p><strong>Style Guide Adherence:</strong> {formatCheck(selectedCheck).style_guide_adherence}</p>
               <p><strong>Style Guide Feedback:</strong> {formatCheck(selectedCheck).style_guide_feedback}</p>
-              <p><strong>Continuity:</strong> {formatCheck(selectedCheck).continuity ? 'Yes' : 'No'}</p>
+              <p><strong>Continuity:</strong> {formatCheck(selectedCheck).continuity}</p>
               <p><strong>Continuity Feedback:</strong> {formatCheck(selectedCheck).continuity_feedback}</p>
               <p><strong>Test Results:</strong> {formatCheck(selectedCheck).test_results}</p>
             </div>
