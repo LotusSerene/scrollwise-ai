@@ -170,6 +170,14 @@ class AgentManager:
 
         # Parse the result and create a structured validity dictionary
         validity = {
+            'is_valid': 'Valid: Yes' in result,
+            'feedback': self._extract_section(result, 'Feedback: '),
+            'review': self._extract_section(result, 'Review: '),
+            'style_guide_adherence': 'Style Guide Adherence: Yes' in result,
+            'style_guide_feedback': self._extract_section(result, 'Style Guide Feedback: '),
+            'continuity': 'Continuity: Yes' in result,
+            'continuity_feedback': self._extract_section(result, 'Continuity Feedback: '),
+            'test_results': self._extract_section(result, 'Test Results: ')
         }
 
         return validity
