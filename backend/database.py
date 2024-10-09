@@ -129,9 +129,7 @@ class Database:
         row = self.cursor.fetchone()
         return {'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} if row else None
 
-    def save_validity_check(self, chapter_id, validity):
-        chapter = self.get_chapter(chapter_id)
-        chapter_title = chapter['title'] if chapter else 'Unknown Chapter'
+    def save_validity_check(self, chapter_id, chapter_title, validity):
         self.cursor.execute('''
             INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback)
             VALUES (?, ?, ?, ?, ?)
