@@ -1,3 +1,4 @@
+# backend/server.py
 from flask import Flask, request, jsonify, Blueprint
 from flask_cors import CORS
 from flask_jwt_extended import jwt_required, get_jwt_identity

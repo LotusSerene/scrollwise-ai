@@ -41,18 +41,18 @@ class Database:
     def __init__(self, db_path):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.cursor = self.conn.cursor()
         self.create_tables()
 
     def create_tables(self):
-        self.cursor.execute('''
+        cursor = self.conn.cursor()
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 email TEXT UNIQUE,
                 password TEXT
             )
         ''')
-        self.cursor.execute('''
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS chapters (
                 id TEXT PRIMARY KEY,
                 name TEXT,
@@ -60,7 +60,7 @@ class Database:
                 title TEXT
             )
         ''')
-        self.cursor.execute('''
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS validity_checks (
                 id TEXT PRIMARY KEY,
                 chapter_id TEXT,
@@ -76,7 +76,7 @@ class Database:
                 FOREIGN KEY (chapter_id) REFERENCES chapters (id)
             )
         ''')
-        self.cursor.execute('''
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS characters (
                 id TEXT PRIMARY KEY,
                 name TEXT,
@@ -86,64 +86,81 @@ class Database:
         self.conn.commit()
         
         # Add the chapter_title column if it doesn't exist
-        self.cursor.execute('PRAGMA table_info(validity_checks)')
-        columns = [column[1] for column in self.cursor.fetchall()]
+        cursor.execute('PRAGMA table_info(validity_checks)')
+        columns = [column[1] for column in cursor.fetchall()]
         if 'chapter_title' not in columns:
-            self.cursor.execute('ALTER TABLE validity_checks ADD COLUMN chapter_title TEXT')
+            cursor.execute('ALTER TABLE validity_checks ADD COLUMN chapter_title TEXT')
             self.conn.commit()
         
         # Ensure all columns are present
         required_columns = ['id', 'chapter_id', 'chapter_title', 'is_valid', 'feedback', 'review', 'style_guide_adherence', 'style_guide_feedback', 'continuity', 'continuity_feedback', 'test_results']
         for column in required_columns:
             if column not in columns:
-                self.cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
+                cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
                 self.conn.commit()
+        cursor.close()
 
     def create_user(self, email, password):
+        cursor = self.conn.cursor()
         user_id = uuid.uuid4().hex
-        self.cursor.execute('INSERT INTO users (id, email, password) VALUES (?, ?, ?)', (user_id, email, password))
+        cursor.execute('INSERT INTO users (id, email, password) VALUES (?, ?, ?)', (user_id, email, password))
         self.conn.commit()
+        cursor.close()
         return user_id
 
     def get_user_by_email(self, email):
-        self.cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
-        row = self.cursor.fetchone()
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        row = cursor.fetchone()
+        cursor.close()
         return {'id': row[0], 'email': row[1], 'password': row[2]} if row else None
 
     def get_all_chapters(self):
-        self.cursor.execute('SELECT * FROM chapters')
-        return [{'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} for row in self.cursor.fetchall()]
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM chapters')
+        rows = cursor.fetchall()
+        cursor.close()
+        return [{'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} for row in rows]
 
     def create_chapter(self, title, content):
+        cursor = self.conn.cursor()
         chapter_id = str(uuid.uuid4())
-        self.cursor.execute('''
+        cursor.execute('''
             INSERT INTO chapters (id, title, content)
             VALUES (?, ?, ?)
         ''', (chapter_id, title, content))
         self.conn.commit()
+        cursor.close()
         return chapter_id
 
     def update_chapter(self, chapter_id, title, content):
-        self.cursor.execute('''
+        cursor = self.conn.cursor()
+        cursor.execute('''
             UPDATE chapters
             SET content = ?, title = ?
             WHERE id = ?
         ''', (content, title, chapter_id))
         self.conn.commit()
+        cursor.close()
         return self.get_chapter(chapter_id)
 
     def delete_chapter(self, chapter_id):
-        self.cursor.execute('DELETE FROM chapters WHERE id = ?', (chapter_id,))
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM chapters WHERE id = ?', (chapter_id,))
         self.conn.commit()
-        return self.cursor.rowcount > 0
+        cursor.close()
+        return cursor.rowcount > 0
 
     def get_chapter(self, chapter_id):
-        self.cursor.execute('SELECT * FROM chapters WHERE id = ?', (chapter_id,))
-        row = self.cursor.fetchone()
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM chapters WHERE id = ?', (chapter_id,))
+        row = cursor.fetchone()
+        cursor.close()
         return {'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} if row else None
 
     def save_validity_check(self, chapter_id, chapter_title, validity):
-        self.cursor.execute('''
+        cursor = self.conn.cursor()
+        cursor.execute('''
             INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
@@ -160,9 +177,13 @@ class Database:
             validity.get('test_results', '')
         ))
         self.conn.commit()
+        cursor.close()
 
     def get_all_validity_checks(self):
-        self.cursor.execute('SELECT * FROM validity_checks')
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM validity_checks')
+        rows = cursor.fetchall()
+        cursor.close()
         return [
             {
                 'id': row[0],
@@ -177,40 +198,53 @@ class Database:
                 'continuity_feedback': row[9] if len(row) > 9 else None,
                 'test_results': row[10] if len(row) > 10 else None
             }
-            for row in self.cursor.fetchall()
+            for row in rows
         ]
 
     def delete_validity_check(self, check_id):
-        self.cursor.execute('DELETE FROM validity_checks WHERE id = ?', (check_id,))
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM validity_checks WHERE id = ?', (check_id,))
         self.conn.commit()
-        return self.cursor.rowcount > 0
+        cursor.close()
+        return cursor.rowcount > 0
 
     def create_character(self, name: str, description: str) -> str:
+        cursor = self.conn.cursor()
         character_id = uuid.uuid4().hex
-        self.cursor.execute('INSERT INTO characters (id, name, description) VALUES (?, ?, ?)', (character_id, name, description))
+        cursor.execute('INSERT INTO characters (id, name, description) VALUES (?, ?, ?)', (character_id, name, description))
         self.conn.commit()
+        cursor.close()
         return character_id
 
     def get_all_characters(self):
-        self.cursor.execute('SELECT * FROM characters')
-        return [{'id': row[0], 'name': row[1], 'description': row[2]} for row in self.cursor.fetchall()]
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM characters')
+        rows = cursor.fetchall()
+        cursor.close()
+        return [{'id': row[0], 'name': row[1], 'description': row[2]} for row in rows]
 
     def update_character(self, character_id: str, name: str, description: str):
-        self.cursor.execute('''
+        cursor = self.conn.cursor()
+        cursor.execute('''
             UPDATE characters
             SET name = ?, description = ?
             WHERE id = ?
         ''', (name, description, character_id))
         self.conn.commit()
+        cursor.close()
 
     def delete_character(self, character_id: str):
-        self.cursor.execute('DELETE FROM characters WHERE id = ?', (character_id,))
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM characters WHERE id = ?', (character_id,))
         self.conn.commit()
-        return self.cursor.rowcount > 0
+        cursor.close()
+        return cursor.rowcount > 0
 
     def get_chapter_count(self):
-        self.cursor.execute("SELECT COUNT(*) FROM chapters")
-        count = self.cursor.fetchone()[0]
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM chapters")
+        count = cursor.fetchone()[0]
+        cursor.close()
         return count
 
 db = Database('novel_generator.db')
