@@ -136,7 +136,7 @@ def generate_chapters():
             # Check for new characters
             if new_characters:
                 for name, description in new_characters.items():
-                    db.create_character(name, description, user_id)
+                    db.create_character(name, description)
                 
             # Save the chapter to the database
             chapter_id = db.create_chapter(chapter_title, chapter_content, user_id)
@@ -243,11 +243,9 @@ def delete_character(character_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/characters', methods=['POST'])
-@jwt_required()
 def create_character():
     data = request.json
-    user_id = get_jwt_identity()
-    character = Character.get_or_create(data['name'], data['description'], user_id)
+    character = db.create_character(data['name'], data['description'])
     return jsonify(character.to_dict()), 201
 
 if __name__ == '__main__':

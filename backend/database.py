@@ -10,14 +10,13 @@ class Character(db.Model):
     id = db.Column(db.String, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=False)
-    user_id = db.Column(db.String, nullable=False)
 
     @classmethod
-    def get_or_create(cls, name, description, user_id):
-        existing_character = cls.query.filter_by(name=name, user_id=user_id).first()
+    def get_or_create(cls, name, description):
+        existing_character = cls.query.filter_by(name=name).first()
         if existing_character:
             return existing_character
-        new_character = cls(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
+        new_character = cls(id=str(uuid.uuid4()), name=name, description=description)
         db.session.add(new_character)
         db.session.commit()
         return new_character
@@ -80,8 +79,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS characters (
                 id TEXT PRIMARY KEY,
                 name TEXT,
-                description TEXT,
-                user_id TEXT
+                description TEXT
             )
         ''')
         self.conn.commit()
@@ -100,19 +98,6 @@ class Database:
                 cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
                 self.conn.commit()
         
-        # Add the user_id column to the characters table if it doesn't exist
-        cursor.execute('PRAGMA table_info(characters)')
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'user_id' not in columns:
-            cursor.execute('ALTER TABLE characters ADD COLUMN user_id TEXT')
-            self.conn.commit()
-        
-        # Add the user_id column to the chapters table if it doesn't exist
-        cursor.execute('PRAGMA table_info(chapters)')
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'user_id' not in columns:
-            cursor.execute('ALTER TABLE chapters ADD COLUMN user_id TEXT')
-            self.conn.commit()
         cursor.close()
 
     def create_user(self, email, password):
@@ -223,17 +208,17 @@ class Database:
         cursor.close()
         return cursor.rowcount > 0
 
-    def create_character(self, name: str, description: str, user_id: str) -> str:
+    def create_character(self, name: str, description: str) -> str:
         cursor = self.conn.cursor()
         character_id = uuid.uuid4().hex
-        cursor.execute('INSERT INTO characters (id, name, description, user_id) VALUES (?, ?, ?, ?)', (character_id, name, description, user_id))
+        cursor.execute('INSERT INTO characters (id, name, description) VALUES (?, ?, ?)', (character_id, name, description))
         self.conn.commit()
         cursor.close()
         return character_id
 
-    def get_all_characters(self, user_id):
+    def get_all_characters(self):
         cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM characters WHERE user_id = ?', (user_id,))
+        cursor.execute('SELECT * FROM characters')
         rows = cursor.fetchall()
         cursor.close()
         return [{'id': row[0], 'name': row[1], 'description': row[2]} for row in rows]
