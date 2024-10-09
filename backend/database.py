@@ -23,7 +23,6 @@ class Character(db.Model):
 
 class Chapter(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=False)
     chapter_number = db.Column(db.Integer, nullable=False)
@@ -55,8 +54,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS chapters (
                 id TEXT PRIMARY KEY,
                 title TEXT,
-                content TEXT,
-                user_id TEXT
+                content TEXT
             )
         ''')
         cursor.execute('''
@@ -120,15 +118,15 @@ class Database:
         cursor.execute('SELECT * FROM chapters')
         rows = cursor.fetchall()
         cursor.close()
-        return [{'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} for row in rows]
+        return [{'id': row[0], 'title': row[1], 'content': row[2]} for row in rows]
 
-    def create_chapter(self, title, content, user_id):
+    def create_chapter(self, title, content):
         cursor = self.conn.cursor()
         chapter_id = str(uuid.uuid4())
         cursor.execute('''
-            INSERT INTO chapters (id, title, content, user_id)
-            VALUES (?, ?, ?, ?)
-        ''', (chapter_id, title, content, user_id))
+            INSERT INTO chapters (id, title, content)
+            VALUES (?, ?, ?)
+        ''', (chapter_id, title, content))
         self.conn.commit()
         cursor.close()
         return chapter_id
@@ -156,7 +154,7 @@ class Database:
         cursor.execute('SELECT * FROM chapters WHERE id = ?', (chapter_id,))
         row = cursor.fetchone()
         cursor.close()
-        return {'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} if row else None
+        return {'id': row[0], 'title': row[1], 'content': row[2]} if row else None
 
     def save_validity_check(self, chapter_id, chapter_title, validity):
         cursor = self.conn.cursor()
