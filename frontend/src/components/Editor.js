@@ -19,6 +19,7 @@ function Editor({ chapters, setChapters }) {
         }
       });
       setChapters(response.data.chapters);
+      logging.debug(`Fetched ${response.data.chapters.length} chapters`);
     } catch (error) {
       console.error('Error fetching chapters:', error);
       setError('Error fetching chapters. Please try again later.');
@@ -145,5 +146,3 @@ function Editor({ chapters, setChapters }) {
 }
 
 export default Editor;
-
-

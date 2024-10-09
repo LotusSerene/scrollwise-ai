@@ -57,7 +57,7 @@ function Validity() {
               className={`validity-check ${selectedCheck && selectedCheck.id === check.id ? 'selected' : ''}`}
               onClick={() => handleCheckClick(check)}
             >
-              {check.chapterPath}
+              {check.chapterId}
             </li>
           ))}
         </ul>
@@ -65,7 +65,7 @@ function Validity() {
       <div className="validity-content">
         {selectedCheck && (
           <div className="validity-details">
-            <h3>{selectedCheck.chapterPath}</h3>
+            <h3>{selectedCheck.chapterId}</h3>
             <p><strong>Is Valid:</strong> {selectedCheck.isValid ? 'Yes' : 'No'}</p>
             <p><strong>Feedback:</strong> {selectedCheck.feedback || 'No feedback available'}</p>
             <p><strong>Review Feedback:</strong> {selectedCheck.reviewFeedback || 'No review feedback available'}</p>

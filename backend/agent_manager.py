@@ -89,7 +89,7 @@ class AgentManager:
             for name, description in new_characters.items():
                 db.create_character(name, description)
 
-        self.save_chapter(chapter, chapter_number, chapter_title)
+        self.save_chapter(chapter, chapter_number, title)
         self.save_validity_feedback(validity, chapter_number)
         
         return chapter, title, new_characters

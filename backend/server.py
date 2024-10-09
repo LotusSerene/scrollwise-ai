@@ -164,6 +164,7 @@ def generate_chapters():
 def get_chapters():
     try:
         chapters = db.get_all_chapters()
+        logging.debug(f"Retrieved {len(chapters)} chapters")
         return jsonify({'chapters': chapters}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
