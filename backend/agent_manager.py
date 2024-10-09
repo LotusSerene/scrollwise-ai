@@ -170,14 +170,6 @@ class AgentManager:
 
         # Parse the result and create a structured validity dictionary
         validity = {
-            "is_valid": "Valid: Yes" in result,
-            "feedback": self._extract_section(result, "Feedback:"),
-            "review_feedback": self._extract_section(result, "Review:"),
-            "adheres_to_style_guide": "Style Guide Adherence: Yes" in result,
-            "style_guide_feedback": self._extract_section(result, "Style Guide Feedback:"),
-            "continuity": "Continuity: Yes" in result,
-            "continuity_feedback": self._extract_section(result, "Continuity Feedback:"),
-            "test_results": self._extract_section(result, "Test Results:").split('\n')
         }
 
         return validity
@@ -215,7 +207,7 @@ class AgentManager:
         return chapter
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = db.create_chapter(chapter_title, chapter, chapter_number)
+        chapter_id = db.create_chapter(chapter_title, chapter)
         self.logger.info(f"Chapter {chapter_number} saved to the database.")
 
     def save_validity_feedback(self, validity: Dict[str, Any], chapter_number: int):
@@ -291,7 +283,7 @@ class AgentManager:
         Ensure that the chapter follows the plot points, incorporates the characters and settings, 
         adheres to the specified writing style, and maintains continuity with previous chapters.
         Avoid starting with phrases like: "Continuing from where we left off", "Picking up where we left off", "Resuming the story", etc.
-        Start the chapter seamlessly as if it were part of the original generation.
+        Start the chapter seamlessly as if it were part of the original generation. Do not add the chapter title at all
         """
         return ChatPromptTemplate.from_template(template)
 
@@ -377,7 +369,8 @@ class AgentManager:
 
     def _generate_title(self, chapter: str) -> str:
         prompt = ChatPromptTemplate.from_template("""
-        Based on the following chapter content, generate a short, engaging title:
+        Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
+        use this format Chapter<Number>: <Title>, do not respond with anything else, nothing more nothing less.
 
         Chapter Content:
         {chapter}

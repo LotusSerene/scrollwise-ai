@@ -66,14 +66,6 @@ function Validity() {
         {selectedCheck && (
           <div className="validity-details">
             <h3>{selectedCheck.chapterId}</h3>
-            <p><strong>Is Valid:</strong> {selectedCheck.isValid ? 'Yes' : 'No'}</p>
-            <p><strong>Feedback:</strong> {selectedCheck.feedback || 'No feedback available'}</p>
-            <p><strong>Review Feedback:</strong> {selectedCheck.reviewFeedback || 'No review feedback available'}</p>
-            <p><strong>Style Guide Feedback:</strong> {selectedCheck.styleGuideFeedback || 'No style guide feedback available'}</p>
-            <p><strong>Continuity Feedback:</strong> {selectedCheck.continuityFeedback || 'No continuity feedback available'}</p>
-            <p><strong>Adheres to Style Guide:</strong> {selectedCheck.adheresToStyleGuide ? 'Yes' : 'No'}</p>
-            <p><strong>Continuity:</strong> {selectedCheck.continuity ? 'Yes' : 'No'}</p>
-            <h4>Test Results:</h4>
             {selectedCheck.testResults && selectedCheck.testResults.length > 0 ? (
               <ul>
                 {selectedCheck.testResults.map((result, index) => (
