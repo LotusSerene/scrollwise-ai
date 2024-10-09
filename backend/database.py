@@ -96,9 +96,9 @@ class Database:
     def create_chapter(self, title, content, chapter_number):
         chapter_id = str(uuid.uuid4())
         self.cursor.execute('''
-            INSERT INTO chapters (id, name, content, title)
+            INSERT INTO chapters (id, title, content, chapter_number)
             VALUES (?, ?, ?, ?)
-        ''', (chapter_id, f'Chapter {chapter_number}', content, title))
+        ''', (chapter_id, title, content, chapter_number))
         self.conn.commit()
         return chapter_id
 
@@ -122,12 +122,15 @@ class Database:
         return {'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} if row else None
 
     def save_validity_check(self, chapter_id, validity):
+        chapter = self.get_chapter(chapter_id)
+        chapter_title = chapter['title'] if chapter else 'Unknown Chapter'
         self.cursor.execute('''
-            INSERT INTO validity_checks (id, chapter_id, is_valid, feedback)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback)
+            VALUES (?, ?, ?, ?, ?)
         ''', (
             uuid.uuid4().hex,
             chapter_id,
+            chapter_title,
             1 if validity['is_valid'] else 0,
             validity['feedback']
         ))
@@ -139,8 +142,9 @@ class Database:
             {
                 'id': row[0],
                 'chapterId': row[1],
-                'isValid': bool(row[2]),
-                'feedback': row[3]
+                'chapterTitle': row[2],
+                'isValid': bool(row[3]),
+                'feedback': row[4]
             }
             for row in self.cursor.fetchall()
         ]
