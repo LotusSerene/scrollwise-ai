@@ -91,9 +91,9 @@ def generate_chapters():
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        characters = data.get('characters', {})
+        user_id = data.get('userId', '')
         
-        logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}")
+        logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}, user_id={user_id}")
         
         if not api_key:
             return jsonify({'error': 'API Key is required'}), 400
@@ -125,7 +125,7 @@ def generate_chapters():
                         'min_word_count': min_word_count,
                         'chapter_number': chapter_number
                     },
-                    characters=characters,  # This should be a dictionary of character names to descriptions
+                    user_id=user_id,  # Pass user_id to fetch characters
                     previous_chapters=previous_chapters
                 )
                 logging.debug(f"Chapter {chapter_number} generated successfully")
@@ -136,10 +136,10 @@ def generate_chapters():
             # Check for new characters
             if new_characters:
                 for name, description in new_characters.items():
-                    db.create_character(name, description)
+                    db.create_character(name, description, user_id)
                 
             # Save the chapter to the database
-            chapter_id = db.create_chapter(chapter_title, chapter_content)
+            chapter_id = db.create_chapter(chapter_title, chapter_content, user_id)
                 
             # Get validity from the agent's check_chapter method
             validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
