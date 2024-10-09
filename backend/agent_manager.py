@@ -362,6 +362,9 @@ class AgentManager:
             # Log the raw response
         self.logger.debug(f"Raw new characters response: {result}")
 
+        # Strip leading and trailing backticks
+        result = result.strip().strip('```json').strip('```')
+
         if not result.strip():
             self.logger.error("Empty response from new characters check.")
             return {}
@@ -370,7 +373,7 @@ class AgentManager:
         try:
             new_characters = json.loads(result)
         except json.JSONDecodeError as e:
-            print(f"Error decoding JSON: {e}")
+            self.logger.error(f"Error decoding JSON: {e}")
             # Handle the error appropriately, e.g., log it or return an empty dictionary
 
         return new_characters
