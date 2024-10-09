@@ -67,6 +67,12 @@ class Database:
                 chapter_title TEXT,
                 is_valid INTEGER,
                 feedback TEXT,
+                review TEXT,
+                style_guide_adherence INTEGER,
+                style_guide_feedback TEXT,
+                continuity INTEGER,
+                continuity_feedback TEXT,
+                test_results TEXT,
                 FOREIGN KEY (chapter_id) REFERENCES chapters (id)
             )
         ''')
@@ -131,14 +137,20 @@ class Database:
 
     def save_validity_check(self, chapter_id, chapter_title, validity):
         self.cursor.execute('''
-            INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             uuid.uuid4().hex,
             chapter_id,
             chapter_title,
             1 if validity['is_valid'] else 0,
-            validity['feedback']
+            validity['feedback'],
+            validity.get('review', ''),
+            1 if validity.get('style_guide_adherence', False) else 0,
+            validity.get('style_guide_feedback', ''),
+            1 if validity.get('continuity', False) else 0,
+            validity.get('continuity_feedback', ''),
+            validity.get('test_results', '')
         ))
         self.conn.commit()
 
@@ -150,7 +162,13 @@ class Database:
                 'chapterId': row[1],
                 'chapterTitle': row[2],
                 'isValid': bool(row[3]),
-                'feedback': row[4]
+                'feedback': row[4],
+                'review': row[5],
+                'style_guide_adherence': bool(row[6]),
+                'style_guide_feedback': row[7],
+                'continuity': bool(row[8]),
+                'continuity_feedback': row[9],
+                'test_results': row[10]
             }
             for row in self.cursor.fetchall()
         ]
