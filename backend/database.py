@@ -216,10 +216,10 @@ class Database:
         cursor.close()
         return cursor.rowcount > 0
 
-    def create_character(self, name: str, description: str) -> str:
+    def create_character(self, name: str, description: str, user_id: str) -> str:
         cursor = self.conn.cursor()
         character_id = uuid.uuid4().hex
-        cursor.execute('INSERT INTO characters (id, name, description) VALUES (?, ?, ?)', (character_id, name, description))
+        cursor.execute('INSERT INTO characters (id, name, description, user_id) VALUES (?, ?, ?, ?)', (character_id, name, description, user_id))
         self.conn.commit()
         cursor.close()
         return character_id
