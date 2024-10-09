@@ -171,10 +171,18 @@ class AgentManager:
             "instructions": instructions,
             "truncated_previous_chapters": truncated_previous_chapters
         })
+
+        # Log the raw response
+        self.logger.debug(f"Raw validity check response: {result}")
+
+        if not result.strip():
+            self.logger.error("Empty response from validity check.")
+            return {"is_valid": False, "feedback": "Empty response from validity check."}
+
         try:
             validity_dict = json.loads(result)
         except json.JSONDecodeError as e:
-            print(f"Could not parse validity result as JSON: {e}")
+            self.logger.error(f"Could not parse validity result as JSON: {e}")
             validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check."}
 
         return validity_dict
