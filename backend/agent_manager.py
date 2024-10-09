@@ -70,7 +70,7 @@ class AgentManager:
         )
 
         chapter = chain.invoke(
-            {"chapter_number": chapter_number, "context": context, "instructions": instructions},
+            {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters},
             config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
         )
     
@@ -89,7 +89,7 @@ class AgentManager:
         return chapter, title, new_characters
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
-                           characters: Dict[str, Any], previous_chapters: List[Dict[str, Any]]) -> str:
+                           characters: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
         context = f"Plot: {plot}\n\n"
         context += f"Writing Style: {writing_style}\n\n"
         context += "Instructions:\n"
