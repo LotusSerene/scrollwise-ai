@@ -93,7 +93,6 @@ def generate_chapters():
         min_word_count = int(instructions.get('minWordCount', 1000))
         previous_chapters = data.get('previousChapters', [])  # Get previous chapters from request data
         logging.debug(f"Received previousChapters: {previous_chapters}")
-        #logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}")
         
         if not api_key:
             return jsonify({'error': 'API Key is required'}), 400
