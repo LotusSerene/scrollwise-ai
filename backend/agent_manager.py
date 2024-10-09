@@ -18,7 +18,7 @@ import logging
 import uuid
 from database import db
 from pydantic import BaseModel  # Ensure you import directly from pydantic
-
+import json
 # Load environment variables
 load_dotenv()
 
@@ -89,8 +89,8 @@ class AgentManager:
             for name, description in new_characters.items():
                 db.create_character(name, description)
 
-        self.save_chapter(chapter, chapter_number, title)
-        self.save_validity_feedback(validity, chapter_number)
+        chapter_id = self.save_chapter(chapter, chapter_number, title)
+        self.save_validity_feedback(validity, chapter_number, chapter_id)
         
         return chapter, title, new_characters
 
@@ -150,15 +150,19 @@ class AgentManager:
         Previous Chapters:
         {truncated_previous_chapters}
 
-        Provide your analysis in the following format:
-        Valid: [Yes/No]
-        Feedback: [Your detailed feedback here]
-        Review: [Detailed review focusing on plot consistency, character development, setting descriptions, and adherence to writing style]
-        Style Guide Adherence: [Yes/No]
-        Style Guide Feedback: [Feedback on adherence to the style guide]
-        Continuity: [Yes/No]
-        Continuity Feedback: [Feedback on continuity with previous chapters]
-        Test Results: [Results of automated tests for specified criteria]
+        Provide your analysis in the following JSON format:
+        ```json
+        {
+          "is_valid": true/false,
+          "feedback": "feedback",
+          "review": "review",
+          "style_guide_adherence": true/false,
+          "style_guide_feedback": "feedback",
+          "continuity": true/false,
+          "continuity_feedback": "feedback",
+          "test_results": "results"
+        }
+        ```
         """)
 
         check_chain = check_prompt | self.check_llm | StrOutputParser()
@@ -167,8 +171,13 @@ class AgentManager:
             "instructions": instructions,
             "truncated_previous_chapters": truncated_previous_chapters
         })
+        try:
+            validity_dict = json.loads(result)
+        except json.JSONDecodeError as e:
+            print(f"Could not parse validity result as JSON: {e}")
+            validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check."}
 
-        return result
+        return validity_dict
 
     def _extract_section(self, text: str, section_name: str) -> str:
         start = text.find(section_name)
@@ -205,6 +214,7 @@ class AgentManager:
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
         chapter_id = db.create_chapter(chapter_title, chapter)
         self.logger.info(f"Chapter {chapter_number} saved to the database with ID: {chapter_id}")
+        return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_title = f'Chapter {chapter_number}'
@@ -315,7 +325,14 @@ class AgentManager:
         
         prompt = ChatPromptTemplate.from_template("""
         Analyze the following chapter and extract any new characters that are not in the provided list. 
-        For each new character, provide their name and a brief description.
+        For each new character, provide their name and a brief description in the following JSON format:
+
+        ```json
+        {
+"character_name": "description",
+"character_name": "description"
+        }
+        ```
 
         Chapter:
         {chapter}
@@ -323,10 +340,7 @@ class AgentManager:
         Existing Characters:
         {existing_characters}
 
-        Please respond with a list of new characters in the following format:
-        Name: [Character Name]
-        Description: [Character Description]
-        If there are no new characters, respond with "No new characters."
+        New Characters:
         """)
 
         extraction_chain = prompt | self.llm | StrOutputParser()
@@ -336,16 +350,11 @@ class AgentManager:
         })
 
         new_characters = {}
-        if "No new characters" not in result:
-            # Parse the result to extract character names and descriptions
-            lines = result.strip().split('\n')
-            for i in range(0, len(lines), 2):
-                if i + 1 < len(lines):
-                    name_line = lines[i].strip()
-                    description_line = lines[i + 1].strip()
-                    name = name_line.split(": ")[1] if ": " in name_line else name_line
-                    description = description_line.split(": ")[1] if ": " in description_line else description_line
-                    new_characters[name] = description
+        try:
+            new_characters = json.loads(result)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON: {e}")
+            # Handle the error appropriately, e.g., log it or return an empty dictionary
 
         return new_characters
 
