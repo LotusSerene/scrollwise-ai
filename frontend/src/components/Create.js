@@ -82,21 +82,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
     }
   };
 
-  const handleAddCharacter = () => {
-    const name = prompt("Enter character name:");
-    const description = prompt("Enter character description:");
-    if (name && description) {
-      setCharacters((prevCharacters) => ({ ...prevCharacters, [name]: description }));
-    }
-  };
 
-  const handleRemoveCharacter = (name) => {
-    setCharacters((prevCharacters) => {
-      const newCharacters = { ...prevCharacters };
-      delete newCharacters[name];
-      return newCharacters;
-    });
-  };
 
   return (
     <div className="create-container">
