@@ -104,6 +104,21 @@ function Editor({ chapters, setChapters }) {
     }
   };
 
+  const handleDeleteChapter = async (chapterId) => {
+    try {
+      const token = getAuthToken();
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      fetchChapters();
+    } catch (error) {
+      console.error('Error deleting chapter:', error);
+      setError('Error deleting chapter. Please try again later.');
+    }
+  };
+
   return (
     <div className="editor-container">
       <div className="chapter-list">
