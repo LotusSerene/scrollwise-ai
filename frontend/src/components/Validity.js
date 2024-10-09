@@ -67,16 +67,7 @@ function Validity() {
           <div className="validity-details">
             <h3>{selectedCheck.chapterTitle}</h3>
             <p>Validity: {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
-            <p>Feedback: {selectedCheck.feedback}</p>
-            {selectedCheck.testResults && selectedCheck.testResults.length > 0 ? (
-              <ul>
-                {selectedCheck.testResults.map((result, index) => (
-                  <li key={index}>{result}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No test results available</p>
-            )}
+            <pre>{selectedCheck.result}</pre>
           </div>
         )}
       </div>

@@ -168,19 +168,7 @@ class AgentManager:
             "truncated_previous_chapters": truncated_previous_chapters
         })
 
-        # Parse the result and create a structured validity dictionary
-        validity = {
-            'is_valid': 'Valid: Yes' in result,
-            'feedback': self._extract_section(result, 'Feedback: '),
-            'review': self._extract_section(result, 'Review: '),
-            'style_guide_adherence': 'Style Guide Adherence: Yes' in result,
-            'style_guide_feedback': self._extract_section(result, 'Style Guide Feedback: '),
-            'continuity': 'Continuity: Yes' in result,
-            'continuity_feedback': self._extract_section(result, 'Continuity Feedback: '),
-            'test_results': self._extract_section(result, 'Test Results: ')
-        }
-
-        return validity
+        return result
 
     def _extract_section(self, text: str, section_name: str) -> str:
         start = text.find(section_name)
@@ -218,10 +206,10 @@ class AgentManager:
         chapter_id = db.create_chapter(chapter_title, chapter)
         self.logger.info(f"Chapter {chapter_number} saved to the database.")
 
-    def save_validity_feedback(self, validity: Dict[str, Any], chapter_number: int):
+    def save_validity_feedback(self, result: str, chapter_number: int):
         chapter_name = f'Chapter {chapter_number}'
-        chapter_title = validity.get('chapter_title', 'Unknown Chapter')
-        db.save_validity_check(chapter_name, chapter_title, validity)
+        chapter_title = f'Chapter {chapter_number}'
+        db.save_validity_check(chapter_name, chapter_title, result)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database.")
 
     def add_to_knowledge_base(self, documents: List[str]):
