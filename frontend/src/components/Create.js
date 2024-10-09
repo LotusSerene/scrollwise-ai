@@ -183,12 +183,11 @@ const CreateChapter = ({ onChapterGenerated }) => {
         </label>
         <label>
           Characters:
-          <button onClick={handleAddCharacter}>Add Character</button>
           <ul>
             {characters.map((char) => (
               <li key={char.name}>
                 <strong>Name:</strong> {char.name}, <strong>Description:</strong> {char.description}
-                <button onClick={() => handleRemoveCharacter(char.name)}>Remove</button>
+                <span className="remove-icon" onClick={() => handleRemoveCharacter(char.name)}>❌</span>
               </li>
             ))}
           </ul>

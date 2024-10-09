@@ -76,7 +76,7 @@ function Validity() {
               onClick={() => handleCheckClick(check)}
             >
               {check.chapterTitle} : {check.isValid ? 'Valid' : 'Invalid'}
-              <button onClick={() => handleDeleteCheck(check.id)}>Delete</button>
+              <span className="remove-icon" onClick={() => handleDeleteCheck(check.id)}>❌</span>
             </li>
           ))}
         </ul>
