@@ -55,9 +55,9 @@ class Database:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS chapters (
                 id TEXT PRIMARY KEY,
-                name TEXT,
+                title TEXT,
                 content TEXT,
-                title TEXT
+                user_id TEXT
             )
         ''')
         cursor.execute('''
@@ -106,6 +106,13 @@ class Database:
         if 'user_id' not in columns:
             cursor.execute('ALTER TABLE characters ADD COLUMN user_id TEXT')
             self.conn.commit()
+        
+        # Add the user_id column to the chapters table if it doesn't exist
+        cursor.execute('PRAGMA table_info(chapters)')
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'user_id' not in columns:
+            cursor.execute('ALTER TABLE chapters ADD COLUMN user_id TEXT')
+            self.conn.commit()
         cursor.close()
 
     def create_user(self, email, password):
@@ -130,13 +137,13 @@ class Database:
         cursor.close()
         return [{'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} for row in rows]
 
-    def create_chapter(self, title, content):
+    def create_chapter(self, title, content, user_id):
         cursor = self.conn.cursor()
         chapter_id = str(uuid.uuid4())
         cursor.execute('''
-            INSERT INTO chapters (id, title, content)
-            VALUES (?, ?, ?)
-        ''', (chapter_id, title, content))
+            INSERT INTO chapters (id, title, content, user_id)
+            VALUES (?, ?, ?, ?)
+        ''', (chapter_id, title, content, user_id))
         self.conn.commit()
         cursor.close()
         return chapter_id
