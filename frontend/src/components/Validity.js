@@ -67,7 +67,7 @@ function Validity() {
           <div className="validity-details">
             <h3>{selectedCheck.chapterTitle}</h3>
             <p>Validity: {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
-            <pre>{JSON.stringify(selectedCheck.result, null, 2)}</pre>
+            <pre>{JSON.stringify(selectedCheck, null, 2)}</pre>
           </div>
         )}
       </div>

@@ -207,7 +207,6 @@ class AgentManager:
         self.logger.info(f"Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
-        chapter_name = f'Chapter {chapter_number}'
         chapter_title = f'Chapter {chapter_number}'
         db.save_validity_check(chapter_id, chapter_title, result)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
