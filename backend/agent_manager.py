@@ -175,6 +175,9 @@ class AgentManager:
         # Log the raw response
         self.logger.debug(f"Raw validity check response: {result}")
 
+        # Strip leading and trailing backticks
+        result = result.strip().strip('```json').strip('```')
+
         if not result.strip():
             self.logger.error("Empty response from validity check.")
             return {"is_valid": False, "feedback": "Empty response from validity check."}
