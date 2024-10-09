@@ -85,13 +85,7 @@ class AgentManager:
         validity = self.check_chapter(chapter, instructions, previous_chapters)
         
         new_characters = self.check_new_characters(chapter, characters)
-        if new_characters:
-            for name, description in new_characters.items():
-                db.create_character(name, description)
 
-        chapter_id = self.save_chapter(chapter, chapter_number, title)
-        self.save_validity_feedback(validity, chapter_number, chapter_id)
-        
         return chapter, title, new_characters
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 

@@ -144,7 +144,7 @@ def generate_chapters():
             validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
                 
             # Save validity to the database
-            agent.save_validity_feedback(validity, chapter_number, chapter_id)
+            db.save_validity_check(chapter_id, chapter_title, validity)
                 
             generated_chapters.append({
                 'id': chapter_id,
