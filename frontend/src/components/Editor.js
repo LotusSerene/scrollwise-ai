@@ -9,6 +9,10 @@ function Editor({ chapters, setChapters }) {
   const [chapterContent, setChapterContent] = useState(''); 
   const [chapterTitle, setChapterTitle] = useState('');  
   const [error, setError] = useState(null);
+  const logging = {
+    debug: (message) => console.debug(message),
+  };
+  
 
   const fetchChapters = useCallback(async () => {
     try {
