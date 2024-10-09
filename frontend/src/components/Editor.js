@@ -117,7 +117,7 @@ function Editor({ chapters, setChapters }) {
             >
           
               {chapter.title}  
-              <button onClick={() => handleDeleteChapter(chapter.id)}>Delete</button>
+              <span className="remove-icon" onClick={() => handleDeleteChapter(chapter.id)}>❌</span>
             </li>
           ))}
         </ul>
