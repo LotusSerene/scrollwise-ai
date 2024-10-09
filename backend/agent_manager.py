@@ -45,9 +45,9 @@ class AgentManager:
         )
 
     def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, 
-                         instructions: Dict[str, Any], user_id: str, 
+                         instructions: Dict[str, Any],
                          previous_chapters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, Any]]:
-        characters = {char['name']: char['description'] for char in db.get_all_characters(user_id)}
+        characters = {char['name']: char['description'] for char in db.get_all_characters}
         context = self._construct_context(plot, writing_style, instructions, characters, previous_chapters)
         prompt = self._construct_prompt(instructions, context)
     
