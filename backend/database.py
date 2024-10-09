@@ -91,6 +91,13 @@ class Database:
         if 'chapter_title' not in columns:
             self.cursor.execute('ALTER TABLE validity_checks ADD COLUMN chapter_title TEXT')
             self.conn.commit()
+        
+        # Ensure all columns are present
+        required_columns = ['id', 'chapter_id', 'chapter_title', 'is_valid', 'feedback', 'review', 'style_guide_adherence', 'style_guide_feedback', 'continuity', 'continuity_feedback', 'test_results']
+        for column in required_columns:
+            if column not in columns:
+                self.cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
+                self.conn.commit()
 
     def create_user(self, email, password):
         user_id = uuid.uuid4().hex
@@ -163,12 +170,12 @@ class Database:
                 'chapterTitle': row[2],
                 'isValid': bool(row[3]),
                 'feedback': row[4],
-                'review': row[5],
-                'style_guide_adherence': bool(row[6]),
-                'style_guide_feedback': row[7],
-                'continuity': bool(row[8]),
-                'continuity_feedback': row[9],
-                'test_results': row[10]
+                'review': row[5] if len(row) > 5 else None,
+                'style_guide_adherence': bool(row[6]) if len(row) > 6 else None,
+                'style_guide_feedback': row[7] if len(row) > 7 else None,
+                'continuity': bool(row[8]) if len(row) > 8 else None,
+                'continuity_feedback': row[9] if len(row) > 9 else None,
+                'test_results': row[10] if len(row) > 10 else None
             }
             for row in self.cursor.fetchall()
         ]
