@@ -1,3 +1,4 @@
+// frontend/src/components/Validity.js
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Validity.css';
@@ -75,6 +76,7 @@ function Validity() {
               onClick={() => handleCheckClick(check)}
             >
               {check.chapterTitle} : {check.isValid ? 'Valid' : 'Invalid'}
+              <button onClick={() => handleDeleteCheck(check.id)}>Delete</button>
             </li>
           ))}
         </ul>
