@@ -215,9 +215,7 @@ class AgentManager:
         return chapter
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = uuid.uuid4().hex
-        chapter_name = f'Chapter {chapter_number}'
-        db.create_user_chapter(chapter_name, chapter, chapter_title)
+        chapter_id = db.create_chapter(chapter_title, chapter, chapter_number)
         self.logger.info(f"Chapter {chapter_number} saved to the database.")
 
     def save_validity_feedback(self, validity: Dict[str, Any], chapter_number: int):
