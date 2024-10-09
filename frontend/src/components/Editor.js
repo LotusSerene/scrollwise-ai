@@ -46,6 +46,21 @@ function Editor({ chapters, setChapters }) {
     setChapterContent('');
   };
 
+  const handleDeleteChapter = async (chapterId) => {
+    try {
+      const token = getAuthToken();
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      fetchChapters();
+    } catch (error) {
+      console.error('Error deleting chapter:', error);
+      setError('Error deleting chapter. Please try again later.');
+    }
+  };
+
   const handleSaveChapter = async () => {
     if (!chapterTitle) { 
       setError('Chapter title is required.');
@@ -101,6 +116,7 @@ function Editor({ chapters, setChapters }) {
               onClick={() => handleChapterClick(chapter)}
             >
               {chapter.title}  
+              <span className="remove-icon" onClick={() => handleDeleteChapter(chapter.id)}>❌</span>
             </li>
           ))}
         </ul>
