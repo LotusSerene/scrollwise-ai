@@ -204,13 +204,13 @@ class AgentManager:
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
         chapter_id = db.create_chapter(chapter_title, chapter)
-        self.logger.info(f"Chapter {chapter_number} saved to the database.")
+        self.logger.info(f"Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
-    def save_validity_feedback(self, result: str, chapter_number: int):
+    def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_name = f'Chapter {chapter_number}'
         chapter_title = f'Chapter {chapter_number}'
-        db.save_validity_check(chapter_name, chapter_title, result)
-        self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database.")
+        db.save_validity_check(chapter_id, chapter_title, result)
+        self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, documents: List[str]):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)

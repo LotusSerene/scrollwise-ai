@@ -136,20 +136,16 @@ def generate_chapters():
             if new_characters:
                 for name, description in new_characters.items():
                     db.create_character(name, description)
-            
+                
             # Save the chapter to the database
             chapter_id = db.create_chapter(chapter_title, chapter_content)
-            
+                
             # Get validity from the agent's check_chapter method
             validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
-            
+                
             # Save validity to the database
-            if generated_chapters:
-                chapter_title = generated_chapters[-1]['title']
-            else:
-                chapter_title = f'Chapter {chapter_number}'
-            db.save_validity_check(chapter_id, chapter_title, validity)
-            
+            agent.save_validity_feedback(validity, chapter_number, chapter_id)
+                
             generated_chapters.append({
                 'id': chapter_id,
                 'content': chapter_content,
