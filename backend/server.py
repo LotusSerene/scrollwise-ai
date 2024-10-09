@@ -199,7 +199,8 @@ def get_validity_checks():
         validity_checks = db.get_all_validity_checks()
         return jsonify({'validityChecks': validity_checks}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"An error occurred in get_validity_checks: {str(e)}", exc_info=True)
+        return jsonify({'error': 'An internal server error occurred'}), 500
 
 @app.route('/api/validity-checks/<check_id>', methods=['DELETE'])
 def delete_validity_check(check_id):

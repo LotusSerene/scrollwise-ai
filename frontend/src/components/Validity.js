@@ -22,6 +22,11 @@ function Validity() {
       setValidityChecks(response.data.validityChecks);
     } catch (error) {
       console.error('Error fetching validity checks:', error);
+      if (error.response) {
+        setValidityChecks([{ error: error.response.data.error }]);
+      } else {
+        setValidityChecks([{ error: 'An unexpected error occurred' }]);
+      }
     }
   };
 

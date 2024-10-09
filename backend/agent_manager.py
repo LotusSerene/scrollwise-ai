@@ -137,60 +137,64 @@ class AgentManager:
 
     def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
                       previous_chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
-        truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
-        check_prompt = ChatPromptTemplate.from_template("""
-        Analyze the following chapter and provide feedback on its quality, consistency, and adherence to instructions:
-
-        Chapter:
-        {chapter}
-
-        Instructions:
-        {instructions}
-
-        Previous Chapters:
-        {truncated_previous_chapters}
-
-        Provide your analysis in the following JSON format:
-        ```json
-        {{
-          "is_valid": true/false,
-          "feedback": "feedback",
-          "review": "review",
-          "style_guide_adherence": true/false,
-          "style_guide_feedback": "feedback",
-          "continuity": true/false,
-          "continuity_feedback": "feedback",
-          "test_results": "results"
-        }}
-        ```
-        """)
-
-        check_chain = check_prompt | self.check_llm | StrOutputParser()
-        result = check_chain.invoke({
-            "chapter": chapter,
-            "instructions": instructions,
-            "truncated_previous_chapters": truncated_previous_chapters
-        })
-
-        # Log the raw response
-        self.logger.debug(f"Raw validity check response: {result}")
-
-        # Strip leading and trailing backticks
-        result = result.strip().strip('```json').strip('```')
-
-        if not result.strip():
-            self.logger.error("Empty response from validity check.")
-            return {"is_valid": False, "feedback": "Empty response from validity check."}
-
         try:
-            validity_dict = json.loads(result)
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Could not parse validity result as JSON: {e}")
-            validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check.",
-                             "review": "N/A", "style_guide_adherence": False, "style_guide_feedback": "N/A",
-                             "continuity": False, "continuity_feedback": "N/A", "test_results": "N/A"}
+            truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
+            check_prompt = ChatPromptTemplate.from_template("""
+            Analyze the following chapter and provide feedback on its quality, consistency, and adherence to instructions:
 
-        return validity_dict
+            Chapter:
+            {chapter}
+
+            Instructions:
+            {instructions}
+
+            Previous Chapters:
+            {truncated_previous_chapters}
+
+            Provide your analysis in the following JSON format:
+            ```json
+            {{
+              "is_valid": true/false,
+              "feedback": "feedback",
+              "review": "review",
+              "style_guide_adherence": true/false,
+              "style_guide_feedback": "feedback",
+              "continuity": true/false,
+              "continuity_feedback": "feedback",
+              "test_results": "results"
+            }}
+            ```
+            """)
+
+            check_chain = check_prompt | self.check_llm | StrOutputParser()
+            result = check_chain.invoke({
+                "chapter": chapter,
+                "instructions": instructions,
+                "truncated_previous_chapters": truncated_previous_chapters
+            })
+
+            # Log the raw response
+            self.logger.debug(f"Raw validity check response: {result}")
+
+            # Strip leading and trailing backticks
+            result = result.strip().strip('```json').strip('```')
+
+            if not result.strip():
+                self.logger.error("Empty response from validity check.")
+                return {"is_valid": False, "feedback": "Empty response from validity check."}
+
+            try:
+                validity_dict = json.loads(result)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Could not parse validity result as JSON: {e}")
+                validity_dict = {"is_valid": False, "feedback": "Invalid JSON output from validity check.",
+                                 "review": "N/A", "style_guide_adherence": False, "style_guide_feedback": "N/A",
+                                 "continuity": False, "continuity_feedback": "N/A", "test_results": "N/A"}
+
+            return validity_dict
+        except Exception as e:
+            self.logger.error(f"An error occurred in check_chapter: {str(e)}", exc_info=True)
+            return {"is_valid": False, "feedback": "An error occurred during validity check."}
 
     def _extract_section(self, text: str, section_name: str) -> str:
         start = text.find(section_name)
