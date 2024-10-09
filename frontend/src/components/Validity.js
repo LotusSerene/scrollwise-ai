@@ -46,6 +46,18 @@ function Validity() {
     }
   };
 
+  const formatCheck = (check) => {
+    return {
+      ...check,
+      review: check.review || 'N/A',
+      style_guide_adherence: check.style_guide_adherence || false,
+      style_guide_feedback: check.style_guide_feedback || 'N/A',
+      continuity: check.continuity || false,
+      continuity_feedback: check.continuity_feedback || 'N/A',
+      test_results: check.test_results || 'N/A'
+    };
+  };
+
   return (
     <div className="validity-container">
       <div className="validity-sidebar">
@@ -72,12 +84,12 @@ function Validity() {
               <p><strong>Chapter Title:</strong> {selectedCheck.chapterTitle}</p>
               <p><strong>Validity:</strong> {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
               <p><strong>Feedback:</strong> {selectedCheck.feedback}</p>
-              <p><strong>Review:</strong> {selectedCheck.review}</p>
-              <p><strong>Style Guide Adherence:</strong> {selectedCheck.style_guide_adherence ? 'Yes' : 'No'}</p>
-              <p><strong>Style Guide Feedback:</strong> {selectedCheck.style_guide_feedback}</p>
-              <p><strong>Continuity:</strong> {selectedCheck.continuity ? 'Yes' : 'No'}</p>
-              <p><strong>Continuity Feedback:</strong> {selectedCheck.continuity_feedback}</p>
-              <p><strong>Test Results:</strong> {selectedCheck.test_results}</p>
+              <p><strong>Review:</strong> {formatCheck(selectedCheck).review}</p>
+              <p><strong>Style Guide Adherence:</strong> {formatCheck(selectedCheck).style_guide_adherence ? 'Yes' : 'No'}</p>
+              <p><strong>Style Guide Feedback:</strong> {formatCheck(selectedCheck).style_guide_feedback}</p>
+              <p><strong>Continuity:</strong> {formatCheck(selectedCheck).continuity ? 'Yes' : 'No'}</p>
+              <p><strong>Continuity Feedback:</strong> {formatCheck(selectedCheck).continuity_feedback}</p>
+              <p><strong>Test Results:</strong> {formatCheck(selectedCheck).test_results}</p>
             </div>
           </div>
         )}
