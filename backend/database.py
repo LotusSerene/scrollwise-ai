@@ -216,9 +216,9 @@ class Database:
         cursor.close()
         return character_id
 
-    def get_all_characters(self):
+    def get_all_characters(self, user_id):
         cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM characters')
+        cursor.execute('SELECT * FROM characters WHERE user_id = ?', (user_id,))
         rows = cursor.fetchall()
         cursor.close()
         return [{'id': row[0], 'name': row[1], 'description': row[2]} for row in rows]
