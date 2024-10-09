@@ -138,7 +138,7 @@ def generate_chapters():
                     db.create_character(name, description)
             
             # Save the chapter to the database
-            chapter_id = db.create_chapter(f'Chapter {chapter_number}', chapter_content, chapter_number)
+            chapter_id = db.create_chapter(chapter_title, chapter_content)
             
             # Get validity from the agent's check_chapter method
             validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
@@ -216,7 +216,7 @@ def delete_validity_check(check_id):
 def create_chapter():
     try:
         data = request.get_json()
-        chapter_id = db.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), data.get('title', 'Untitled'))
+        chapter_id = db.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
         return jsonify({'message': 'Chapter created successfully', 'id': chapter_id}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
