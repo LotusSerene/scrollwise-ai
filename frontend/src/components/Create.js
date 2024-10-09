@@ -12,7 +12,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [generationModel, setGenerationModel] = useState('gemini-1.5-pro-002');
   const [checkModel, setCheckModel] = useState('gemini-1.5-pro-002');
   const [minWordCount, setMinWordCount] = useState(1000);
-  const [characters, setCharacters] = useState([]);
   const [chapterContent, setChapterContent] = useState('');
   const [error, setError] = useState(null);
   const [previousChapters, setPreviousChapters] = useState([]);
@@ -51,7 +50,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
           minWordCount,
           additionalInstructions: instructions
         },
-        characters: Object.fromEntries(characters.map(char => [char.name, char.description])),
         previousChapters,
         apiKey,
         generationModel,
@@ -81,8 +79,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
       setIsGenerating(false); // Re-enable the button
     }
   };
-
-
 
   return (
     <div className="create-container">
@@ -166,17 +162,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
             <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
             <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
           </select>
-        </label>
-        <label>
-          Characters:
-          <ul>
-            {characters.map((char) => (
-              <li key={char.name}>
-                <strong>Name:</strong> {char.name}, <strong>Description:</strong> {char.description}
-                <span className="remove-icon" onClick={() => handleRemoveCharacter(char.name)}>❌</span>
-              </li>
-            ))}
-          </ul>
         </label>
         <button onClick={handleSubmit} disabled={isGenerating}>
           {isGenerating ? 'Generating...' : 'Generate Chapter'}

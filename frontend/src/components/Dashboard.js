@@ -3,27 +3,13 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
 const Dashboard = () => {
-    const [chapters, setChapters] = useState([]);
     const [characters, setCharacters] = useState([]);
     const [newCharacterName, setNewCharacterName] = useState('');
     const [newCharacterDescription, setNewCharacterDescription] = useState('');
 
     useEffect(() => {
-        fetchChapters();
         fetchCharacters();
     }, []);
-
-    const fetchChapters = async () => {
-        try {
-            const token = localStorage.getItem('token');
-            const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            setChapters(response.data.chapters);
-        } catch (error) {
-            console.error('Error fetching chapters:', error);
-        }
-    };
 
     const fetchCharacters = async () => {
         try {
@@ -71,15 +57,6 @@ const Dashboard = () => {
     return (
         <div>
             <h1>Dashboard</h1>
-            <h2>Current Chapters</h2>
-            <ul>
-                {chapters.map(chapter => (
-                    <li key={chapter.id}>
-                        {chapter.title}
-                        <span className="remove-icon" onClick={() => handleDeleteChapter(chapter.id)}>❌</span>
-                    </li>
-                ))}
-            </ul>
             <h2>All Characters</h2>
             <div className="character-container">
                 {characters.map(character => (
