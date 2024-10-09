@@ -392,10 +392,10 @@ class AgentManager:
             total_tokens += chapter_tokens
         return truncated
 
-    def _generate_title(self, chapter: str) -> str:
+    def _generate_title(self, chapter: str, chapter_number: int) -> str:
         prompt = ChatPromptTemplate.from_template("""
         Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
-        use this format Chapter<Number>: <Title>, do not respond with anything else, nothing more nothing less.
+        use this format Chapter {chapter_number}: <Title>, do not respond with anything else, nothing more nothing less.
 
         Chapter Content:
         {chapter}
@@ -404,4 +404,4 @@ class AgentManager:
         """)
         
         chain = prompt | self.llm | StrOutputParser()
-        return chain.invoke({"chapter": chapter[:1000]})  # Use first 1000 characters to generate title
+        return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title

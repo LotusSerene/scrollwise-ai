@@ -62,13 +62,9 @@ const CreateChapter = ({ onChapterGenerated }) => {
       
       if (response.data.chapters && response.data.chapters.length > 0) {
         // Generate title for each chapter
-        const chaptersWithTitles = await Promise.all(response.data.chapters.map(async (chapter) => {
-          const titleResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate-title`, {
-            content: chapter.content
-          }, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          return { ...chapter, title: titleResponse.data.title };
+        const chaptersWithTitles = response.data.chapters.map((chapter) => ({
+          ...chapter,
+          title: chapter.title
         }));
 
         if (onChapterGenerated) {
