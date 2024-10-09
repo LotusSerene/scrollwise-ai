@@ -30,7 +30,7 @@ class AgentManager:
         self.check_model = check_model
         self.llm = self._initialize_llm()
         self.check_llm = self._initialize_llm(model=check_model)
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
+        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
         self.vector_store = None
         self.logger = logging.getLogger(__name__)
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in generation_model else 1048576
@@ -171,7 +171,9 @@ class AgentManager:
             })
 
             # Log the raw response
-            self.logger.debug(f"Raw validity check response: {result}")
+            #self.logger.debug(f"Raw validity check response: {result}")
+          #  self.logger.debug(f"Truncated previous chapters: {truncated_previous_chapters}")
+           # self.logger.debug(f"previous_chapters: {previous_chapters}")
 
             # Strip leading and trailing backticks
             result = result.strip().strip('```json').strip('```')
@@ -363,7 +365,7 @@ class AgentManager:
             "existing_characters": ", ".join(existing_names)
         })
             # Log the raw response
-        self.logger.debug(f"Raw new characters response: {result}")
+        #self.logger.debug(f"Raw new characters response: {result}")
 
         # Strip leading and trailing backticks
         result = result.strip().strip('```json').strip('```')

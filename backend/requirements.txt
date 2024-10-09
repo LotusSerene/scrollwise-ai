@@ -1,0 +1,8 @@
+gunicorn
+streamlit
+google-generativeai
+python-dotenv
+flask
+flask-cors
+docx
+python-docx

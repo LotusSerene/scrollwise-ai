@@ -123,7 +123,7 @@ function Editor({ chapters, setChapters }) {
         <button onClick={handleCreateChapter}>Create New Chapter</button>
       </div>
       <div className="editor-content">
-        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.title}` : 'Create New Chapter'}</h3>  {/* Reversed: Use chapter.content for title. This is due to a bug where the state variables were swapped. */}
+        <h3>{selectedChapter ? `Edit Chapter: ${selectedChapter.title}` : 'Create New Chapter'}</h3>
         {error && <p className="error">{error}</p>}
         <label>
           Title:

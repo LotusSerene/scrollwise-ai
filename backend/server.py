@@ -80,7 +80,7 @@ def login():
 def generate_chapters():
     try:
         data = request.json
-        logging.debug(f"Received data: {data}")
+        #logging.debug(f"Received data: {data}")
         
         num_chapters = int(data.get('numChapters', 1))
         plot = data.get('plot', '')
@@ -91,30 +91,29 @@ def generate_chapters():
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        previous_chapters = data.get('previousChapters', [])  # Get previous chapters from request data
-        logging.debug(f"Received previousChapters: {previous_chapters}")
+        previous_chapters = chapters = db.get_all_chapters()
+        #logging.debug(f"Received previousChapters: {previous_chapters}")
         
         if not api_key:
             return jsonify({'error': 'API Key is required'}), 400
 
         agent = AgentManager(api_key, generation_model, check_model)
-        logging.debug("AgentManager initialized")
+       # logging.debug("AgentManager initialized")
 
         generated_chapters = []
         validities = []
 
         # Get the current chapter count from the database
         current_chapter_count = get_chapter_count()
-        logging.debug(f"Current chapter count: {current_chapter_count}")
 
         for i in range(num_chapters):
             chapter_number = current_chapter_count + i + 1
-            logging.debug(f"Generating chapter {chapter_number}")
+            #logging.debug(f"Generating chapter {chapter_number}")
             # Log the characters being sent to the agent
-            logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
+            #logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
 
             characters = db.get_all_characters()
-            logging.debug(f"Retrieved {len(characters)} characters")
+           # logging.debug(f"Retrieved {len(characters)} characters")
 
             try:
                 chapter_content, chapter_title, new_characters = agent.generate_chapter(
