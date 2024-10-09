@@ -356,6 +356,12 @@ class AgentManager:
             "chapter": chapter,
             "existing_characters": ", ".join(existing_names)
         })
+            # Log the raw response
+        self.logger.debug(f"Raw new characters response: {result}")
+
+        if not result.strip():
+            self.logger.error("Empty response from new characters check.")
+            return {}
 
         new_characters = {}
         try:
