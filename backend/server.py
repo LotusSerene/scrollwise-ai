@@ -91,8 +91,9 @@ def generate_chapters():
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        
-        logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}")
+        previous_chapters = data.get('previousChapters', [])  # Get previous chapters from request data
+        logging.debug(f"Received previousChapters: {previous_chapters}")
+        #logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}")
         
         if not api_key:
             return jsonify({'error': 'API Key is required'}), 400
@@ -110,8 +111,8 @@ def generate_chapters():
         for i in range(num_chapters):
             chapter_number = current_chapter_count + i + 1
             logging.debug(f"Generating chapter {chapter_number}")
-            previous_chapters = db.get_all_chapters()
-            logging.debug(f"Retrieved {len(previous_chapters)} previous chapters")
+            # Log the characters being sent to the agent
+            logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
 
             characters = db.get_all_characters()
             logging.debug(f"Retrieved {len(characters)} characters")
@@ -127,7 +128,7 @@ def generate_chapters():
                         'min_word_count': min_word_count,
                         'chapter_number': chapter_number
                     },
-                    previous_chapters=previous_chapters,
+                    previous_chapters=previous_chapters, 
                     characters=characters
                 )
                 logging.debug(f"Chapter {chapter_number} generated successfully")
