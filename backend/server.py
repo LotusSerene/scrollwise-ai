@@ -113,6 +113,9 @@ def generate_chapters():
             previous_chapters = db.get_all_chapters()
             logging.debug(f"Retrieved {len(previous_chapters)} previous chapters")
 
+            characters = db.get_all_characters()
+            logging.debug(f"Retrieved {len(characters)} characters")
+
             try:
                 chapter_content, chapter_title, new_characters = agent.generate_chapter(
                     chapter_number=chapter_number,
@@ -124,7 +127,8 @@ def generate_chapters():
                         'min_word_count': min_word_count,
                         'chapter_number': chapter_number
                     },
-                    previous_chapters=previous_chapters
+                    previous_chapters=previous_chapters,
+                    characters=characters
                 )
                 logging.debug(f"Chapter {chapter_number} generated successfully")
             except Exception as e:

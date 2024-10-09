@@ -1,3 +1,4 @@
+# backend/agent_manager.py
 import os
 from typing import Dict, Any, List, Tuple, Optional
 from dotenv import load_dotenv
@@ -46,9 +47,10 @@ class AgentManager:
 
     def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, 
                          instructions: Dict[str, Any],
-                         previous_chapters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, Any]]:
-        characters = {char['name']: char['description'] for char in db.get_all_characters()}
-        context = self._construct_context(plot, writing_style, instructions, characters, previous_chapters)
+                         previous_chapters: List[Dict[str, Any]],
+                         characters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, Any]]:
+        characters_dict = {char['name']: char['description'] for char in characters}
+        context = self._construct_context(plot, writing_style, instructions, characters_dict, previous_chapters)
         prompt = self._construct_prompt(instructions, context)
     
         chat_history = ChatMessageHistory()
@@ -71,12 +73,12 @@ class AgentManager:
         )
 
         chapter = chain.invoke(
-            {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters},
+            {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
             config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
         )
     
         title = self._generate_title(chapter, chapter_number)
-        new_characters = self.extract_new_characters(chapter, characters)
+        new_characters = self.extract_new_characters(chapter, characters_dict)
     
         min_word_count = instructions.get('min_word_count', 0)
         if len(chapter.split()) < min_word_count:
@@ -85,7 +87,7 @@ class AgentManager:
         chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
         validity = self.check_chapter(chapter, instructions, previous_chapters)
         
-        new_characters = self.check_new_characters(chapter, characters)
+        new_characters = self.check_new_characters(chapter, characters_dict)
 
         return chapter, title, new_characters
 
