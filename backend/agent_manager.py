@@ -212,7 +212,8 @@ class AgentManager:
 
     def save_validity_feedback(self, validity: Dict[str, Any], chapter_number: int):
         chapter_name = f'Chapter {chapter_number}'
-        db.save_validity_check(chapter_name, validity)
+        chapter_title = validity.get('chapter_title', 'Unknown Chapter')
+        db.save_validity_check(chapter_name, chapter_title, validity)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database.")
 
     def add_to_knowledge_base(self, documents: List[str]):

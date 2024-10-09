@@ -78,6 +78,13 @@ class Database:
             )
         ''')
         self.conn.commit()
+        
+        # Add the chapter_title column if it doesn't exist
+        self.cursor.execute('PRAGMA table_info(validity_checks)')
+        columns = [column[1] for column in self.cursor.fetchall()]
+        if 'chapter_title' not in columns:
+            self.cursor.execute('ALTER TABLE validity_checks ADD COLUMN chapter_title TEXT')
+            self.conn.commit()
 
     def create_user(self, email, password):
         user_id = uuid.uuid4().hex
