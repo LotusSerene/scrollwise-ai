@@ -249,5 +249,26 @@ def create_character():
     character = db.create_character(data['name'], data['description'])
     return jsonify(character.to_dict()), 201
 
+@app.route('/api/knowledge-base', methods=['POST'])
+@jwt_required()
+def add_to_knowledge_base():
+    try:
+        data = request.json
+        documents = data.get('documents', [])
+        if not documents:
+            return jsonify({'error': 'Documents are required'}), 400
+
+        api_key = data.get('apiKey', '')
+        if not api_key:
+            return jsonify({'error': 'API Key is required'}), 400
+
+        agent = AgentManager(api_key, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        agent.add_to_knowledge_base(documents)
+
+        return jsonify({'message': 'Documents added to the knowledge base successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in add_to_knowledge_base: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True)

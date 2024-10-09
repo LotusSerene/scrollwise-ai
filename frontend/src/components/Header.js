@@ -21,6 +21,9 @@ function Header({ isLoggedIn, onLogout }) {
               <li>
                 <Link to="/validity">Validity</Link>
               </li>
+              <li>
+                <Link to="/knowledge-base">Knowledge Base</Link>
+              </li>
             </>
           )}
         </ul>
