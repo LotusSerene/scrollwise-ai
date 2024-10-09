@@ -1,54 +1,84 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Create.css';
-import { getAuthToken } from '../utils/auth';
-import { v4 as uuidv4 } from 'uuid';
 
-function Create({ onChapterGenerated, previousChapters }) {
+const CreateChapter = ({ onChapterGenerated }) => {
   const [numChapters, setNumChapters] = useState(1);
   const [plot, setPlot] = useState('');
   const [writingStyle, setWritingStyle] = useState('');
   const [instructions, setInstructions] = useState('');
   const [styleGuide, setStyleGuide] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [generationModel, setGenerationModel] = useState('gemini-1.5-pro-002');
+  const [checkModel, setCheckModel] = useState('gemini-1.5-pro-002');
   const [minWordCount, setMinWordCount] = useState(1000);
-  const [characters, setCharacters] = useState({});
+  const [characters, setCharacters] = useState([]);
   const [chapterContent, setChapterContent] = useState('');
-  const [apiKey, setApiKey] = useState('');  // Add API key state
   const [error, setError] = useState(null);
+  const [previousChapters, setPreviousChapters] = useState([]);
 
-  const handleGenerateChapter = async () => {
-    const token = getAuthToken();
-    const data = {
-      numChapters,
-      plot,
-      writingStyle,
-      instructions,
-      styleGuide,
-      minWordCount,
-      characters: JSON.stringify(characters),
-      previousChapters: JSON.stringify(previousChapters),
-      apiKey  // Add API key to the data
+  useEffect(() => {
+    const fetchPreviousChapters = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setPreviousChapters(response.data.chapters);
+      } catch (error) {
+        console.error('Error fetching previous chapters:', error);
+        setError('Error fetching previous chapters. Please try again later.');
+      }
     };
 
-    try {
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate`, data, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+    fetchPreviousChapters();
+  }, []);
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const token = localStorage.getItem('token');
+      setError(null); // Clear any previous errors
+      
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate`, {
+        numChapters,
+        plot,
+        writingStyle,
+        instructions: {
+          styleGuide,
+          minWordCount,
+          additionalInstructions: instructions
+        },
+        characters: Object.fromEntries(characters.map(char => [char.name, char.description])),
+        previousChapters,
+        apiKey,
+        generationModel,
+        checkModel,
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
       if (response.data.chapters && response.data.chapters.length > 0) {
-        const newChapters = response.data.chapters;
-        newChapters.forEach((newChapter) => {
-          setChapterContent(newChapter.chapter);
-          onChapterGenerated(newChapter);
-        });
+        // Generate title for each chapter
+        const chaptersWithTitles = await Promise.all(response.data.chapters.map(async (chapter) => {
+          const titleResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate-title`, {
+            content: chapter.content
+          }, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          return { ...chapter, title: titleResponse.data.title };
+        }));
+
+        if (onChapterGenerated) {
+          onChapterGenerated(chaptersWithTitles);
+        }
+        setChapterContent(chaptersWithTitles.map(chapter => `${chapter.title}\n\n${chapter.content}`).join('\n\n'));
       } else {
-        setError('No chapters generated. Please try again.');
+        setError('No chapters were generated. Please try again.');
       }
     } catch (error) {
-      console.error('Error generating chapter:', error);
-      setError('Error generating chapter. Please try again later.');
+      console.error('Error generating chapters:', error);
+      setError(error.response?.data?.message || 'Error generating chapters. Please try again later.');
     }
   };
 
@@ -136,18 +166,34 @@ function Create({ onChapterGenerated, previousChapters }) {
           />
         </label>
         <label>
+          Generation Model:
+          <select value={generationModel} onChange={(e) => setGenerationModel(e.target.value)}>
+            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
+            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
+            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+          </select>
+        </label>
+        <label>
+          Check Model:
+          <select value={checkModel} onChange={(e) => setCheckModel(e.target.value)}>
+            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
+            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
+            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+          </select>
+        </label>
+        <label>
           Characters:
           <button onClick={handleAddCharacter}>Add Character</button>
           <ul>
-            {Object.entries(characters).map(([name, description]) => (
-              <li key={name}>
-                <strong>Name:</strong> {name}, <strong>Description:</strong> {description}
-                <button onClick={() => handleRemoveCharacter(name)}>Remove</button>
+            {characters.map((char) => (
+              <li key={char.name}>
+                <strong>Name:</strong> {char.name}, <strong>Description:</strong> {char.description}
+                <button onClick={() => handleRemoveCharacter(char.name)}>Remove</button>
               </li>
             ))}
           </ul>
         </label>
-        <button onClick={handleGenerateChapter}>Generate Chapter</button>
+        <button onClick={handleSubmit}>Generate Chapter</button>
       </div>
       <div className="generated-chapter">
         <h3>Generated Chapter</h3>
@@ -155,6 +201,6 @@ function Create({ onChapterGenerated, previousChapters }) {
       </div>
     </div>
   );
-}
+};
 
-export default Create;
+export default CreateChapter;

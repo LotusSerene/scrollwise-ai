@@ -1,19 +1,14 @@
-# server.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Blueprint
 from flask_cors import CORS
+from flask_jwt_extended import jwt_required, get_jwt_identity
 import os
 from dotenv import load_dotenv
-import google.generativeai as genai
-from context_manager import ContextManager
-from chapter_generator import ChapterGenerator
 import logging
-from utils import save_state, load_state, ChapterGeneratorLoop
-import tempfile
-import json
 import jwt
 import datetime
-import uuid  # Add this import
-from database import db
+import uuid
+from database import db, get_chapter_count, Character
+from agent_manager import AgentManager
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -83,69 +78,92 @@ def login():
 @app.route('/api/generate', methods=['POST'])
 def generate_chapters():
     try:
-        data = request.form
+        data = request.json
+        logging.debug(f"Received data: {data}")
+        
         num_chapters = int(data.get('numChapters', 1))
         plot = data.get('plot', '')
         writing_style = data.get('writingStyle', '')
-        instructions = data.get('instructions', '')
-        style_guide = data.get('styleGuide', '')
+        instructions = data.get('instructions', {})
+        style_guide = instructions.get('styleGuide', '')
         api_key = data.get('apiKey', '')
-        generation_model = data.get('generationModel', 'gemini-1.5-flash-002')
-        check_model = data.get('checkModel', 'gemini-1.5-flash-002')
-        min_word_count = int(data.get('minWordCount', 1000))
-        characters = json.loads(data.get('characters', '{}'))
-        chapter_title = data.get('chapterTitle', '')
-
+        generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
+        check_model = data.get('checkModel', 'gemini-1.5-pro-002')
+        min_word_count = int(instructions.get('minWordCount', 1000))
+        characters = data.get('characters', {})
+        
+        logging.debug(f"Parsed data: num_chapters={num_chapters}, plot={plot[:50]}..., writing_style={writing_style[:50]}..., api_key={api_key[:5]}..., generation_model={generation_model}, check_model={check_model}, min_word_count={min_word_count}")
+        
         if not api_key:
             return jsonify({'error': 'API Key is required'}), 400
 
-        # Fetch previous chapters from the database for the user
-        previous_chapters = json.loads(data.get('previousChapters', '[]'))
+        agent = AgentManager(api_key, generation_model, check_model)
+        logging.debug("AgentManager initialized")
 
-        # Ensure previous_chapters is a list
-        if not isinstance(previous_chapters, list):
-            previous_chapters = []
-
-        context_manager = ContextManager()
-        looping_generator = ChapterGeneratorLoop(
-            api_key=api_key,
-            generation_model=generation_model,
-            check_model=check_model
-        )
-
-        chapters = []
+        generated_chapters = []
         validities = []
 
-        for chapter_number in range(1, num_chapters + 1):
-            chapter, chapter_title, validity = looping_generator.generate_chapter(
-                chapter_number=chapter_number,
-                plot=plot,
-                writing_style=writing_style,
-                instructions={"general": instructions, "style_guide": style_guide, 'min_word_count': min_word_count, 'chapter_number': chapter_number, 'chapter_title': chapter_title},
-                characters=characters,
-                previous_chapters=previous_chapters
-            )
-            chapters.append({'chapter': chapter, 'title': chapter_title})
+        # Get the current chapter count from the database
+        current_chapter_count = get_chapter_count()
+        logging.debug(f"Current chapter count: {current_chapter_count}")
+
+        for i in range(num_chapters):
+            chapter_number = current_chapter_count + i + 1
+            logging.debug(f"Generating chapter {chapter_number}")
+            previous_chapters = db.get_all_chapters()
+            logging.debug(f"Retrieved {len(previous_chapters)} previous chapters")
+
+            try:
+                chapter_content, chapter_title, new_characters = agent.generate_chapter(
+                    chapter_number=chapter_number,
+                    plot=plot,
+                    writing_style=writing_style,
+                    instructions={
+                        "general": instructions,
+                        "style_guide": style_guide,
+                        'min_word_count': min_word_count,
+                        'chapter_number': chapter_number
+                    },
+                    characters=characters,  # This should be a dictionary of character names to descriptions
+                    previous_chapters=previous_chapters
+                )
+                logging.debug(f"Chapter {chapter_number} generated successfully")
+            except Exception as e:
+                logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
+                raise
+
+            # Check for new characters
+            if new_characters:
+                for name, description in new_characters.items():
+                    db.create_character(name, description)
+            
+            # Save the chapter to the database
+            chapter_id = db.create_chapter(f'Chapter {chapter_number}', chapter_content, chapter_number)
+            
+            # Get validity from the agent's check_chapter method
+            validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
+            
+            # Save validity to the database
+            db.save_validity_check(chapter_id, validity)
+            
+            generated_chapters.append({
+                'id': chapter_id,
+                'content': chapter_content,
+                'title': chapter_title,
+                'new_characters': new_characters
+            })
             validities.append(validity)
 
-            # Save the chapter to the database
-            db.create_user_chapter(f'Chapter {chapter_number}', chapter, chapter_title)
-
-            # Save validity to the database
-            db.save_validity_check(f'Chapter {chapter_number}', validity)
-
-        return jsonify({'chapters': chapters, 'validities': validities}), 200
+        return jsonify({'chapters': generated_chapters, 'validities': validities}), 200
 
     except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
-        logging.error(f"Request data: {request.form}")
-        return jsonify({'error': 'An error occurred while generating chapters. Please try again later.'}), 500
+        logging.error(f"An error occurred in generate_chapters: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters', methods=['GET'])
 def get_chapters():
     try:
-        # Fetch chapters from the database for the user
-        chapters = db.get_all_chapters()  # Use a default user for now
+        chapters = db.get_all_chapters()
         return jsonify({'chapters': chapters}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -154,36 +172,22 @@ def get_chapters():
 def update_chapter(chapter_id):
     try:
         data = request.json
-        updated_chapter = db.update_chapter(chapter_id, data)
+        updated_chapter = db.update_chapter(chapter_id, data.get('title'), data.get('content'))
         if updated_chapter:
             return jsonify(updated_chapter), 200
         else:
             return jsonify({'error': 'Chapter not found'}), 404
     except Exception as e:
         logging.error(f"Error updating chapter: {str(e)}")
-        logging.error(f"Request data: {data}")
-        logging.error(f"Chapter ID: {chapter_id}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/chapters', methods=['POST'])
-def create_chapter():
-    try:
-        data = request.json
-        chapter_id = uuid.uuid4().hex
-        chapter_name = data.get('name', 'New Chapter')
-        chapter_content = data.get('content', '')
-        chapter_title = data.get('title', '')
-        db.create_user_chapter(chapter_name, chapter_content, chapter_title)
-        return jsonify({'id': chapter_id, 'name': chapter_name, 'content': chapter_content, 'title': chapter_title}), 201
-    except Exception as e:
-        logging.error(f"Error creating chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters/<chapter_id>', methods=['DELETE'])
 def delete_chapter(chapter_id):
     try:
-        db.delete_chapter(chapter_id)
-        return jsonify({'message': 'Chapter deleted successfully'}), 200
+        if db.delete_chapter(chapter_id):
+            return jsonify({'message': 'Chapter deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Chapter not found'}), 404
     except Exception as e:
         logging.error(f"Error deleting chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -191,7 +195,6 @@ def delete_chapter(chapter_id):
 @app.route('/api/validity-checks', methods=['GET'])
 def get_validity_checks():
     try:
-        # Fetch validity checks from the database for the user
         validity_checks = db.get_all_validity_checks()
         return jsonify({'validityChecks': validity_checks}), 200
     except Exception as e:
@@ -200,14 +203,49 @@ def get_validity_checks():
 @app.route('/api/validity-checks/<check_id>', methods=['DELETE'])
 def delete_validity_check(check_id):
     try:
-        # Delete the validity check from the database
-        db.delete_validity_check(check_id)
-        return jsonify({'message': 'Validity check deleted successfully'}), 200
+        if db.delete_validity_check(check_id):
+            return jsonify({'message': 'Validity check deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Validity check not found'}), 404
     except Exception as e:
         logging.error(f"Error deleting validity check: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/chapters', methods=['POST'])
+def create_chapter():
+    try:
+        data = request.get_json()
+        chapter_id = db.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), data.get('title', 'Untitled'))
+        return jsonify({'message': 'Chapter created successfully', 'id': chapter_id}), 201
+    except Exception as e:
+        logging.error(f"Error creating chapter: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/characters', methods=['GET'])
+def get_characters():
+    try:
+        characters = db.get_all_characters()
+        return jsonify({'characters': characters}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/characters/<character_id>', methods=['DELETE'])
+def delete_character(character_id):
+    try:
+        if db.delete_character(character_id):
+            return jsonify({'message': 'Character deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Character not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/characters', methods=['POST'])
+@jwt_required()
+def create_character():
+    data = request.json
+    user_id = get_jwt_identity()
+    character = Character.get_or_create(data['name'], data['description'], user_id)
+    return jsonify(character.to_dict()), 201
+
 if __name__ == '__main__':
     app.run(debug=True)
-    port = int(os.environ.get('PORT', 5000))  # Default to 5000 if no PORT env is set
-    app.run(host='0.0.0.0', port=port)  # This line will not be executed in production
