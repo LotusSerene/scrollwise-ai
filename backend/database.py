@@ -7,17 +7,17 @@ import logging
 db = SQLAlchemy()
 
 class Character(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.String, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.String, nullable=False)
 
     @classmethod
     def get_or_create(cls, name, description, user_id):
         existing_character = cls.query.filter_by(name=name, user_id=user_id).first()
         if existing_character:
             return existing_character
-        new_character = cls(name=name, description=description, user_id=user_id)
+        new_character = cls(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
         db.session.add(new_character)
         db.session.commit()
         return new_character
@@ -80,7 +80,8 @@ class Database:
             CREATE TABLE IF NOT EXISTS characters (
                 id TEXT PRIMARY KEY,
                 name TEXT,
-                description TEXT
+                description TEXT,
+                user_id TEXT
             )
         ''')
         self.conn.commit()
@@ -98,6 +99,13 @@ class Database:
             if column not in columns:
                 cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
                 self.conn.commit()
+        
+        # Add the user_id column to the characters table if it doesn't exist
+        cursor.execute('PRAGMA table_info(characters)')
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'user_id' not in columns:
+            cursor.execute('ALTER TABLE characters ADD COLUMN user_id TEXT')
+            self.conn.commit()
         cursor.close()
 
     def create_user(self, email, password):
