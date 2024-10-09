@@ -67,7 +67,18 @@ function Validity() {
           <div className="validity-details">
             <h3>{selectedCheck.chapterTitle}</h3>
             <p>Validity: {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
-            <pre>{JSON.stringify(selectedCheck, null, 2)}</pre>
+            <div className="validity-details-section">
+              <p><strong>Chapter ID:</strong> {selectedCheck.chapterId}</p>
+              <p><strong>Chapter Title:</strong> {selectedCheck.chapterTitle}</p>
+              <p><strong>Validity:</strong> {selectedCheck.isValid ? 'Valid' : 'Invalid'}</p>
+              <p><strong>Feedback:</strong> {selectedCheck.feedback}</p>
+              <p><strong>Review:</strong> {selectedCheck.review}</p>
+              <p><strong>Style Guide Adherence:</strong> {selectedCheck.style_guide_adherence ? 'Yes' : 'No'}</p>
+              <p><strong>Style Guide Feedback:</strong> {selectedCheck.style_guide_feedback}</p>
+              <p><strong>Continuity:</strong> {selectedCheck.continuity ? 'Yes' : 'No'}</p>
+              <p><strong>Continuity Feedback:</strong> {selectedCheck.continuity_feedback}</p>
+              <p><strong>Test Results:</strong> {selectedCheck.test_results}</p>
+            </div>
           </div>
         )}
       </div>
