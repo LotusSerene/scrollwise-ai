@@ -64,6 +64,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS validity_checks (
                 id TEXT PRIMARY KEY,
                 chapter_id TEXT,
+                chapter_title TEXT,
                 is_valid INTEGER,
                 feedback TEXT,
                 FOREIGN KEY (chapter_id) REFERENCES chapters (id)
@@ -93,12 +94,12 @@ class Database:
         self.cursor.execute('SELECT * FROM chapters')
         return [{'id': row[0], 'name': row[1], 'content': row[2], 'title': row[3]} for row in self.cursor.fetchall()]
 
-    def create_chapter(self, title, content, chapter_number):
+    def create_chapter(self, title, content):
         chapter_id = str(uuid.uuid4())
         self.cursor.execute('''
-            INSERT INTO chapters (id, title, content, chapter_number)
-            VALUES (?, ?, ?, ?)
-        ''', (chapter_id, title, content, chapter_number))
+            INSERT INTO chapters (id, title, content)
+            VALUES (?, ?, ?)
+        ''', (chapter_id, title, content))
         self.conn.commit()
         return chapter_id
 
