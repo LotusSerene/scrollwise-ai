@@ -74,7 +74,7 @@ class AgentManager:
             config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
         )
     
-        title = self._generate_title(chapter)
+        title = self._generate_title(chapter, chapter_number)
         new_characters = self.extract_new_characters(chapter, characters)
     
         min_word_count = instructions.get('min_word_count', 0)
