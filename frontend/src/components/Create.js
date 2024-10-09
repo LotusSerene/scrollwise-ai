@@ -16,6 +16,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [chapterContent, setChapterContent] = useState('');
   const [error, setError] = useState(null);
   const [previousChapters, setPreviousChapters] = useState([]);
+  const [isGenerating, setIsGenerating] = useState(false); // New state to track generation process
 
   useEffect(() => {
     const fetchPreviousChapters = async () => {
@@ -36,6 +37,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsGenerating(true); // Disable the button
     try {
       const token = localStorage.getItem('token');
       setError(null); // Clear any previous errors
@@ -79,6 +81,8 @@ const CreateChapter = ({ onChapterGenerated }) => {
     } catch (error) {
       console.error('Error generating chapters:', error);
       setError(error.response?.data?.message || 'Error generating chapters. Please try again later.');
+    } finally {
+      setIsGenerating(false); // Re-enable the button
     }
   };
 
@@ -193,7 +197,9 @@ const CreateChapter = ({ onChapterGenerated }) => {
             ))}
           </ul>
         </label>
-        <button onClick={handleSubmit}>Generate Chapter</button>
+        <button onClick={handleSubmit} disabled={isGenerating}>
+          {isGenerating ? 'Generating...' : 'Generate Chapter'}
+        </button>
       </div>
       <div className="generated-chapter">
         <h3>Generated Chapter</h3>
