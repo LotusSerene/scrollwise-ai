@@ -328,10 +328,10 @@ class AgentManager:
         For each new character, provide their name and a brief description in the following JSON format:
 
         ```json
-        {
+        {{
 "character_name": "description",
 "character_name": "description"
-        }
+        }}
         ```
 
         Chapter:
