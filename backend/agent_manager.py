@@ -152,7 +152,7 @@ class AgentManager:
 
         Provide your analysis in the following JSON format:
         ```json
-        {
+        {{
           "is_valid": true/false,
           "feedback": "feedback",
           "review": "review",
@@ -161,7 +161,7 @@ class AgentManager:
           "continuity": true/false,
           "continuity_feedback": "feedback",
           "test_results": "results"
-        }
+        }}
         ```
         """)
 
