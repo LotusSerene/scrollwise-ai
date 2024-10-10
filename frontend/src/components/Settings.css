@@ -1,0 +1,51 @@
+.settings-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.settings-container h2 {
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.settings-container .message {
+  margin-bottom: 20px;
+  color: green;
+  font-weight: bold;
+}
+
+.settings-container form {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-container label {
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.settings-container input {
+  padding: 10px;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.settings-container button {
+  padding: 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.settings-container button:hover {
+  background-color: #0056b3;
+}
