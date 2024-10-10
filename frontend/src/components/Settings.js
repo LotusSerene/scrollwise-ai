@@ -199,7 +199,7 @@ function Settings() {
             value={value}
             onChange={(e) => handleModelSettingChange(key, e.target.value)}
           >
-            {key === 'embeddingsModel' ? embeddingOptions : llmOptions}.map(option => (
+            {(key === 'embeddingsModel' ? embeddingOptions : llmOptions).map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
