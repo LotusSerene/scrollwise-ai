@@ -17,24 +17,36 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 import logging
 import uuid
-from database import db
+from database import db, db_instance
 from pydantic import BaseModel  # Ensure you import directly from pydantic
 import json
 # Load environment variables
 load_dotenv()
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
 
 class AgentManager:
-    def __init__(self, api_key: str, generation_model: str, check_model: str):
-        self.api_key = api_key
+    def __init__(self, user_id: str, generation_model: str, check_model: str):
+        self.user_id = user_id
         self.generation_model = generation_model
         self.check_model = check_model
+        self.api_key = self._get_api_key()
         self.llm = self._initialize_llm()
         self.check_llm = self._initialize_llm(model=check_model)
         self.embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
-        self.vector_store = None
+        self.vector_store = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
         self.logger = logging.getLogger(__name__)
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in generation_model else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
+        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+    def _get_api_key(self) -> str:
+        api_key = db_instance.get_api_key(self.user_id)
+        if not api_key:
+            raise ValueError("API key not set. Please set your API key in the settings.")
+        return api_key
 
     def _initialize_llm(self, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
         return ChatGoogleGenerativeAI(
@@ -86,7 +98,7 @@ class AgentManager:
         
         chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
         validity = self.check_chapter(chapter, instructions, previous_chapters)
-        
+    
         new_characters = self.check_new_characters(chapter, characters_dict)
 
         return chapter, title, new_characters
@@ -241,10 +253,7 @@ class AgentManager:
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         texts = text_splitter.create_documents(documents)
         
-        if not self.vector_store:
-            self.vector_store = Chroma.from_documents(texts, self.embeddings)
-        else:
-            self.vector_store.add_documents(texts)
+        self.vector_store.add_documents(texts)
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         if not self.vector_store:
@@ -252,22 +261,45 @@ class AgentManager:
         return self.vector_store.similarity_search(query, k=k)
 
     def generate_with_retrieval(self, query: str) -> str:
-        relevant_docs = self.query_knowledge_base(query)
-        context = self._truncate_context("\n".join([doc.page_content for doc in relevant_docs]))
+        retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
         
-        prompt = ChatPromptTemplate.from_template("""
-        Use the following context to answer the question:
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=self.llm,
+            retriever=retriever,
+            memory=self.memory,
+            return_source_documents=True
+        )
         
-        Context:
-        {context}
+        result = qa_chain({"question": query})
         
-        Question: {query}
+        answer = result['answer']
+        source_documents = result['source_documents']
         
-        Answer:
-        """)
+        # Format the response with source information
+        response = f"AI: {answer}\n\nSources:\n"
+        for i, doc in enumerate(source_documents, 1):
+            response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
         
-        chain = prompt | self.llm | StrOutputParser()
-        return chain.invoke({"context": context, "query": query})
+        return response
+
+    def _construct_query_context(self, relevant_docs: List[Document]) -> str:
+        context = "\n".join([doc.page_content for doc in relevant_docs])
+        
+        # Add characters information
+        characters = db_instance.get_all_characters()
+        if characters:
+            context += "\n\nCharacters:\n"
+            for character in characters:
+                context += f"{character['name']}: {character['description']}\n"
+        
+        # Add chapters information (you might want to limit this to avoid token limits)
+        chapters = db_instance.get_all_chapters()
+        if chapters:
+            context += "\n\nChapters:\n"
+            for chapter in chapters:
+                context += f"Chapter {chapter['id']}: {chapter['title']}\n"
+        
+        return self._truncate_context(context)
 
     def _truncate_context(self, context: str) -> str:
         max_tokens = self.MAX_INPUT_TOKENS // 2  # Reserve half of the tokens for context
@@ -410,3 +442,35 @@ class AgentManager:
         
         chain = prompt | self.llm | StrOutputParser()
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
+
+    def add_character_to_knowledge_base(self, character: Dict[str, Any]):
+        text = f"Character: {character['name']}\nDescription: {character['description']}"
+        self.add_to_knowledge_base([text])
+
+    def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
+        text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
+        self.add_to_knowledge_base([text])
+
+    def remove_from_knowledge_base(self, text: str):
+        # This is a simplification. In practice, you'd need to find the exact document
+        # or implement a more sophisticated removal strategy.
+        documents = self.vector_store.similarity_search(text, k=1)
+        if documents:
+            self.vector_store.delete(documents[0].metadata['id'])
+
+    def remove_character_from_knowledge_base(self, character: Dict[str, Any]):
+        text = f"Character: {character['name']}"
+        self.remove_from_knowledge_base(text)
+
+    def remove_chapter_from_knowledge_base(self, chapter: Dict[str, Any]):
+        text = f"Chapter {chapter['id']}: {chapter['title']}"
+        self.remove_from_knowledge_base(text)
+
+    def get_knowledge_base_content(self):
+        content = []
+        for doc in self.vector_store.get():
+            content.append({
+                'type': doc.metadata.get('type', 'Unknown'),
+                'content': doc.page_content
+            })
+        return content

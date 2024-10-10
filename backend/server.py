@@ -1,7 +1,7 @@
 # backend/server.py
 from flask import Flask, request, jsonify, Blueprint
 from flask_cors import CORS
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 import os
 from dotenv import load_dotenv
 import logging
@@ -27,6 +27,12 @@ API_KEY = os.environ.get("API_KEY")  # Get API key from environment
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# JWT Configuration
+app.config['JWT_SECRET_KEY'] = JWT_SECRET_KEY
+app.config['JWT_TOKEN_LOCATION'] = ['headers']
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=1)
+jwt = JWTManager(app)
 
 # Initialize Database
 # db = db(app, None)  # Pass None for agent_manager for now
@@ -67,17 +73,10 @@ def login():
         if not email or not password:
             return jsonify({"message": "Email and password are required"}), 400
 
-        # Check if user exists and password matches
         user = db_instance.get_user_by_email(email)
         if user and user['password'] == password:
-            # Generate JWT token
-            payload = {
-                "id": user['id'],  # Include user ID in the payload
-                "email": email,
-                "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)  # Token expires in 1 hour
-            }
-            token = jwt.encode(payload, JWT_SECRET_KEY)
-            return jsonify({"token": token}), 200
+            access_token = create_access_token(identity=user['id'])
+            return jsonify(access_token=access_token), 200
         else:
             return jsonify({"message": "Invalid email or password"}), 401
 
@@ -86,6 +85,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
+@jwt_required()
 def generate_chapters():
     try:
         data = request.json
@@ -103,7 +103,11 @@ def generate_chapters():
         #logging.debug(f"Received previousChapters: {previous_chapters}")
         
         user_id = get_jwt_identity()  # Get user ID from JWT token
-        agent_manager = AgentManager(user_id, generation_model, check_model)  # Pass user ID to AgentManager
+        
+        try:
+            agent_manager = AgentManager(user_id, generation_model, check_model)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400  # Return 400 Bad Request if API key is not set
        # logging.debug("AgentManager initialized")
 
         generated_chapters = []
@@ -169,6 +173,7 @@ def generate_chapters():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters', methods=['GET'])
+@jwt_required()
 def get_chapters():
     try:
         chapters = db_instance.get_all_chapters()
@@ -222,11 +227,17 @@ def delete_validity_check(check_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters', methods=['POST'])
+@jwt_required()
 def create_chapter():
     try:
         data = request.get_json()
-        chapter_id = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
-        return jsonify({'message': 'Chapter created successfully', 'id': chapter_id}), 201
+        chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
+        
+        user_id = get_jwt_identity()
+        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        agent_manager.add_chapter_to_knowledge_base(chapter)
+        
+        return jsonify({'message': 'Chapter created successfully', 'id': chapter['id']}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -240,20 +251,39 @@ def get_characters():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/characters/<character_id>', methods=['DELETE'])
+@jwt_required()
 def delete_character(character_id):
     try:
-        if db_instance.delete_character(character_id):
+        character = db_instance.get_character_by_id(character_id)
+        if character:
+            db_instance.delete_character(character_id)
+            
+            user_id = get_jwt_identity()
+            agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+            agent_manager.remove_character_from_knowledge_base(character)
+            
             return jsonify({'message': 'Character deleted successfully'}), 200
         else:
             return jsonify({'error': 'Character not found'}), 404
     except Exception as e:
+        logging.error(f"Error deleting character: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/characters', methods=['POST'])
+@jwt_required()
 def create_character():
-    data = request.json
-    character = db_instance.create_character(data['name'], data['description'])
-    return jsonify(character.to_dict()), 201
+    try:
+        data = request.json
+        character = db_instance.create_character(data['name'], data['description'])
+        
+        user_id = get_jwt_identity()
+        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        agent_manager.add_character_to_knowledge_base(character)
+        
+        return jsonify(character), 201
+    except Exception as e:
+        logging.error(f"Error creating character: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge-base', methods=['POST'])
 def add_to_knowledge_base():
@@ -264,7 +294,7 @@ def add_to_knowledge_base():
             return jsonify({'error': 'Documents are required'}), 400
 
         user_id = get_jwt_identity()  # Get user ID from JWT token
-        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')  # Pass user ID to AgentManager
+        agent_manager = AgentManager(user_id, 'gemini-1.5-flash-002', 'gemini-1.5-flash-002')  # Pass user ID to AgentManager
         agent_manager.add_to_knowledge_base(documents)
 
         return jsonify({'message': 'Documents added to the knowledge base successfully'}), 200
@@ -338,6 +368,62 @@ def extract_text_from_document(file_path):
         return docx2txt.process(file_path)
     else:
         return "Unsupported file type"
+
+@app.route('/api/check-api-key', methods=['GET'])
+@jwt_required()
+def check_api_key():
+    try:
+        user_id = get_jwt_identity()
+        api_key = db_instance.get_api_key(user_id)
+        is_set = bool(api_key)
+        masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
+        return jsonify({'isSet': is_set, 'apiKey': masked_key}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in check_api_key: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/remove-api-key', methods=['DELETE'])
+@jwt_required()
+def remove_api_key():
+    try:
+        user_id = get_jwt_identity()
+        db_instance.remove_api_key(user_id)
+        return jsonify({'message': 'API key removed successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in remove_api_key: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/query-knowledge-base', methods=['POST'])
+@jwt_required()
+def query_knowledge_base():
+    try:
+        data = request.json
+        query = data.get('query')
+        model = data.get('model', 'gemini-1.5-pro-002')
+        
+        if not query:
+            return jsonify({'error': 'Query is required'}), 400
+
+        user_id = get_jwt_identity()
+        agent_manager = AgentManager(user_id, model, model)
+        result = agent_manager.generate_with_retrieval(query)
+
+        return jsonify({'result': result}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in query_knowledge_base: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/knowledge-base', methods=['GET'])
+@jwt_required()
+def get_knowledge_base_content():
+    try:
+        user_id = get_jwt_identity()
+        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        content = agent_manager.get_knowledge_base_content()
+        return jsonify({'content': content}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
