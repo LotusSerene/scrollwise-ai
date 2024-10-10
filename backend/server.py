@@ -8,8 +8,12 @@ import logging
 import jwt
 import datetime
 import uuid
-from database import db, get_chapter_count, Character, Database
+from database import db_instance, get_chapter_count, Character
 from agent_manager import AgentManager
+from werkzeug.utils import secure_filename
+import tempfile
+import pypdf
+import docx2txt
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -24,21 +28,12 @@ API_KEY = os.environ.get("API_KEY")  # Get API key from environment
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Configure the SQLAlchemy extension
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///novel_generator.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
-
-# Create the database tables
-with app.app_context():
-    db.create_all()
+# Initialize Database
+# db = db(app, None)  # Pass None for agent_manager for now
 
 # Create a test user if they don't already exist
-db_instance = Database('novel_generator.db')  # Create an instance of the Database class
-
-with app.app_context():
-    if not db_instance.get_user_by_email("test@example.com"):
-        db_instance.create_user("test@example.com", "password")
+if not db_instance.get_user_by_email("test@example.com"):
+    db_instance.create_user("test@example.com", "password")
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -91,7 +86,6 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
-@jwt_required()
 def generate_chapters():
     try:
         data = request.json
@@ -105,7 +99,7 @@ def generate_chapters():
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        previous_chapters = db_instance.get_all_chapters()
+        previous_chapters = chapters = db_instance.get_all_chapters()
         #logging.debug(f"Received previousChapters: {previous_chapters}")
         
         user_id = get_jwt_identity()  # Get user ID from JWT token
@@ -122,7 +116,7 @@ def generate_chapters():
             chapter_number = current_chapter_count + i + 1
             #logging.debug(f"Generating chapter {chapter_number}")
             # Log the characters being sent to the agent
-            #logging.debug(f"Sending characters to agent: {db_instance.get_all_characters()}")
+            #logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
 
             characters = db_instance.get_all_characters()
            # logging.debug(f"Retrieved {len(characters)} characters")
@@ -262,7 +256,6 @@ def create_character():
     return jsonify(character.to_dict()), 201
 
 @app.route('/api/knowledge-base', methods=['POST'])
-@jwt_required()
 def add_to_knowledge_base():
     try:
         data = request.json
@@ -295,6 +288,56 @@ def save_api_key():
     except Exception as e:
         logging.error(f"An error occurred in save_api_key: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/upload-document', methods=['POST'])
+def upload_document():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
+
+        if file:
+            filename = secure_filename(file.filename)
+            # Save the file temporarily
+            temp_dir = tempfile.mkdtemp()
+            file_path = os.path.join(temp_dir, filename)
+            file.save(file_path)
+
+            # Process the document (extract text, etc.)
+            extracted_text = extract_text_from_document(file_path)
+
+            # Add the processed document to the knowledge base
+            user_id = get_jwt_identity()
+            agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+            agent_manager.add_to_knowledge_base([extracted_text])
+
+            # Remove the temporary file
+            os.remove(file_path)
+            os.rmdir(temp_dir)
+
+            return jsonify({'message': 'Document uploaded and added to knowledge base successfully'}), 200
+
+    except Exception as e:
+        logging.error(f"An error occurred in upload_document: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+def extract_text_from_document(file_path):
+    if file_path.endswith('.pdf'):
+        with open(file_path, 'rb') as f:
+            reader = pypdf.PdfReader(f)
+            num_pages = len(reader.pages)
+            text = ""
+            for i in range(num_pages):
+                page = reader.pages[i]
+                text += page.extract_text()
+            return text
+    elif file_path.endswith('.docx'):
+        return docx2txt.process(file_path)
+    else:
+        return "Unsupported file type"
 
 if __name__ == '__main__':
     app.run(debug=True)
