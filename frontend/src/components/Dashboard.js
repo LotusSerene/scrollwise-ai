@@ -1,4 +1,3 @@
-// Dashboard.js
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
@@ -7,6 +6,8 @@ import { getAuthToken } from '../utils/auth';
 const Dashboard = () => {
   const [characters, setCharacters] = useState([]);
   const [chapters, setChapters] = useState([]);
+  const [knowledgeBaseData, setKnowledgeBaseData] = useState('');
+  const [knowledgeBaseQuery, setKnowledgeBaseQuery] = useState('');
   const [error, setError] = useState(null);
 
   const fetchCharacters = async () => {
@@ -39,6 +40,21 @@ const Dashboard = () => {
     }
   };
 
+  const fetchKnowledgeBaseData = async () => {
+    try {
+      const token = getAuthToken();
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, { query: knowledgeBaseQuery }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      setKnowledgeBaseData(response.data.result);
+    } catch (error) {
+      console.error('Error fetching knowledge base data:', error);
+      setError('Error fetching knowledge base data. Please try again later.');
+    }
+  };
+
   const handleDeleteCharacter = async (characterId) => {
     try {
       const token = getAuthToken();
@@ -62,7 +78,15 @@ const Dashboard = () => {
   return (
     <div className="dashboard-container">
       <h2>Dashboard</h2>
-      {error && <p className="error">{error}</p>}
+      {error &amp;&amp; (
+        <p className="error">{error}</p>
+      )}
+      <div className="knowledge-base-section">
+        <h3>Knowledge Base</h3>
+        <input type="text" value={knowledgeBaseQuery} onChange={e => setKnowledgeBaseQuery(e.target.value)} placeholder="Enter your query" />
+        <button onClick={fetchKnowledgeBaseData}>Search</button>
+        <p>{knowledgeBaseData}</p>
+      </div>
       <div className="characters-section">
         <h3>Characters</h3>
         <ul>
@@ -89,4 +113,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-
