@@ -469,6 +469,9 @@ class AgentManager:
     def get_knowledge_base_content(self):
         content = []
         for doc in self.vector_store.get():
+            if isinstance(doc, str):
+                # Convert string to a document object with default metadata
+                doc = Document(page_content=doc, metadata={'type': 'Unknown'})
             content.append({
                 'type': doc.metadata.get('type', 'Unknown'),
                 'content': doc.page_content
