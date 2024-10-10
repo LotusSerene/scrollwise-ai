@@ -2,15 +2,16 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Validity.css';
-import { getAuthToken } from '../utils/auth';
+import { getAuthToken, getUserId } from '../utils/auth';
 
 function Validity() {
   const [validityChecks, setValidityChecks] = useState([]);
   const [selectedCheck, setSelectedCheck] = useState(null);
+  const userId = getUserId();
 
   useEffect(() => {
     fetchValidityChecks();
-  }, []);
+  }, [userId]);
 
   const fetchValidityChecks = async () => {
     try {
@@ -18,6 +19,9 @@ function Validity() {
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/validity-checks`, {
         headers: {
           'Authorization': `Bearer ${token}`
+        },
+        params: {
+          user_id: userId
         }
       });
       setValidityChecks(response.data.validityChecks);
@@ -41,6 +45,9 @@ function Validity() {
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/validity-checks/${checkId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
+        },
+        params: {
+          user_id: userId
         }
       });
       fetchValidityChecks(); // Refresh the list after deletion
