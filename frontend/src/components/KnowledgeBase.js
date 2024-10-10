@@ -1,7 +1,8 @@
+// frontend/src/components/KnowledgeBase.js
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './KnowledgeBase.css';
-import { getAuthToken } from '../utils/auth';
+import { getAuthToken, getUserId } from '../utils/auth';
 
 function KnowledgeBase() {
   const [documents, setDocuments] = useState('');
@@ -9,6 +10,7 @@ function KnowledgeBase() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
+  const userId = getUserId();
 
   useEffect(() => {
     fetchKnowledgeBaseContent();
@@ -38,6 +40,7 @@ function KnowledgeBase() {
       const token = getAuthToken();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
         documents: documents.split('\n'),
+        user_id: userId
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -72,6 +75,7 @@ function KnowledgeBase() {
 
     const formData = new FormData();
     formData.append('file', selectedFile);
+    formData.append('user_id', userId);
 
     try {
       const token = getAuthToken();

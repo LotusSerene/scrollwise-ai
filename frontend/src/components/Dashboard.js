@@ -1,7 +1,8 @@
+// frontend/src/components/Dashboard.js
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
-import { getAuthToken } from '../utils/auth';
+import { getAuthToken, getUserId } from '../utils/auth';
 
 const Dashboard = () => {
   const [characters, setCharacters] = useState([]);
@@ -10,6 +11,7 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const chatContainerRef = useRef(null);
+  const userId = getUserId();
 
   const fetchCharacters = async () => {
     try {
@@ -67,7 +69,8 @@ const Dashboard = () => {
       setKnowledgeBaseQuery('');
 
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/query-knowledge-base`, {
-        query: knowledgeBaseQuery
+        query: knowledgeBaseQuery,
+        user_id: userId
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -85,7 +88,9 @@ const Dashboard = () => {
   const resetChatHistory = async () => {
     try {
       const token = getAuthToken();
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-chat-history`, {}, {
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-chat-history`, {
+        user_id: userId
+      }, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

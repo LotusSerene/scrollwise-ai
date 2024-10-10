@@ -1,7 +1,8 @@
+// frontend/src/components/Editor.js
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './Editor.css';
-import { getAuthToken } from '../utils/auth';
+import { getAuthToken, getUserId } from '../utils/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
@@ -12,7 +13,7 @@ function Editor({ chapters, setChapters }) {
   const logging = {
     debug: (message) => console.debug(message),
   };
-  
+  const userId = getUserId();
 
   const fetchChapters = useCallback(async () => {
     try {
@@ -75,7 +76,8 @@ function Editor({ chapters, setChapters }) {
         // Update existing chapter
         await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
           title: chapterTitle,  
-          content: chapterContent   
+          content: chapterContent,
+          user_id: userId
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -85,7 +87,8 @@ function Editor({ chapters, setChapters }) {
         // Create new chapter
         const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
           title: chapterTitle,
-          content: chapterContent  
+          content: chapterContent,
+          user_id: userId
         }, {
           headers: {
             'Authorization': `Bearer ${token}`

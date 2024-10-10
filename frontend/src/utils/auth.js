@@ -1,10 +1,17 @@
+// frontend/src/utils/auth.js
+import jwtDecode from 'jwt-decode';
+
 export const getAuthToken = () => {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    console.error('No auth token found in localStorage');
-    return null;
+  return localStorage.getItem('token');
+};
+
+export const getUserId = () => {
+  const token = getAuthToken();
+  if (token) {
+    const decodedToken = jwtDecode(token);
+    return decodedToken.user_id || null;
   }
-  return token;
+  return null;
 };
 
 export const setAuthToken = (token) => {
@@ -13,8 +20,4 @@ export const setAuthToken = (token) => {
 
 export const removeAuthToken = () => {
   localStorage.removeItem('token');
-};
-
-export const isAuthenticated = () => {
-  return !!getAuthToken();
 };
