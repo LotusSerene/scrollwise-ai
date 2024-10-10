@@ -1,3 +1,4 @@
+# backend/database.py
 from flask_sqlalchemy import SQLAlchemy
 import sqlite3
 import uuid
@@ -97,6 +98,13 @@ class Database:
                 cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
                 self.conn.commit()
         
+        # Ensure the api_key column exists in the users table
+        cursor.execute('PRAGMA table_info(users)')
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'api_key' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN api_key TEXT')
+            self.conn.commit()
+        
         cursor.close()
 
     def create_user(self, email, password):
@@ -112,7 +120,14 @@ class Database:
         cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
         row = cursor.fetchone()
         cursor.close()
-        return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': row[3]} if row else None
+        if row:
+            # Ensure the row has the expected number of columns
+            if len(row) == 4:
+                return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': row[3]}
+            else:
+                # If the row has fewer columns, handle it gracefully
+                return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': None}
+        return None
 
     def get_all_chapters(self):
         cursor = self.conn.cursor()
