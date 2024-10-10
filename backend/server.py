@@ -19,9 +19,13 @@ load_dotenv()
 
 # Secret key for JWT (replace with a strong secret in production)
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "your-secret-key")
+API_KEY = os.environ.get("API_KEY")  # Get API key from environment
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Initialize Database
+db = db(app, None)  # Pass None for agent_manager for now
 
 # Create a test user if they don't already exist
 if not db.get_user_by_email("test@example.com"):
@@ -64,6 +68,7 @@ def login():
         if user and user['password'] == password:
             # Generate JWT token
             payload = {
+                "id": user['id'],  # Include user ID in the payload
                 "email": email,
                 "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)  # Token expires in 1 hour
             }
@@ -77,6 +82,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/generate', methods=['POST'])
+@jwt_required()
 def generate_chapters():
     try:
         data = request.json
@@ -87,17 +93,14 @@ def generate_chapters():
         writing_style = data.get('writingStyle', '')
         instructions = data.get('instructions', {})
         style_guide = instructions.get('styleGuide', '')
-        api_key = data.get('apiKey', '')
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
         previous_chapters = chapters = db.get_all_chapters()
         #logging.debug(f"Received previousChapters: {previous_chapters}")
         
-        if not api_key:
-            return jsonify({'error': 'API Key is required'}), 400
-
-        agent = AgentManager(api_key, generation_model, check_model)
+        user_id = get_jwt_identity()  # Get user ID from JWT token
+        agent_manager = AgentManager(user_id, generation_model, check_model)  # Pass user ID to AgentManager
        # logging.debug("AgentManager initialized")
 
         generated_chapters = []
@@ -116,7 +119,7 @@ def generate_chapters():
            # logging.debug(f"Retrieved {len(characters)} characters")
 
             try:
-                chapter_content, chapter_title, new_characters = agent.generate_chapter(
+                chapter_content, chapter_title, new_characters = agent_manager.generate_chapter(
                     chapter_number=chapter_number,
                     plot=plot,
                     writing_style=writing_style,
@@ -143,7 +146,7 @@ def generate_chapters():
             chapter_id = db.create_chapter(chapter_title, chapter_content)
                 
             # Get validity from the agent's check_chapter method
-            validity = agent.check_chapter(chapter_content, instructions, previous_chapters)
+            validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
                 
             # Save validity to the database
             db.save_validity_check(chapter_id, chapter_title, validity)
@@ -258,16 +261,30 @@ def add_to_knowledge_base():
         if not documents:
             return jsonify({'error': 'Documents are required'}), 400
 
-        api_key = data.get('apiKey', '')
-        if not api_key:
-            return jsonify({'error': 'API Key is required'}), 400
-
-        agent = AgentManager(api_key, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
-        agent.add_to_knowledge_base(documents)
+        user_id = get_jwt_identity()  # Get user ID from JWT token
+        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')  # Pass user ID to AgentManager
+        agent_manager.add_to_knowledge_base(documents)
 
         return jsonify({'message': 'Documents added to the knowledge base successfully'}), 200
     except Exception as e:
         logging.error(f"An error occurred in add_to_knowledge_base: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/save-api-key', methods=['POST'])
+@jwt_required()
+def save_api_key():
+    try:
+        data = request.get_json()
+        api_key = data.get('apiKey')
+        if not api_key:
+            return jsonify({'error': 'API key is required'}), 400
+
+        user_id = get_jwt_identity()
+        db.save_api_key(user_id, api_key)
+
+        return jsonify({'message': 'API key saved successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in save_api_key: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 import json
 import logging
+from agent_manager import AgentManager  # Import AgentManager
 
 db = SQLAlchemy()
 
@@ -36,10 +37,11 @@ class Chapter(db.Model):
         }
 
 class Database:
-    def __init__(self, db_path):
+    def __init__(self, db_path, agent_manager: AgentManager):  # Add agent_manager parameter
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.create_tables()
+        self.agent_manager = agent_manager  # Store agent_manager instance
 
     def create_tables(self):
         cursor = self.conn.cursor()
@@ -47,7 +49,8 @@ class Database:
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 email TEXT UNIQUE,
-                password TEXT
+                password TEXT,
+                api_key TEXT
             )
         ''')
         cursor.execute('''
@@ -111,7 +114,7 @@ class Database:
         cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
         row = cursor.fetchone()
         cursor.close()
-        return {'id': row[0], 'email': row[1], 'password': row[2]} if row else None
+        return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': row[3]} if row else None
 
     def get_all_chapters(self):
         cursor = self.conn.cursor()
@@ -143,10 +146,16 @@ class Database:
         return self.get_chapter(chapter_id)
 
     def delete_chapter(self, chapter_id):
+        chapter = self.get_chapter(chapter_id)  # Get chapter data before deleting
         cursor = self.conn.cursor()
         cursor.execute('DELETE FROM chapters WHERE id = ?', (chapter_id,))
         self.conn.commit()
         cursor.close()
+
+        # Delete chapter from knowledge base
+        if chapter:
+            self.agent_manager.delete_from_knowledge_base(f"{chapter['title']}: {chapter['content']}")
+
         return cursor.rowcount > 0
 
     def get_chapter(self, chapter_id):
@@ -232,10 +241,16 @@ class Database:
         cursor.close()
 
     def delete_character(self, character_id: str):
+        character = self.get_character_by_id(character_id)  # Get character data before deleting
         cursor = self.conn.cursor()
         cursor.execute('DELETE FROM characters WHERE id = ?', (character_id,))
         self.conn.commit()
         cursor.close()
+
+        # Delete character from knowledge base
+        if character:
+            self.agent_manager.delete_from_knowledge_base(f"{character['name']}: {character['description']}")
+
         return cursor.rowcount > 0
 
     def get_chapter_count(self):
@@ -245,7 +260,27 @@ class Database:
         cursor.close()
         return count
 
-db = Database('novel_generator.db')
+    def get_character_by_id(self, character_id: str):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM characters WHERE id = ?', (character_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        return {'id': row[0], 'name': row[1], 'description': row[2]} if row else None
+
+    def save_api_key(self, user_id: str, api_key: str):
+        cursor = self.conn.cursor()
+        cursor.execute('UPDATE users SET api_key = ? WHERE id = ?', (api_key, user_id))
+        self.conn.commit()
+        cursor.close()
+
+    def get_api_key(self, user_id: str) -> str:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT api_key FROM users WHERE id = ?', (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        return row[0] if row else None
+
+db = Database('novel_generator.db', None)  # Pass None for agent_manager for now
 
 def get_chapter_count():
     return len(db.get_all_chapters())
