@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Create.css';
-import { getAuthToken, getUserId } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 
 const CreateChapter = ({ onChapterGenerated }) => {
   const [numChapters, setNumChapters] = useState(1);
@@ -20,9 +20,9 @@ const CreateChapter = ({ onChapterGenerated }) => {
   useEffect(() => {
     const fetchPreviousChapters = async () => {
       try {
-        const token = localStorage.getItem('token');
+        const headers = getAuthHeaders();
         const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: headers
         });
         setPreviousChapters(response.data.chapters);
       } catch (error) {
@@ -38,7 +38,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
     e.preventDefault();
     setIsGenerating(true);
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       setError(null);
       
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate`, {
@@ -53,7 +53,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
         previousChapters,
         user_id: userId
       }, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headers
       });
       
       if (response.data.chapters && response.data.chapters.length > 0) {

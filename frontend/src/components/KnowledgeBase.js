@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './KnowledgeBase.css';
-import { getAuthToken, getUserId } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 
 function KnowledgeBase() {
   const [documents, setDocuments] = useState('');
@@ -18,11 +18,9 @@ function KnowledgeBase() {
 
   const fetchKnowledgeBaseContent = async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setKnowledgeBaseContent(response.data.content);
     } catch (error) {
@@ -37,14 +35,12 @@ function KnowledgeBase() {
     setSuccess(null);
 
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
         documents: documents.split('\n'),
         user_id: userId
       }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
 
       if (response.data.message) {
@@ -78,10 +74,10 @@ function KnowledgeBase() {
     formData.append('user_id', userId);
 
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/upload-document`, formData, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          ...headers,
           'Content-Type': 'multipart/form-data'
         }
       });

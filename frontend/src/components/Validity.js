@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Validity.css';
-import { getAuthToken, getUserId } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 
 function Validity() {
   const [validityChecks, setValidityChecks] = useState([]);
@@ -15,11 +15,9 @@ function Validity() {
 
   const fetchValidityChecks = async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/validity-checks`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: headers,
         params: {
           user_id: userId
         }
@@ -41,11 +39,9 @@ function Validity() {
 
   const handleDeleteCheck = async (checkId) => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/validity-checks/${checkId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: headers,
         params: {
           user_id: userId
         }

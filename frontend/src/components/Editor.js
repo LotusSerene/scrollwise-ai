@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './Editor.css';
-import { getAuthToken, getUserId } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
@@ -17,11 +17,9 @@ function Editor({ chapters, setChapters }) {
 
   const fetchChapters = useCallback(async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setChapters(response.data.chapters);
       logging.debug(`Fetched ${response.data.chapters.length} chapters`);
@@ -49,11 +47,9 @@ function Editor({ chapters, setChapters }) {
 
   const handleDeleteChapter = async (chapterId) => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       fetchChapters();
     } catch (error) {
@@ -68,7 +64,7 @@ function Editor({ chapters, setChapters }) {
       return;
     }
 
-    const token = getAuthToken();
+    const headers = getAuthHeaders();
     const chapterId = selectedChapter ? selectedChapter.id : uuidv4();
 
     try {
@@ -79,9 +75,7 @@ function Editor({ chapters, setChapters }) {
           content: chapterContent,
           user_id: userId
         }, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: headers
         });
       } else {
         // Create new chapter
@@ -90,9 +84,7 @@ function Editor({ chapters, setChapters }) {
           content: chapterContent,
           user_id: userId
         }, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: headers
         });
         
         // Set the newly created chapter as the selected chapter to prevent duplicate creation

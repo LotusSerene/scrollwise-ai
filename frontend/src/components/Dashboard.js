@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
-import { getAuthToken, getUserId } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 
 const Dashboard = () => {
   const [characters, setCharacters] = useState([]);
@@ -15,11 +15,9 @@ const Dashboard = () => {
 
   const fetchCharacters = async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/characters`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setCharacters(response.data.characters);
     } catch (error) {
@@ -30,11 +28,9 @@ const Dashboard = () => {
 
   const fetchChapters = async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setChapters(response.data.chapters);
     } catch (error) {
@@ -45,11 +41,9 @@ const Dashboard = () => {
 
   const handleDeleteCharacter = async (characterId) => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/characters/${characterId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       fetchCharacters();
     } catch (error) {
@@ -63,7 +57,7 @@ const Dashboard = () => {
     if (!knowledgeBaseQuery.trim()) return;
 
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       const newUserMessage = { role: 'user', content: knowledgeBaseQuery };
       setChatHistory([...chatHistory, newUserMessage]);
       setKnowledgeBaseQuery('');
@@ -72,9 +66,7 @@ const Dashboard = () => {
         query: knowledgeBaseQuery,
         user_id: userId
       }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
 
       const aiResponse = { role: 'ai', content: response.data.result };
@@ -87,13 +79,11 @@ const Dashboard = () => {
 
   const resetChatHistory = async () => {
     try {
-      const token = getAuthToken();
+      const headers = getAuthHeaders();
       await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-chat-history`, {
         user_id: userId
       }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setChatHistory([]);
     } catch (error) {

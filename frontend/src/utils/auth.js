@@ -21,3 +21,15 @@ export const setAuthToken = (token) => {
 export const removeAuthToken = () => {
   localStorage.removeItem('token');
 };
+
+export const getAuthHeaders = () => {
+  const token = getAuthToken();
+  const userId = getUserId();
+  if (token && userId) {
+    return {
+      'Authorization': `Bearer ${token}`,
+      'user_id': userId
+    };
+  }
+  return {};
+};

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Settings.css';
-import { getAuthToken } from '../utils/auth';
+import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
 
 function Settings() {
   const [apiKey, setApiKey] = useState('');
@@ -29,15 +29,9 @@ function Settings() {
 
   const checkApiKeyStatus = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage('Authentication token is missing. Please log in again.');
-        return;
-      }
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-api-key`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setIsKeySet(response.data.isSet);
       if (response.data.isSet) {
@@ -56,15 +50,9 @@ function Settings() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage('Authentication token is missing. Please log in again.');
-        return;
-      }
+      const headers = getAuthHeaders();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/save-api-key`, { apiKey }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setMessage(response.data.message);
       setIsKeySet(true);
@@ -82,15 +70,9 @@ function Settings() {
 
   const handleRemove = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage('Authentication token is missing. Please log in again.');
-        return;
-      }
+      const headers = getAuthHeaders();
       const response = await axios.delete(`${process.env.REACT_APP_API_URL}/api/remove-api-key`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setMessage(response.data.message);
       setIsKeySet(false);
@@ -107,15 +89,9 @@ function Settings() {
 
   const fetchModelSettings = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage('Authentication token is missing. Please log in again.');
-        return;
-      }
+      const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setModelSettings(response.data);
     } catch (error) {
@@ -134,15 +110,9 @@ function Settings() {
 
   const saveModelSettings = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage('Authentication token is missing. Please log in again.');
-        return;
-      }
+      const headers = getAuthHeaders();
       await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: headers
       });
       setMessage('Model settings saved successfully');
     } catch (error) {
