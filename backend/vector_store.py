@@ -6,30 +6,31 @@ import os
 import logging
 
 class VectorStore:
-    def __init__(self, api_key, embeddings_model):
+    def __init__(self, user_id, api_key, embeddings_model):
+        self.user_id = user_id
         self.api_key = api_key
         self.embeddings = GoogleGenerativeAIEmbeddings(model=embeddings_model, google_api_key=self.api_key)
-        self.vector_store = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
+        self.vector_store = Chroma(persist_directory=f"./chroma_db/{user_id}", embedding_function=self.embeddings)
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        self.logger.info(f"VectorStore initialized with embeddings model: {embeddings_model}")
+        self.logger.info(f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}")
 
     def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
         if metadata is None:
             metadata = {}
-        self.logger.debug(f"Adding to knowledge base: {text[:100]}...")
+        self.logger.debug(f"Adding to knowledge base for user {self.user_id}: {text[:100]}...")
         self.vector_store.add_texts([text], metadatas=[metadata])
         self.vector_store.persist()  # Ensure data is persisted
-        self.logger.info(f"Added text to knowledge base. Metadata: {metadata}")
+        self.logger.info(f"Added text to knowledge base for user {self.user_id}. Metadata: {metadata}")
 
     def delete_from_knowledge_base(self, text: str):
-        self.logger.debug(f"Attempting to delete from knowledge base: {text[:100]}...")
+        self.logger.debug(f"Attempting to delete from knowledge base for user {self.user_id}: {text[:100]}...")
         documents = self.vector_store.similarity_search(text, k=1)
         if documents:
             self.delete([documents[0].metadata.get('id')])
-            self.logger.info(f"Deleted document from knowledge base. ID: {documents[0].metadata.get('id')}")
+            self.logger.info(f"Deleted document from knowledge base for user {self.user_id}. ID: {documents[0].metadata.get('id')}")
         else:
-            self.logger.warning(f"No matching document found for deletion: {text[:100]}...")
+            self.logger.warning(f"No matching document found for deletion for user {self.user_id}: {text[:100]}...")
 
     def delete(self, ids: List[str]):
         for id in ids:
@@ -37,15 +38,15 @@ class VectorStore:
                 self.vector_store.delete(id)
 
     def similarity_search(self, query: str, k: int = 5) -> List[Document]:
-        self.logger.debug(f"Performing similarity search for query: {query}")
+        self.logger.debug(f"Performing similarity search for user {self.user_id} and query: {query}")
         results = self.vector_store.similarity_search(query, k=k)
-        self.logger.info(f"Similarity search returned {len(results)} results")
+        self.logger.info(f"Similarity search returned {len(results)} results for user {self.user_id}")
         return results
 
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
-        self.logger.debug("Retrieving all knowledge base content")
+        self.logger.debug(f"Retrieving all knowledge base content for user {self.user_id}")
         docs = self.vector_store.get()
-        self.logger.info(f"Retrieved {len(docs)} documents from knowledge base")
+        self.logger.info(f"Retrieved {len(docs)} documents from knowledge base for user {self.user_id}")
         return [
             {
                 "type": self._get_type(doc),
@@ -90,7 +91,7 @@ class VectorStore:
 
     def clear(self):
         self.vector_store.delete_collection()
-        self.vector_store = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
+        self.vector_store = Chroma(persist_directory=f"./chroma_db/{self.user_id}", embedding_function=self.embeddings)
 
     def get_document_by_id(self, doc_id: str) -> Document:
         return self.vector_store.get([doc_id])[0]

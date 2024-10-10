@@ -35,7 +35,7 @@ class AgentManager:
         self.model_settings = self._get_model_settings()
         self.llm = self._initialize_llm(self.model_settings['mainLLM'])
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
-        self.vector_store = VectorStore(self.api_key, self.model_settings['embeddingsModel'])
+        self.vector_store = VectorStore(self.user_id, self.api_key, self.model_settings['embeddingsModel'])
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
@@ -245,19 +245,19 @@ class AgentManager:
         return chapter
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = db.create_chapter(chapter_title, chapter)
+        chapter_id = db.create_chapter(chapter_title, chapter, self.user_id)
         self.logger.info(f"Chapter {chapter_number} saved to the database with ID: {chapter_id}")
         return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_title = f'Chapter {chapter_number}'
-        db.save_validity_check(chapter_id, chapter_title, result)
+        db.save_validity_check(chapter_id, chapter_title, result, self.user_id)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, documents: List[str]):
         for doc in documents:
             self.vector_store.add_to_knowledge_base(doc)
-        self.logger.info(f"Added {len(documents)} documents to the knowledge base")
+        self.logger.info(f"Added {len(documents)} documents to the knowledge base for user {self.user_id}")
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
@@ -319,14 +319,14 @@ class AgentManager:
         context = "\n".join([doc.page_content for doc in relevant_docs])
         
         # Add characters information
-        characters = db_instance.get_all_characters()
+        characters = db_instance.get_all_characters(self.user_id)
         if characters:
             context += "\n\nCharacters:\n"
             for character in characters:
                 context += f"{character['name']}: {character['description']}\n"
         
         # Add chapters information (you might want to limit this to avoid token limits)
-        chapters = db_instance.get_all_chapters()
+        chapters = db_instance.get_all_chapters(self.user_id)
         if chapters:
             context += "\n\nChapters:\n"
             for chapter in chapters:
@@ -484,12 +484,12 @@ class AgentManager:
 
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.logger.debug(f"Adding chapter to knowledge base: {text[:100]}...")  # Log first 100 characters
+        self.logger.debug(f"Adding chapter to knowledge base for user {self.user_id}: {text[:100]}...")  # Log first 100 characters
         self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
-        self.logger.info(f"Added chapter {chapter['id']} to knowledge base")
+        self.logger.info(f"Added chapter {chapter['id']} to knowledge base for user {self.user_id}")
         # Verify the addition
-        content = self.get_knowledge_base_content()
-        self.logger.info(f"Current knowledge base content after adding chapter: {content}")
+        content = self.vector_store.get_knowledge_base_content()
+        self.logger.info(f"Current knowledge base content after adding chapter for user {self.user_id}: {content}")
 
     def remove_from_knowledge_base(self, text: str):
         self.vector_store.delete_from_knowledge_base(text)
