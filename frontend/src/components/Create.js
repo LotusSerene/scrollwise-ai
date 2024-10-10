@@ -8,14 +8,11 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [writingStyle, setWritingStyle] = useState('');
   const [instructions, setInstructions] = useState('');
   const [styleGuide, setStyleGuide] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [generationModel, setGenerationModel] = useState('gemini-1.5-pro-002');
-  const [checkModel, setCheckModel] = useState('gemini-1.5-pro-002');
   const [minWordCount, setMinWordCount] = useState(1000);
   const [chapterContent, setChapterContent] = useState('');
   const [error, setError] = useState(null);
   const [previousChapters, setPreviousChapters] = useState([]);
-  const [isGenerating, setIsGenerating] = useState(false); // New state to track generation process
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     const fetchPreviousChapters = async () => {
@@ -36,10 +33,10 @@ const CreateChapter = ({ onChapterGenerated }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsGenerating(true); // Disable the button
+    setIsGenerating(true);
     try {
       const token = localStorage.getItem('token');
-      setError(null); // Clear any previous errors
+      setError(null);
       
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate`, {
         numChapters,
@@ -51,9 +48,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
           additionalInstructions: instructions
         },
         previousChapters,
-        apiKey,
-        generationModel,
-        checkModel,
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -76,7 +70,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
       console.error('Error generating chapters:', error);
       setError(error.response?.data?.message || 'Error generating chapters. Please try again later.');
     } finally {
-      setIsGenerating(false); // Re-enable the button
+      setIsGenerating(false);
     }
   };
 
@@ -138,30 +132,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
             onChange={(e) => setMinWordCount(e.target.value)}
             min={0}
           />
-        </label>
-        <label>
-          API Key:
-          <input
-            type="text"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </label>
-        <label>
-          Generation Model:
-          <select value={generationModel} onChange={(e) => setGenerationModel(e.target.value)}>
-            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
-            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
-            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
-          </select>
-        </label>
-        <label>
-          Check Model:
-          <select value={checkModel} onChange={(e) => setCheckModel(e.target.value)}>
-            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
-            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
-            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
-          </select>
         </label>
         <button onClick={handleSubmit} disabled={isGenerating}>
           {isGenerating ? 'Generating...' : 'Generate Chapter'}

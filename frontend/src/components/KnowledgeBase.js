@@ -6,9 +6,28 @@ import { getAuthToken } from '../utils/auth';
 function KnowledgeBase() {
   const [documents, setDocuments] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
-  const [apiKey, setApiKey] = useState('');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
+
+  useEffect(() => {
+    fetchKnowledgeBaseContent();
+  }, []);
+
+  const fetchKnowledgeBaseContent = async () => {
+    try {
+      const token = getAuthToken();
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      setKnowledgeBaseContent(response.data.content);
+    } catch (error) {
+      console.error('Error fetching knowledge base content:', error);
+      setError('Error fetching knowledge base content. Please try again later.');
+    }
+  };
 
   const handleAddDocuments = async (e) => {
     e.preventDefault();
@@ -19,7 +38,6 @@ function KnowledgeBase() {
       const token = getAuthToken();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
         documents: documents.split('\n'),
-        apiKey: apiKey
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -28,6 +46,7 @@ function KnowledgeBase() {
 
       if (response.data.message) {
         setSuccess(response.data.message);
+        fetchKnowledgeBaseContent(); // Refresh the content after adding
       } else {
         setError('An unexpected error occurred');
       }
@@ -66,6 +85,7 @@ function KnowledgeBase() {
       if (response.data.message) {
         setSuccess(response.data.message);
         setSelectedFile(null); // Clear the selected file
+        fetchKnowledgeBaseContent(); // Refresh the content after uploading
       } else {
         setError('An unexpected error occurred.');
       }
@@ -77,9 +97,27 @@ function KnowledgeBase() {
 
   return (
     <div className="knowledge-base-container">
-      <h2>Add to Knowledge Base</h2>
+      <h2>Knowledge Base</h2>
       {error && <p className="error">{error}</p>}
       {success && <p className="success">{success}</p>}
+      
+      <h3>Current Knowledge Base Content</h3>
+      <div className="knowledge-base-content">
+        {knowledgeBaseContent.map((item, index) => (
+          <div key={index} className="knowledge-base-item">
+            <h4>{item.type}</h4>
+            <p>{item.content}</p>
+            {item.metadata && (
+              <details>
+                <summary>Metadata</summary>
+                <pre>{JSON.stringify(item.metadata, null, 2)}</pre>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <h3>Add to Knowledge Base</h3>
       <form onSubmit={handleAddDocuments}>
         <label>
           Documents (one per line):
@@ -88,14 +126,6 @@ function KnowledgeBase() {
             onChange={(e) => setDocuments(e.target.value)}
             rows={10}
             cols={80}
-          />
-        </label>
-        <label>
-          API Key:
-          <input
-            type="text"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
           />
         </label>
         <button type="submit">Add to Knowledge Base</button>
