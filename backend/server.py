@@ -25,7 +25,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Initialize Database
-db = db(app, None)  # Pass None for agent_manager for now
+db = db('novel_generator.db')
 
 # Create a test user if they don't already exist
 if not db.get_user_by_email("test@example.com"):

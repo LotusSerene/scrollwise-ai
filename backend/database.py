@@ -3,7 +3,6 @@ import sqlite3
 import uuid
 import json
 import logging
-from agent_manager import AgentManager  # Import AgentManager
 
 db = SQLAlchemy()
 
@@ -37,11 +36,10 @@ class Chapter(db.Model):
         }
 
 class Database:
-    def __init__(self, db_path, agent_manager: AgentManager):  # Add agent_manager parameter
+    def __init__(self, db_path):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.create_tables()
-        self.agent_manager = agent_manager  # Store agent_manager instance
 
     def create_tables(self):
         cursor = self.conn.cursor()
@@ -154,7 +152,7 @@ class Database:
 
         # Delete chapter from knowledge base
         if chapter:
-            self.agent_manager.delete_from_knowledge_base(f"{chapter['title']}: {chapter['content']}")
+            self.delete_from_knowledge_base(f"{chapter['title']}: {chapter['content']}")
 
         return cursor.rowcount > 0
 
@@ -249,7 +247,7 @@ class Database:
 
         # Delete character from knowledge base
         if character:
-            self.agent_manager.delete_from_knowledge_base(f"{character['name']}: {character['description']}")
+            self.delete_from_knowledge_base(f"{character['name']}: {character['description']}")
 
         return cursor.rowcount > 0
 
@@ -280,7 +278,11 @@ class Database:
         cursor.close()
         return row[0] if row else None
 
-db = Database('novel_generator.db', None)  # Pass None for agent_manager for now
+    def delete_from_knowledge_base(self, text: str):
+        # Placeholder for the actual implementation
+        pass
+
+db = Database('novel_generator.db')
 
 def get_chapter_count():
     return len(db.get_all_chapters())
