@@ -155,10 +155,14 @@ function Settings() {
     }
   };
 
-  const modelOptions = [
+  const llmOptions = [
     { value: 'gemini-1.5-pro-002', label: 'Gemini 1.5 Pro' },
     { value: 'gemini-1.5-flash-002', label: 'Gemini 1.5 Flash' },
     { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash 8B' }
+  ];
+
+  const embeddingOptions = [
+    { value: 'models/embedding-004', label: 'Embedding 004' }
   ];
 
   return (
@@ -195,7 +199,7 @@ function Settings() {
             value={value}
             onChange={(e) => handleModelSettingChange(key, e.target.value)}
           >
-            {modelOptions.map(option => (
+            {key === 'embeddingsModel' ? embeddingOptions : llmOptions}.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
