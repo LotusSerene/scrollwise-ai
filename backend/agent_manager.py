@@ -26,21 +26,23 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
+from vector_store import VectorStore
 
 class AgentManager:
-    def __init__(self, user_id: str, generation_model: str, check_model: str):
+    def __init__(self, user_id: str):
         self.user_id = user_id
-        self.generation_model = generation_model
-        self.check_model = check_model
         self.api_key = self._get_api_key()
-        self.llm = self._initialize_llm()
-        self.check_llm = self._initialize_llm(model=check_model)
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
-        self.vector_store = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
+        self.model_settings = self._get_model_settings()
+        self.llm = self._initialize_llm(self.model_settings['mainLLM'])
+        self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
+        self.vector_store = VectorStore(self.api_key, self.model_settings['embeddingsModel'])
         self.logger = logging.getLogger(__name__)
-        self.MAX_INPUT_TOKENS = 2097152 if 'pro' in generation_model else 1048576
+        self.logger.setLevel(logging.DEBUG)
+        self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+        self.chat_history = db_instance.get_chat_history(user_id)
+        self.logger.info(f"AgentManager initialized for user: {user_id}")
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -48,9 +50,12 @@ class AgentManager:
             raise ValueError("API key not set. Please set your API key in the settings.")
         return api_key
 
-    def _initialize_llm(self, model: Optional[str] = None) -> ChatGoogleGenerativeAI:
+    def _get_model_settings(self) -> dict:
+        return db_instance.get_model_settings(self.user_id)
+
+    def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
         return ChatGoogleGenerativeAI(
-            model=model or self.generation_model,
+            model=model,
             google_api_key=self.api_key,
             temperature=0.7,
             streaming=True,
@@ -250,37 +255,65 @@ class AgentManager:
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, documents: List[str]):
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        texts = text_splitter.create_documents(documents)
-        
-        self.vector_store.add_documents(texts)
+        for doc in documents:
+            self.vector_store.add_to_knowledge_base(doc)
+        self.logger.info(f"Added {len(documents)} documents to the knowledge base")
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
-        if not self.vector_store:
-            raise ValueError("Knowledge base is empty. Add documents first.")
         return self.vector_store.similarity_search(query, k=k)
 
     def generate_with_retrieval(self, query: str) -> str:
+        self.logger.debug(f"Generating response for query: {query}")
+        qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
         
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=retriever,
-            memory=self.memory,
-            return_source_documents=True
+        memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+            output_key="answer"
         )
         
-        result = qa_chain({"question": query})
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=qa_llm,
+            retriever=retriever,
+            memory=memory,
+            return_source_documents=True,
+            combine_docs_chain_kwargs={"prompt": self._get_qa_prompt()},
+            chain_type="stuff",
+        )
+        
+        self.logger.debug("Invoking ConversationalRetrievalChain")
+        result = qa_chain.invoke({"question": query})
         
         answer = result['answer']
         source_documents = result['source_documents']
         
+        self.logger.info(f"Generated response. Number of source documents: {len(source_documents)}")
+        
         # Format the response with source information
-        response = f"AI: {answer}\n\nSources:\n"
+        response = f"{answer}\n\nSources:\n"
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
         
+        # Update chat history
+        self.chat_history.append({"role": "user", "content": query})
+        self.chat_history.append({"role": "assistant", "content": answer})
+        db_instance.save_chat_history(self.user_id, self.chat_history)
+        
         return response
+
+    def _get_qa_prompt(self):
+        template = """Use the following pieces of context to answer the human's question. 
+        If you don't know the answer, just say that you don't know, don't try to make up an answer.
+        
+        Context:
+        {context}
+        
+        Human: {question}
+        AI: """
+        return PromptTemplate(
+            template=template, input_variables=["context", "question"]
+        )
 
     def _construct_query_context(self, relevant_docs: List[Document]) -> str:
         context = "\n".join([doc.page_content for doc in relevant_docs])
@@ -369,6 +402,7 @@ class AgentManager:
         return new_characters
 
     def extract_new_characters(self, chapter: str, existing_characters: Dict[str, str]) -> Dict[str, str]:
+        extraction_llm = self._initialize_llm(self.model_settings['characterExtractionLLM'])
         existing_names = set(existing_characters.keys())
         
         prompt = ChatPromptTemplate.from_template("""
@@ -391,7 +425,7 @@ class AgentManager:
         New Characters:
         """)
 
-        extraction_chain = prompt | self.llm | StrOutputParser()
+        extraction_chain = prompt | extraction_llm | StrOutputParser()
         result = extraction_chain.invoke({
             "chapter": chapter,
             "existing_characters": ", ".join(existing_names)
@@ -430,6 +464,7 @@ class AgentManager:
         return truncated
 
     def _generate_title(self, chapter: str, chapter_number: int) -> str:
+        title_llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
         prompt = ChatPromptTemplate.from_template("""
         Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
         use this format Chapter {chapter_number}: <Title>, do not respond with anything else, nothing more nothing less.
@@ -440,7 +475,7 @@ class AgentManager:
         Title:
         """)
         
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | title_llm | StrOutputParser()
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
 
     def add_character_to_knowledge_base(self, character: Dict[str, Any]):
@@ -449,14 +484,15 @@ class AgentManager:
 
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.add_to_knowledge_base([text])
+        self.logger.debug(f"Adding chapter to knowledge base: {text[:100]}...")  # Log first 100 characters
+        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
+        self.logger.info(f"Added chapter {chapter['id']} to knowledge base")
+        # Verify the addition
+        content = self.get_knowledge_base_content()
+        self.logger.info(f"Current knowledge base content after adding chapter: {content}")
 
     def remove_from_knowledge_base(self, text: str):
-        # This is a simplification. In practice, you'd need to find the exact document
-        # or implement a more sophisticated removal strategy.
-        documents = self.vector_store.similarity_search(text, k=1)
-        if documents:
-            self.vector_store.delete(documents[0].metadata['id'])
+        self.vector_store.delete_from_knowledge_base(text)
 
     def remove_character_from_knowledge_base(self, character: Dict[str, Any]):
         text = f"Character: {character['name']}"
@@ -467,13 +503,8 @@ class AgentManager:
         self.remove_from_knowledge_base(text)
 
     def get_knowledge_base_content(self):
-        content = []
-        for doc in self.vector_store.get():
-            if isinstance(doc, str):
-                # Convert string to a document object with default metadata
-                doc = Document(page_content=doc, metadata={'type': 'Unknown'})
-            content.append({
-                'type': doc.metadata.get('type', 'Unknown'),
-                'content': doc.page_content
-            })
-        return content
+        return self.vector_store.get_knowledge_base_content()
+
+    def reset_memory(self):
+        self.chat_history = []
+        db_instance.save_chat_history(self.user_id, self.chat_history)

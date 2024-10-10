@@ -82,6 +82,14 @@ class Database:
                 description TEXT
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                messages TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
         self.conn.commit()
         
         # Add the chapter_title column if it doesn't exist
@@ -103,6 +111,13 @@ class Database:
         columns = [column[1] for column in cursor.fetchall()]
         if 'api_key' not in columns:
             cursor.execute('ALTER TABLE users ADD COLUMN api_key TEXT')
+            self.conn.commit()
+        
+        # Add the model_settings column if it doesn't exist
+        cursor.execute('PRAGMA table_info(users)')
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'model_settings' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN model_settings TEXT')
             self.conn.commit()
         
         cursor.close()
@@ -159,16 +174,10 @@ class Database:
         return self.get_chapter(chapter_id)
 
     def delete_chapter(self, chapter_id):
-        chapter = self.get_chapter(chapter_id)  # Get chapter data before deleting
         cursor = self.conn.cursor()
         cursor.execute('DELETE FROM chapters WHERE id = ?', (chapter_id,))
         self.conn.commit()
         cursor.close()
-
-        # Delete chapter from knowledge base
-        if chapter:
-            self.delete_from_knowledge_base(f"{chapter['title']}: {chapter['content']}")
-
         return cursor.rowcount > 0
 
     def get_chapter(self, chapter_id):
@@ -254,16 +263,10 @@ class Database:
         cursor.close()
 
     def delete_character(self, character_id: str):
-        character = self.get_character_by_id(character_id)  # Get character data before deleting
         cursor = self.conn.cursor()
         cursor.execute('DELETE FROM characters WHERE id = ?', (character_id,))
         self.conn.commit()
         cursor.close()
-
-        # Delete character from knowledge base
-        if character:
-            self.delete_from_knowledge_base(f"{character['name']}: {character['description']}")
-
         return cursor.rowcount > 0
 
     def get_chapter_count(self):
@@ -296,6 +299,50 @@ class Database:
     def delete_from_knowledge_base(self, text: str):
         # Placeholder for the actual implementation
         pass
+
+    def remove_api_key(self, user_id):
+        cursor = self.conn.cursor()
+        cursor.execute('UPDATE users SET api_key = NULL WHERE id = ?', (user_id,))
+        self.conn.commit()
+        cursor.close()
+
+    def save_model_settings(self, user_id: str, settings: dict):
+        cursor = self.conn.cursor()
+        settings_json = json.dumps(settings)
+        cursor.execute('UPDATE users SET model_settings = ? WHERE id = ?', (settings_json, user_id))
+        self.conn.commit()
+        cursor.close()
+
+    def get_model_settings(self, user_id: str) -> dict:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT model_settings FROM users WHERE id = ?', (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        if row and row[0]:
+            return json.loads(row[0])
+        return {
+            'mainLLM': 'gemini-1.5-pro-002',
+            'checkLLM': 'gemini-1.5-pro-002',
+            'embeddingsModel': 'models/text-embedding-004',
+            'titleGenerationLLM': 'gemini-1.5-pro-002',
+            'characterExtractionLLM': 'gemini-1.5-pro-002',
+            'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+        }
+
+    def save_chat_history(self, user_id: str, messages: list):
+        cursor = self.conn.cursor()
+        messages_json = json.dumps(messages)
+        cursor.execute('INSERT OR REPLACE INTO chat_history (id, user_id, messages) VALUES (?, ?, ?)',
+                       (user_id, user_id, messages_json))
+        self.conn.commit()
+        cursor.close()
+
+    def get_chat_history(self, user_id: str) -> list:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT messages FROM chat_history WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        return json.loads(row[0]) if row else []
 
 db_instance = Database('novel_generator.db')
 
