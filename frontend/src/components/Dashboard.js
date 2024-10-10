@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
 import { getAuthToken } from '../utils/auth';
@@ -6,9 +6,11 @@ import { getAuthToken } from '../utils/auth';
 const Dashboard = () => {
   const [characters, setCharacters] = useState([]);
   const [chapters, setChapters] = useState([]);
-  const [knowledgeBaseData, setKnowledgeBaseData] = useState('');
   const [knowledgeBaseQuery, setKnowledgeBaseQuery] = useState('');
   const [error, setError] = useState(null);
+  const [queryModel, setQueryModel] = useState('gemini-1.5-pro-002');
+  const [chatHistory, setChatHistory] = useState([]);
+  const chatContainerRef = useRef(null);
 
   const fetchCharacters = async () => {
     try {
@@ -40,21 +42,6 @@ const Dashboard = () => {
     }
   };
 
-  const fetchKnowledgeBaseData = async () => {
-    try {
-      const token = getAuthToken();
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, { query: knowledgeBaseQuery }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      setKnowledgeBaseData(response.data.result);
-    } catch (error) {
-      console.error('Error fetching knowledge base data:', error);
-      setError('Error fetching knowledge base data. Please try again later.');
-    }
-  };
-
   const handleDeleteCharacter = async (characterId) => {
     try {
       const token = getAuthToken();
@@ -70,22 +57,90 @@ const Dashboard = () => {
     }
   };
 
+  const handleQuerySubmit = async (e) => {
+    e.preventDefault();
+    if (!knowledgeBaseQuery.trim()) return;
+
+    try {
+      const token = getAuthToken();
+      const newUserMessage = { role: 'user', content: knowledgeBaseQuery };
+      setChatHistory([...chatHistory, newUserMessage]);
+      setKnowledgeBaseQuery('');
+
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/query-knowledge-base`, {
+        query: knowledgeBaseQuery,
+        model: queryModel
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const aiResponse = { role: 'ai', content: response.data.result };
+      setChatHistory(prevHistory => [...prevHistory, aiResponse]);
+    } catch (error) {
+      console.error('Error querying knowledge base:', error);
+      setError('Error querying knowledge base. Please try again later.');
+    }
+  };
+
+  const resetChatHistory = async () => {
+    try {
+      const token = getAuthToken();
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-chat-history`, {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      setChatHistory([]);
+    } catch (error) {
+      console.error('Error resetting chat history:', error);
+      setError('Error resetting chat history. Please try again later.');
+    }
+  };
+
   useEffect(() => {
     fetchCharacters();
     fetchChapters();
   }, []);
 
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatHistory]);
+
   return (
     <div className="dashboard-container">
       <h2>Dashboard</h2>
-      {error &amp;&amp; (
+      {error && (
         <p className="error">{error}</p>
       )}
       <div className="knowledge-base-section">
-        <h3>Knowledge Base</h3>
-        <input type="text" value={knowledgeBaseQuery} onChange={e => setKnowledgeBaseQuery(e.target.value)} placeholder="Enter your query" />
-        <button onClick={fetchKnowledgeBaseData}>Search</button>
-        <p>{knowledgeBaseData}</p>
+        <h3>Chat with AI</h3>
+        <div className="chat-container" ref={chatContainerRef}>
+          {chatHistory.map((message, index) => (
+            <div key={index} className={`chat-message ${message.role}`}>
+              <div className="message-content">{message.content}</div>
+            </div>
+          ))}
+        </div>
+        <form onSubmit={handleQuerySubmit} className="chat-input-form">
+          <input
+            type="text"
+            value={knowledgeBaseQuery}
+            onChange={e => setKnowledgeBaseQuery(e.target.value)}
+            placeholder="Type your message..."
+            className="chat-input"
+          />
+          <select value={queryModel} onChange={e => setQueryModel(e.target.value)} className="model-select">
+            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
+            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
+            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+          </select>
+          <button type="submit" className="send-button">Send</button>
+        </form>
+        <button onClick={resetChatHistory} className="reset-chat">Reset Chat History</button>
       </div>
       <div className="characters-section">
         <h3>Characters</h3>
