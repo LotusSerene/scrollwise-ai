@@ -35,8 +35,8 @@ with app.app_context():
 
 # Create a test user if they don't already exist
 with app.app_context():
-    if not db_instance.get_user_by_email("test@example.com"):
-        db_instance.create_user("test@example.com", "password")
+    if not db.get_user_by_email("test@example.com"):
+        db.create_user("test@example.com", "password")
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -49,11 +49,11 @@ def register():
             return jsonify({"message": "Email and password are required"}), 400
 
         # Check if user already exists
-        if db_instance.get_user_by_email(email):
+        if db.get_user_by_email(email):
             return jsonify({"message": "User already exists"}), 400
 
         # Create new user
-        db_instance.create_user(email, password)
+        db.create_user(email, password)
         return jsonify({"message": "User registered successfully"}), 201
 
     except Exception as e:
@@ -71,7 +71,7 @@ def login():
             return jsonify({"message": "Email and password are required"}), 400
 
         # Check if user exists and password matches
-        user = db_instance.get_user_by_email(email)
+        user = db.get_user_by_email(email)
         if user and user['password'] == password:
             # Generate JWT token
             payload = {
@@ -103,7 +103,7 @@ def generate_chapters():
         generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
         check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        previous_chapters = chapters = db_instance.get_all_chapters()
+        previous_chapters = db.get_all_chapters()
         #logging.debug(f"Received previousChapters: {previous_chapters}")
         
         user_id = get_jwt_identity()  # Get user ID from JWT token
@@ -120,9 +120,9 @@ def generate_chapters():
             chapter_number = current_chapter_count + i + 1
             #logging.debug(f"Generating chapter {chapter_number}")
             # Log the characters being sent to the agent
-            #logging.debug(f"Sending characters to agent: {db_instance.get_all_characters()}")
+            #logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
 
-            characters = db_instance.get_all_characters()
+            characters = db.get_all_characters()
            # logging.debug(f"Retrieved {len(characters)} characters")
 
             try:
@@ -147,16 +147,16 @@ def generate_chapters():
             # Check for new characters
             if new_characters:
                 for name, description in new_characters.items():
-                    db_instance.create_character(name, description)
+                    db.create_character(name, description)
                 
             # Save the chapter to the database
-            chapter_id = db_instance.create_chapter(chapter_title, chapter_content)
+            chapter_id = db.create_chapter(chapter_title, chapter_content)
                 
             # Get validity from the agent's check_chapter method
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
                 
             # Save validity to the database
-            db_instance.save_validity_check(chapter_id, chapter_title, validity)
+            db.save_validity_check(chapter_id, chapter_title, validity)
                 
             generated_chapters.append({
                 'id': chapter_id,
@@ -175,7 +175,7 @@ def generate_chapters():
 @app.route('/api/chapters', methods=['GET'])
 def get_chapters():
     try:
-        chapters = db_instance.get_all_chapters()
+        chapters = db.get_all_chapters()
         logging.debug(f"Retrieved {len(chapters)} chapters")
         return jsonify({'chapters': chapters}), 200
     except Exception as e:
@@ -185,7 +185,7 @@ def get_chapters():
 def update_chapter(chapter_id):
     try:
         data = request.json
-        updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'))
+        updated_chapter = db.update_chapter(chapter_id, data.get('title'), data.get('content'))
         if updated_chapter:
             return jsonify(updated_chapter), 200
         else:
@@ -197,7 +197,7 @@ def update_chapter(chapter_id):
 @app.route('/api/chapters/<chapter_id>', methods=['DELETE'])
 def delete_chapter(chapter_id):
     try:
-        if db_instance.delete_chapter(chapter_id):
+        if db.delete_chapter(chapter_id):
             return jsonify({'message': 'Chapter deleted successfully'}), 200
         else:
             return jsonify({'error': 'Chapter not found'}), 404
@@ -208,7 +208,7 @@ def delete_chapter(chapter_id):
 @app.route('/api/validity-checks', methods=['GET'])
 def get_validity_checks():
     try:
-        validity_checks = db_instance.get_all_validity_checks()
+        validity_checks = db.get_all_validity_checks()
         return jsonify({'validityChecks': validity_checks}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_validity_checks: {str(e)}", exc_info=True)
@@ -217,7 +217,7 @@ def get_validity_checks():
 @app.route('/api/validity-checks/<check_id>', methods=['DELETE'])
 def delete_validity_check(check_id):
     try:
-        if db_instance.delete_validity_check(check_id):
+        if db.delete_validity_check(check_id):
             return jsonify({'message': 'Validity check deleted successfully'}), 200
         else:
             return jsonify({'error': 'Validity check not found'}), 404
@@ -229,7 +229,7 @@ def delete_validity_check(check_id):
 def create_chapter():
     try:
         data = request.get_json()
-        chapter_id = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
+        chapter_id = db.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
         return jsonify({'message': 'Chapter created successfully', 'id': chapter_id}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
@@ -238,7 +238,7 @@ def create_chapter():
 @app.route('/api/characters', methods=['GET'])
 def get_characters():
     try:
-        characters = db_instance.get_all_characters()
+        characters = db.get_all_characters()
         return jsonify({'characters': characters}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -246,7 +246,7 @@ def get_characters():
 @app.route('/api/characters/<character_id>', methods=['DELETE'])
 def delete_character(character_id):
     try:
-        if db_instance.delete_character(character_id):
+        if db.delete_character(character_id):
             return jsonify({'message': 'Character deleted successfully'}), 200
         else:
             return jsonify({'error': 'Character not found'}), 404
@@ -256,7 +256,7 @@ def delete_character(character_id):
 @app.route('/api/characters', methods=['POST'])
 def create_character():
     data = request.json
-    character = db_instance.create_character(data['name'], data['description'])
+    character = db.create_character(data['name'], data['description'])
     return jsonify(character.to_dict()), 201
 
 @app.route('/api/knowledge-base', methods=['POST'])
@@ -287,7 +287,7 @@ def save_api_key():
             return jsonify({'error': 'API key is required'}), 400
 
         user_id = get_jwt_identity()
-        db_instance.save_api_key(user_id, api_key)
+        db.save_api_key(user_id, api_key)
 
         return jsonify({'message': 'API key saved successfully'}), 200
     except Exception as e:
