@@ -282,7 +282,7 @@ class Database:
         # Placeholder for the actual implementation
         pass
 
-db = Database('novel_generator.db')
+db_instance = Database('novel_generator.db')
 
 def get_chapter_count():
-    return len(db.get_all_chapters())
+    return len(db_instance.get_all_chapters())
