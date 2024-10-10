@@ -8,7 +8,6 @@ const Dashboard = () => {
   const [chapters, setChapters] = useState([]);
   const [knowledgeBaseQuery, setKnowledgeBaseQuery] = useState('');
   const [error, setError] = useState(null);
-  const [queryModel, setQueryModel] = useState('gemini-1.5-pro-002');
   const [chatHistory, setChatHistory] = useState([]);
   const chatContainerRef = useRef(null);
 
@@ -68,8 +67,7 @@ const Dashboard = () => {
       setKnowledgeBaseQuery('');
 
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/query-knowledge-base`, {
-        query: knowledgeBaseQuery,
-        model: queryModel
+        query: knowledgeBaseQuery
       }, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -133,11 +131,6 @@ const Dashboard = () => {
             placeholder="Type your message..."
             className="chat-input"
           />
-          <select value={queryModel} onChange={e => setQueryModel(e.target.value)} className="model-select">
-            <option value="gemini-1.5-pro-002">Gemini 1.5 Pro</option>
-            <option value="gemini-1.5-flash-002">Gemini 1.5 Flash</option>
-            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
-          </select>
           <button type="submit" className="send-button">Send</button>
         </form>
         <button onClick={resetChatHistory} className="reset-chat">Reset Chat History</button>
