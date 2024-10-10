@@ -24,12 +24,19 @@ API_KEY = os.environ.get("API_KEY")  # Get API key from environment
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Initialize Database
-db_instance = db('novel_generator.db')
+# Configure the SQLAlchemy extension
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///novel_generator.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# Create the database tables
+with app.app_context():
+    db.create_all()
 
 # Create a test user if they don't already exist
-if not db_instance.get_user_by_email("test@example.com"):
-    db_instance.create_user("test@example.com", "password")
+with app.app_context():
+    if not db_instance.get_user_by_email("test@example.com"):
+        db_instance.create_user("test@example.com", "password")
 
 @app.route('/api/register', methods=['POST'])
 def register():
