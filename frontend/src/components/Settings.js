@@ -11,7 +11,7 @@ function Settings() {
   const [modelSettings, setModelSettings] = useState({
     mainLLM: 'gemini-1.5-pro-002',
     checkLLM: 'gemini-1.5-pro-002',
-    embeddingsModel: 'models/embedding-004',
+    embeddingsModel: 'models/text-embedding-004',
     titleGenerationLLM: 'gemini-1.5-pro-002',
     characterExtractionLLM: 'gemini-1.5-pro-002',
     knowledgeBaseQueryLLM: 'gemini-1.5-pro-002'
@@ -155,14 +155,15 @@ function Settings() {
     }
   };
 
-  const llmOptions = [
+  const modelOptions = [
     { value: 'gemini-1.5-pro-002', label: 'Gemini 1.5 Pro' },
     { value: 'gemini-1.5-flash-002', label: 'Gemini 1.5 Flash' },
     { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash 8B' }
   ];
 
-  const embeddingOptions = [
-    { value: 'models/embedding-004', label: 'Embedding 004' }
+  const embeddingsOptions = [
+    { value: 'models/text-embedding-004', label: 'Text Embedding 004' },
+    { value: 'models/embedding-001', label: 'Text Embedding 001' }
   ];
 
   return (
@@ -195,14 +196,25 @@ function Settings() {
       {Object.entries(modelSettings).map(([key, value]) => (
         <div key={key}>
           <label>{key}:</label>
-          <select
-            value={value}
-            onChange={(e) => handleModelSettingChange(key, e.target.value)}
-          >
-            {(key === 'embeddingsModel' ? embeddingOptions : llmOptions).map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+          {key === 'embeddingsModel' ? (
+            <select
+              value={value}
+              onChange={(e) => handleModelSettingChange(key, e.target.value)}
+            >
+              {embeddingsOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={value}
+              onChange={(e) => handleModelSettingChange(key, e.target.value)}
+            >
+              {modelOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
         </div>
       ))}
       <button onClick={saveModelSettings}>Save Model Settings</button>
