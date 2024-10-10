@@ -64,7 +64,7 @@ function Validity() {
       ...check,
       review: check.review || 'N/A',
       style_guide_adherence: check.style_guide_adherence ? 'Yes' : 'No',
-      style_guide_feedback: check.style_guide_feedback || 'N/A',
+      style_guide_feedback: check.style_guide_adherence_feedback || 'N/A',
       continuity: check.continuity ? 'Yes' : 'No',
       continuity_feedback: check.continuity_feedback || 'N/A',
       test_results: check.test_results || 'N/A'
