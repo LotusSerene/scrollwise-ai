@@ -1,15 +1,12 @@
-// frontend/src/components/KnowledgeBase.js
 import React, { useState, useEffect } from 'react';
+import { Button, TextField, Typography, Paper, List, ListItem, ListItemText, Divider } from '@mui/material';
 import axios from 'axios';
-import './KnowledgeBase.css';
 import { getAuthHeaders } from '../utils/auth';
 
-function KnowledgeBase() {
-  const [documents, setDocuments] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+const KnowledgeBase = () => {
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
+  const [textInput, setTextInput] = useState('');
+  const [file, setFile] = useState(null);
 
   useEffect(() => {
     fetchKnowledgeBaseContent();
@@ -18,122 +15,104 @@ function KnowledgeBase() {
   const fetchKnowledgeBaseContent = async () => {
     try {
       const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        headers: headers
-      });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, { headers });
       setKnowledgeBaseContent(response.data.content);
     } catch (error) {
       console.error('Error fetching knowledge base content:', error);
-      setError('Error fetching knowledge base content. Please try again later.');
     }
   };
 
-  const handleAddDocuments = async (e) => {
+  const handleTextSubmit = async (e) => {
     e.preventDefault();
-    setError(null);
-    setSuccess(null);
-
     try {
       const headers = getAuthHeaders();
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        documents: documents.split('\n')
-      }, {
-        headers: headers
-      });
-
-      if (response.data.message) {
-        setSuccess(response.data.message);
-        fetchKnowledgeBaseContent(); // Refresh the content after adding
-      } else {
-        setError('An unexpected error occurred');
-      }
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, 
+        { documents: [textInput] },
+        { headers }
+      );
+      setTextInput('');
+      fetchKnowledgeBaseContent();
     } catch (error) {
-      console.error('Error adding documents to the knowledge base:', error);
-      setError(error.response?.data?.message || 'Error adding documents to the knowledge base. Please try again later.');
+      console.error('Error adding text to knowledge base:', error);
     }
-  };
-
-  const handleFileChange = (e) => {
-    setSelectedFile(e.target.files[0]);
   };
 
   const handleFileUpload = async (e) => {
     e.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    if (!selectedFile) {
-      setError('Please select a file to upload.');
-      return;
-    }
+    if (!file) return;
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    formData.append('file', file);
+
     try {
       const headers = getAuthHeaders();
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/upload-document`, formData, {
-        headers: {
-          ...headers,
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-
-      if (response.data.message) {
-        setSuccess(response.data.message);
-        setSelectedFile(null); // Clear the selected file
-        fetchKnowledgeBaseContent(); // Refresh the content after uploading
-      } else {
-        setError('An unexpected error occurred.');
-      }
+      headers['Content-Type'] = 'multipart/form-data';
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/upload-document`, formData, { headers });
+      setFile(null);
+      fetchKnowledgeBaseContent();
     } catch (error) {
       console.error('Error uploading document:', error);
-      setError(error.response?.data?.message || 'Error uploading document. Please try again later.');
     }
   };
 
   return (
-    <div className="knowledge-base-container">
-      <h2>Knowledge Base</h2>
-      {error && <p className="error">{error}</p>}
-      {success && <p className="success">{success}</p>}
+    <Paper elevation={3} style={{ padding: '20px', marginTop: '20px' }}>
+      <Typography variant="h5" gutterBottom>Knowledge Base</Typography>
       
-      <h3>Current Knowledge Base Content</h3>
-      <div className="knowledge-base-content">
+      <Typography variant="h6" gutterBottom>Current Knowledge Base Content</Typography>
+      <List>
         {knowledgeBaseContent.map((item, index) => (
-          <div key={index} className="knowledge-base-item">
-            <h4>{item.type}</h4>
-            <p>{item.content}</p>
-            {item.metadata && (
-              <details>
-                <summary>Metadata</summary>
-                <pre>{JSON.stringify(item.metadata, null, 2)}</pre>
-              </details>
-            )}
-          </div>
+          <React.Fragment key={index}>
+            <ListItem>
+              <ListItemText
+                primary={`Type: ${item.type}`}
+                secondary={
+                  <>
+                    <Typography component="span" variant="body2" color="textPrimary">
+                      Content: {item.content}
+                    </Typography>
+                    <br />
+                    <Typography component="span" variant="body2" color="textSecondary">
+                      Metadata: {JSON.stringify(item.metadata)}
+                    </Typography>
+                  </>
+                }
+              />
+            </ListItem>
+            {index < knowledgeBaseContent.length - 1 && <Divider />}
+          </React.Fragment>
         ))}
-      </div>
+      </List>
 
-      <h3>Add to Knowledge Base</h3>
-      <form onSubmit={handleAddDocuments}>
-        <label>
-          Documents (one per line):
-          <textarea
-            value={documents}
-            onChange={(e) => setDocuments(e.target.value)}
-            rows={10}
-            cols={80}
-          />
-        </label>
-        <button type="submit">Add to Knowledge Base</button>
+      <Typography variant="h6" gutterBottom style={{ marginTop: '20px' }}>Add to Knowledge Base</Typography>
+      <form onSubmit={handleTextSubmit}>
+        <TextField
+          fullWidth
+          multiline
+          rows={4}
+          variant="outlined"
+          label="Add text to knowledge base"
+          value={textInput}
+          onChange={(e) => setTextInput(e.target.value)}
+          style={{ marginBottom: '10px' }}
+        />
+        <Button type="submit" variant="contained" color="primary">
+          Add Text
+        </Button>
       </form>
 
-      <h3>Upload Document</h3>
-      <form onSubmit={handleFileUpload}>
-        <input type="file" onChange={handleFileChange} />
-        <button type="submit">Upload</button>
+      <form onSubmit={handleFileUpload} style={{ marginTop: '20px' }}>
+        <input
+          type="file"
+          onChange={(e) => setFile(e.target.files[0])}
+          style={{ marginBottom: '10px' }}
+        />
+        <Button type="submit" variant="contained" color="secondary">
+          Upload Document
+        </Button>
       </form>
-    </div>
+    </Paper>
   );
-}
+};
 
 export default KnowledgeBase;
