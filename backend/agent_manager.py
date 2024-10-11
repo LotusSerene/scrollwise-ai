@@ -301,7 +301,7 @@ class AgentManager:
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
         
         # Save the chat history to the database
-        self.save_chat_history(chat_history)
+        self.save_chat_history(self.user_id, chat_history)
         
         return response
 
