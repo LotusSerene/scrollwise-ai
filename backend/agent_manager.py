@@ -485,6 +485,17 @@ class AgentManager:
     def update_character_in_knowledge_base(self, character: Dict[str, Any]):
 
 
+    def add_character_to_knowledge_base(self, character: Dict[str, Any]):
+        text = f"Character {character['id']}: {character['name']}\n{character['description']}"
+        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
+
+    def remove_character_from_knowledge_base(self, character_id: str):
+        self.vector_store.delete([character_id])
+
+    def update_character_in_knowledge_base(self, character: Dict[str, Any]):
+        text = f"Character {character['id']}: {character['name']}\n{character['description']}"
+        self.vector_store.update_document(character['id'], text, metadata={"type": "Character", "id": character['id']})
+
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
         self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
