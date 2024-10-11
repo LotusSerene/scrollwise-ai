@@ -180,7 +180,7 @@ class Database:
         cursor.close()
         return [{'id': row[0], 'title': row[1], 'content': row[2], 'chapter_number': row[3]} for row in rows]
 
-    def create_chapter(self, title: str, content: str, chapter_number: int, user_id: str) -> str:
+    def create_chapter(self, title: str, content: str, user_id: str) -> str:
         cursor = self.conn.cursor()
         chapter_id = uuid.uuid4().hex
         cursor.execute('INSERT INTO chapters (id, title, content, chapter_number, user_id) VALUES (?, ?, ?, ?, ?)', 
