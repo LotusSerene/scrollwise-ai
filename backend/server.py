@@ -284,7 +284,9 @@ def create_character():
         character = db_instance.create_character(data['name'], data['description'], user_id)
 
         agent_manager = AgentManager(user_id)
-        agent_manager.add_character_to_knowledge_base(character)
+        agent_manager.add_character_to_knowledge_base(data['name'], data['description'])
+        #log the adding of the character to the knowledge base
+        logging.info(f"Character {character['name']} added to the knowledge base")
 
         return jsonify(character), 201
     except Exception as e:
@@ -465,10 +467,8 @@ def query_knowledge_base():
 def get_knowledge_base_content():
     try:
         user_id = get_jwt_identity()
-        api_key = db_instance.get_api_key(user_id)
-        model_settings = db_instance.get_model_settings(user_id)
-        vector_store = VectorStore(user_id, api_key, model_settings['embeddingsModel'])
-        content = vector_store.get_knowledge_base_content()
+        agent_manager = AgentManager(user_id)
+        content = agent_manager.get_knowledge_base_content()
         return jsonify({'content': content}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
