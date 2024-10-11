@@ -183,8 +183,8 @@ class Database:
     def create_chapter(self, title: str, content: str, user_id: str) -> str:
         cursor = self.conn.cursor()
         chapter_id = uuid.uuid4().hex
-        cursor.execute('INSERT INTO chapters (id, title, content, chapter_number, user_id) VALUES (?, ?, ?, ?, ?)', 
-                       (chapter_id, title, content, chapter_number, user_id))
+        cursor.execute('INSERT INTO chapters (id, title, content, user_id) VALUES (?, ?, ?, ?)', 
+                       (chapter_id, title, content, user_id))
         self.conn.commit()
         cursor.close()
         return chapter_id
