@@ -95,7 +95,6 @@ class AgentManager:
         )
     
         title = self._generate_title(chapter, chapter_number)
-        new_characters = self.extract_new_characters(chapter, characters_dict)
     
         min_word_count = instructions.get('min_word_count', 0)
         if len(chapter.split()) < min_word_count:
@@ -104,7 +103,9 @@ class AgentManager:
         chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
         validity = self.check_chapter(chapter, instructions, previous_chapters)
     
-        new_characters = self.check_new_characters(chapter, characters_dict)
+        new_characters = {}
+        if self.check_new_characters(chapter, characters_dict):
+            new_characters = self.extract_new_characters(chapter, characters_dict)
 
         return chapter, title, new_characters
 
