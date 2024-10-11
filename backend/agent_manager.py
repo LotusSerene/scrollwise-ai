@@ -263,7 +263,7 @@ class AgentManager:
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
 
-    def generate_with_retrieval(self, query: str) -> str:
+    def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         self.logger.debug(f"Generating response for query: {query}")
         qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -274,10 +274,12 @@ class AgentManager:
             output_key="answer"
         )
         
-        # Load chat history from the database
-        chat_history = db_instance.get_chat_history(self.user_id)
+        # Load chat history
         for message in chat_history:
-            memory.chat_memory.add_user_message(message['content']) if message['role'] == 'user' else memory.chat_memory.add_ai_message(message['content'])
+            if message['role'] == 'user':
+                memory.chat_memory.add_user_message(message['content'])
+            else:
+                memory.chat_memory.add_ai_message(message['content'])
         
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=qa_llm,
@@ -300,11 +302,6 @@ class AgentManager:
         response = f"{answer}\n\nSources:\n"
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
-        
-        # Save the updated chat history to the database
-        chat_history.append({"role": "user", "content": query})
-        chat_history.append({"role": "ai", "content": answer})
-        db_instance.save_chat_history(self.user_id, chat_history)
         
         return response
 
@@ -432,7 +429,7 @@ class AgentManager:
             "existing_characters": ", ".join(existing_names)
         })
             # Log the raw response
-        #self.logger.debug(f"Raw new characters response: {result}")
+        self.logger.debug(f"Raw new characters response: {result}")
 
         # Strip leading and trailing backticks
         result = result.strip().strip('```json').strip('```')
@@ -480,30 +477,27 @@ class AgentManager:
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
 
     def add_character_to_knowledge_base(self, character: Dict[str, Any]):
-        text = f"Character: {character['name']}\nDescription: {character['description']}"
-        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
+
 
     def remove_character_from_knowledge_base(self, character_id: str):
-        self.vector_store.delete_from_knowledge_base(f"Character: {character_id}")
+
 
     def update_character_in_knowledge_base(self, character: Dict[str, Any]):
-        self.remove_character_from_knowledge_base(character['id'])
-        self.add_character_to_knowledge_base(character)
+
 
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
         self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
 
     def remove_chapter_from_knowledge_base(self, chapter_id: str):
-        self.vector_store.delete_from_knowledge_base(f"Chapter {chapter_id}:")
+        self.vector_store.delete([chapter_id])
 
     def update_chapter_in_knowledge_base(self, chapter: Dict[str, Any]):
-        self.remove_chapter_from_knowledge_base(chapter['id'])
-        self.add_chapter_to_knowledge_base(chapter)
+        text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
+        self.vector_store.update_document(chapter['id'], text, metadata={"type": "Chapter", "id": chapter['id']})
 
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
 
     def reset_memory(self):
-        self.chat_history = []
-        db_instance.save_chat_history(self.user_id, self.chat_history)
+        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
