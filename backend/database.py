@@ -173,20 +173,18 @@ class Database:
                 return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': None, 'model_settings': None}
         return None
 
-    def get_all_chapters(self, user_id):
+    def get_all_chapters(self, user_id: str):
         cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM chapters WHERE user_id = ?', (user_id,))
+        cursor.execute('SELECT * FROM chapters WHERE user_id = ? ORDER BY chapter_number', (user_id,))
         rows = cursor.fetchall()
         cursor.close()
         return [{'id': row[0], 'title': row[1], 'content': row[2], 'chapter_number': row[3]} for row in rows]
 
-    def create_chapter(self, title, content, user_id):
+    def create_chapter(self, title: str, content: str, chapter_number: int, user_id: str) -> str:
         cursor = self.conn.cursor()
-        chapter_id = str(uuid.uuid4())
-        cursor.execute('''
-            INSERT INTO chapters (id, title, content, chapter_number, user_id)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (chapter_id, title, content, 1, user_id))
+        chapter_id = uuid.uuid4().hex
+        cursor.execute('INSERT INTO chapters (id, title, content, chapter_number, user_id) VALUES (?, ?, ?, ?, ?)', 
+                       (chapter_id, title, content, chapter_number, user_id))
         self.conn.commit()
         cursor.close()
         return chapter_id
