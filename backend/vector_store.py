@@ -18,10 +18,9 @@ class VectorStore:
     def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
         if metadata is None:
             metadata = {}
-        self.logger.debug(f"Adding to knowledge base for user {self.user_id}: {text[:100]}...")
+       # self.logger.debug(f"Adding to knowledge base for user {self.user_id}: {text[:100]}...")
         self.vector_store.add_texts([text], metadatas=[metadata])
-        self.vector_store.persist()  # Ensure data is persisted
-        self.logger.info(f"Added text to knowledge base for user {self.user_id}. Metadata: {metadata}")
+        #self.logger.info(f"Added text to knowledge base for user {self.user_id}. Metadata: {metadata}")
 
     def delete_from_knowledge_base(self, text: str):
         self.logger.debug(f"Attempting to delete from knowledge base for user {self.user_id}: {text[:100]}...")
@@ -45,15 +44,20 @@ class VectorStore:
 
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         self.logger.debug(f"Retrieving all knowledge base content for user {self.user_id}")
-        docs = self.vector_store.get()
-        self.logger.info(f"Retrieved {len(docs)} documents from knowledge base for user {self.user_id}")
-        return [
-            {
-                "type": self._get_type(doc),
-                "content": self._get_content(doc)[:100],  # Return first 100 characters of content
-                "metadata": self._get_metadata(doc)
-            } for doc in docs
-        ]
+        collection = self.vector_store._collection
+        results = collection.get(include=['metadatas', 'documents'])
+        
+        content = []
+        for i, doc in enumerate(results['documents']):
+            metadata = results['metadatas'][i] if i < len(results['metadatas']) else {}
+            content.append({
+                "type": metadata.get('type', 'Unknown'),
+                "content": doc[:100] if doc else "",  # Return first 100 characters of content
+                "metadata": metadata
+            })
+        
+        self.logger.info(f"Retrieved {len(content)} documents from knowledge base for user {self.user_id}")
+        return content
 
     def _get_type(self, doc: Any) -> str:
         if isinstance(doc, Document):
