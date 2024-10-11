@@ -7,6 +7,7 @@ const KnowledgeBase = () => {
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
   const [textInput, setTextInput] = useState('');
   const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchKnowledgeBaseContent();
@@ -19,6 +20,7 @@ const KnowledgeBase = () => {
       setKnowledgeBaseContent(response.data.content);
     } catch (error) {
       console.error('Error fetching knowledge base content:', error);
+      setError('Failed to fetch knowledge base content');
     }
   };
 
@@ -34,6 +36,7 @@ const KnowledgeBase = () => {
       fetchKnowledgeBaseContent();
     } catch (error) {
       console.error('Error adding text to knowledge base:', error);
+      setError('Failed to add text to knowledge base');
     }
   };
 
@@ -52,50 +55,64 @@ const KnowledgeBase = () => {
       fetchKnowledgeBaseContent();
     } catch (error) {
       console.error('Error uploading document:', error);
+      setError('Failed to upload document');
+    }
+  };
+
+  const handleDelete = async (embeddingId) => {
+    try {
+      const headers = getAuthHeaders();
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base/${embeddingId}`, { headers });
+      fetchKnowledgeBaseContent();
+    } catch (error) {
+      console.error('Error deleting item from knowledge base:', error);
+      setError('Failed to delete item from knowledge base');
     }
   };
 
   return (
     <div className="knowledge-base-container">
       <h2>Knowledge Base</h2>
-        
-      <h3>Current Knowledge Base Content</h3>
-      <ul>
-        {knowledgeBaseContent.map((item, index) => (
-          <li key={index}>
-            <div>
-              <strong>Type:</strong> {item.type}
-              <br />
-              <strong>Content:</strong> <div className="content">{item.content}</div>
-              <br />
-              <strong>Metadata:</strong> {JSON.stringify(item.metadata, null, 2)}
-            </div>
-            {index < knowledgeBaseContent.length - 1 && <hr />}
-          </li>
-        ))}
-      </ul>
+      
+      {error && <div className="error">{error}</div>}
+      
+      <div className="knowledge-base-content">
+        <h3>Current Knowledge Base Content</h3>
+        <ul className="content-list">
+          {knowledgeBaseContent.map((item, index) => (
+            <li key={index}>
+              <div>
+                <strong>Type:</strong> {item.type}
+                <br />
+                <strong>Content:</strong> {item.content}
+                <br />
+                <strong>Embedding ID:</strong> {item.metadata.embedding_id}
+              </div>
+              <button onClick={() => handleDelete(item.metadata.embedding_id)} className="delete-button">Delete</button>
+            </li>
+          ))}
+        </ul>
+      </div>
 
-      <h3 style={{ marginTop: '20px' }}>Add to Knowledge Base</h3>
-      <form onSubmit={handleTextSubmit}>
-        <label>
-          Add text to knowledge base:
+      <div className="add-to-knowledge-base">
+        <h3>Add to Knowledge Base</h3>
+        <form onSubmit={handleTextSubmit}>
           <textarea
             value={textInput}
             onChange={(e) => setTextInput(e.target.value)}
-            style={{ marginBottom: '10px' }}
+            placeholder="Add text to knowledge base"
           />
-        </label>
-        <button type="submit">Add Text</button>
-      </form>
+          <button type="submit">Add Text</button>
+        </form>
 
-      <form onSubmit={handleFileUpload} style={{ marginTop: '20px' }}>
-        <input
-          type="file"
-          onChange={(e) => setFile(e.target.files[0])}
-          style={{ marginBottom: '10px' }}
-        />
-        <button type="submit">Upload Document</button>
-      </form>
+        <form onSubmit={handleFileUpload}>
+          <input
+            type="file"
+            onChange={(e) => setFile(e.target.files[0])}
+          />
+          <button type="submit">Upload Document</button>
+        </form>
+      </div>
     </div>
   );
 };
