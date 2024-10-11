@@ -262,7 +262,7 @@ class AgentManager:
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
 
-    def generate_with_retrieval(self, query: str, chat_history: List[Tuple[str, str]] = None) -> str:
+    def generate_with_retrieval(self, query: str) -> str:
         self.logger.debug(f"Generating response for query: {query}")
         qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -273,10 +273,10 @@ class AgentManager:
             output_key="answer"
         )
         
-        # If chat history is provided, add it to the memory
-        if chat_history:
-            for message in chat_history:
-                memory.chat_memory.add_user_message(message[0]) if message[1] == 'user' else memory.chat_memory.add_ai_message(message[0])
+        # Load chat history from the database
+        chat_history = db_instance.get_chat_history(self.user_id)
+        for message in chat_history:
+            memory.chat_memory.add_user_message(message['content']) if message['role'] == 'user' else memory.chat_memory.add_ai_message(message['content'])
         
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=qa_llm,
@@ -300,8 +300,10 @@ class AgentManager:
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
         
-        # Save the chat history to the database
-        self.save_chat_history(self.user_id, chat_history)
+        # Save the updated chat history to the database
+        chat_history.append({"role": "user", "content": query})
+        chat_history.append({"role": "ai", "content": answer})
+        db_instance.save_chat_history(self.user_id, chat_history)
         
         return response
 
@@ -377,7 +379,7 @@ class AgentManager:
         """
         return ChatPromptTemplate.from_template(template)
 
-    def check_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
+    def check_new_characters(self, chapter: str, characters: Dict[str, str]) -> bool:
         character_names = list(characters.keys())
         prompt = ChatPromptTemplate.from_template("""
         Analyze the following chapter and check for any new characters based on the provided list:
@@ -391,18 +393,13 @@ class AgentManager:
         Are there any new characters introduced in this chapter? Respond with "Yes" or "No".
         """)
 
-        check_chain = prompt | self.llm | StrOutputParser()
+        check_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | StrOutputParser()
         result = check_chain.invoke({
             "chapter": chapter,
             "characters": ", ".join(character_names)
         })
 
-        new_characters = {}
-        if "Yes" in result:
-            # Extract new character information (this part can be enhanced based on your needs)
-            new_characters = self.extract_new_characters(chapter, characters)
-
-        return new_characters
+        return "Yes" in result
 
     def extract_new_characters(self, chapter: str, existing_characters: Dict[str, str]) -> Dict[str, str]:
         extraction_llm = self._initialize_llm(self.model_settings['characterExtractionLLM'])
@@ -483,27 +480,25 @@ class AgentManager:
 
     def add_character_to_knowledge_base(self, character: Dict[str, Any]):
         text = f"Character: {character['name']}\nDescription: {character['description']}"
-        self.add_to_knowledge_base([text])
+        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
+
+    def remove_character_from_knowledge_base(self, character_id: str):
+        self.vector_store.delete_from_knowledge_base(f"Character: {character_id}")
+
+    def update_character_in_knowledge_base(self, character: Dict[str, Any]):
+        self.remove_character_from_knowledge_base(character['id'])
+        self.add_character_to_knowledge_base(character)
 
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.logger.debug(f"Adding chapter to knowledge base for user {self.user_id}: {text[:100]}...")  # Log first 100 characters
         self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
-        self.logger.info(f"Added chapter {chapter['id']} to knowledge base for user {self.user_id}")
-        # Verify the addition
-        content = self.vector_store.get_knowledge_base_content()
-        self.logger.info(f"Current knowledge base content after adding chapter for user {self.user_id}: {content}")
 
-    def remove_from_knowledge_base(self, text: str):
-        self.vector_store.delete_from_knowledge_base(text)
+    def remove_chapter_from_knowledge_base(self, chapter_id: str):
+        self.vector_store.delete_from_knowledge_base(f"Chapter {chapter_id}:")
 
-    def remove_character_from_knowledge_base(self, character: Dict[str, Any]):
-        text = f"Character: {character['name']}"
-        self.remove_from_knowledge_base(text)
-
-    def remove_chapter_from_knowledge_base(self, chapter: Dict[str, Any]):
-        text = f"Chapter {chapter['id']}: {chapter['title']}"
-        self.remove_from_knowledge_base(text)
+    def update_chapter_in_knowledge_base(self, chapter: Dict[str, Any]):
+        self.remove_chapter_from_knowledge_base(chapter['id'])
+        self.add_chapter_to_knowledge_base(chapter)
 
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
