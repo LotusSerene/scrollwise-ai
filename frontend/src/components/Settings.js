@@ -24,139 +24,61 @@ function Settings() {
 
   const checkApiKeyStatus = async () => {
     try {
-      const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-api-key`, {
-        headers: headers
-      });
-      if (response.status === 200 && response.data) {
-        setIsKeySet(response.data.isSet);
-        if (response.data.isSet) {
-          setApiKey(response.data.apiKey);
-        }
-      } else {
-        throw new Error('Failed to check API key status');
+      const response = await axios.get('/api/check-api-key', { headers: getAuthHeaders() });
+      setIsKeySet(response.data.isSet);
+      if (response.data.isSet) {
+        setApiKey(response.data.apiKey);
       }
     } catch (error) {
       console.error('Error checking API key status:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error checking API key status. Please try again later.');
-      }
     }
   };
 
   const fetchModelSettings = async () => {
     try {
-      const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, {
-        headers: headers
-      });
-      if (response.status === 200 && response.data) {
-        setModelSettings(response.data);
-      } else {
-        throw new Error('Failed to fetch model settings');
-      }
+      const response = await axios.get('/api/model-settings', { headers: getAuthHeaders() });
+      setModelSettings(response.data);
     } catch (error) {
       console.error('Error fetching model settings:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error fetching model settings. Please try again later.');
-      }
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSaveApiKey = async () => {
     try {
-      const headers = getAuthHeaders();
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/save-api-key`, { apiKey }, {
-        headers: headers
-      });
-      if (response.status === 200) {
-        setMessage(response.data.message);
-        setIsKeySet(true);
-        setIsEditing(false);
-        checkApiKeyStatus(); // Refresh the masked API key
-        fetchModelSettings(); // Refresh the model settings
-      } else {
-        throw new Error('Failed to save API key');
-      }
+      await axios.post('/api/save-api-key', { apiKey }, { headers: getAuthHeaders() });
+      setMessage('API key saved successfully');
+      setIsKeySet(true);
+      setIsEditing(false);
     } catch (error) {
-      console.error('Error saving API key:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error saving API key. Please try again later.');
-      }
+      setMessage('Error saving API key');
     }
   };
 
-  const handleRemove = async () => {
+  const handleRemoveApiKey = async () => {
     try {
-      const headers = getAuthHeaders();
-      const response = await axios.delete(`${process.env.REACT_APP_API_URL}/api/remove-api-key`, {
-        headers: headers
-      });
-      setMessage(response.data.message);
+      await axios.delete('/api/remove-api-key', { headers: getAuthHeaders() });
+      setMessage('API key removed successfully');
       setIsKeySet(false);
       setApiKey('');
     } catch (error) {
-      console.error('Error removing API key:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error removing API key. Please try again later.');
-      }
+      setMessage('Error removing API key');
     }
   };
 
-  const fetchModelSettings = async () => {
+  const handleSaveModelSettings = async () => {
     try {
-      const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, {
-        headers: headers
-      });
-      if (response.status === 200 && response.data) {
-        setModelSettings(response.data);
-      } else {
-        throw new Error('Failed to fetch model settings');
-      }
+      await axios.post('/api/model-settings', modelSettings, { headers: getAuthHeaders() });
+      setMessage('Model settings saved successfully');
     } catch (error) {
-      console.error('Error fetching model settings:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error fetching model settings. Please try again later.');
-      }
+      setMessage('Error saving model settings');
     }
   };
 
   const handleModelSettingChange = (setting, value) => {
-    setModelSettings(prev => ({ ...prev, [setting]: value }));
-  };
-
-  const saveModelSettings = async () => {
-    try {
-      const headers = getAuthHeaders();
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, {
-        headers: headers
-      });
-      if (response.status === 200) {
-        setMessage('Model settings saved successfully');
-        fetchModelSettings(); // Refresh the model settings
-      } else {
-        throw new Error('Failed to save model settings');
-      }
-    } catch (error) {
-      console.error('Error saving model settings:', error);
-      if (error.response && error.response.status === 401) {
-        setMessage('Your session has expired. Please log in again.');
-      } else {
-        setMessage('Error saving model settings. Please try again later.');
-      }
-    }
+    setModelSettings(prevSettings => ({
+      ...prevSettings,
+      [setting]: value
+    }));
   };
 
   const modelOptions = [
@@ -173,55 +95,44 @@ function Settings() {
   return (
     <div className="settings-container">
       <h2>Settings</h2>
+      <div className="api-key-section">
+        <h3>API Key</h3>
+        {isKeySet && !isEditing ? (
+          <>
+            <p>API Key: {apiKey}</p>
+            <button onClick={() => setIsEditing(true)}>Edit</button>
+            <button onClick={handleRemoveApiKey}>Remove</button>
+          </>
+        ) : (
+          <>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Enter your API key"
+            />
+            <button onClick={handleSaveApiKey}>Save API Key</button>
+          </>
+        )}
+      </div>
+      <div className="model-settings-section">
+        <h3>Model Settings</h3>
+        {Object.entries(modelSettings).map(([key, value]) => (
+          <div key={key}>
+            <label>{key}:</label>
+            <select
+              value={value}
+              onChange={(e) => handleModelSettingChange(key, e.target.value)}
+            >
+              {(key.includes('LLM') ? modelOptions : embeddingsOptions).map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+        <button onClick={handleSaveModelSettings}>Save Model Settings</button>
+      </div>
       {message && <p className="message">{message}</p>}
-      {!isKeySet && <p className="warning">Please set your API key to use the application.</p>}
-      {isKeySet && !isEditing ? (
-        <div>
-          <p>Your API key is set:</p>
-          <p className="api-key-display">{apiKey}</p>
-          <button onClick={() => setIsEditing(true)}>Edit API Key</button>
-          <button onClick={handleRemove}>Remove API Key</button>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="apiKey">API Key:</label>
-          <input
-            type="password"
-            id="apiKey"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-          <button type="submit">{isKeySet ? 'Update API Key' : 'Save API Key'}</button>
-          {isEditing && <button type="button" onClick={() => setIsEditing(false)}>Cancel</button>}
-        </form>
-      )}
-      
-      <h3>Model Settings</h3>
-      {Object.entries(modelSettings).map(([key, value]) => (
-        <div key={key}>
-          <label>{key}:</label>
-          {key === 'embeddingsModel' ? (
-            <select
-              value={value}
-              onChange={(e) => handleModelSettingChange(key, e.target.value)}
-            >
-              {embeddingsOptions.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          ) : (
-            <select
-              value={value}
-              onChange={(e) => handleModelSettingChange(key, e.target.value)}
-            >
-              {modelOptions.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          )}
-        </div>
-      ))}
-      <button onClick={saveModelSettings}>Save Model Settings</button>
     </div>
   );
 }
