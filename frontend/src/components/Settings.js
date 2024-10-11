@@ -123,6 +123,7 @@ function Settings() {
       });
       if (response.status === 200) {
         setMessage('Model settings saved successfully');
+        fetchModelSettings(); // Refresh the model settings
       } else {
         throw new Error('Failed to save model settings');
       }
