@@ -284,8 +284,9 @@ def create_character():
         character = db_instance.create_character(data['name'], data['description'], user_id)
 
         agent_manager = AgentManager(user_id)
-        agent_manager.add_character_to_knowledge_base(data['name'], data['description'])
-        #log the adding of the character to the knowledge base
+        agent_manager.add_character_to_knowledge_base(character)
+
+        # Log the adding of the character to the knowledge base
         logging.info(f"Character {character['name']} added to the knowledge base")
 
         return jsonify(character), 201
