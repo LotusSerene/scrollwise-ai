@@ -475,7 +475,11 @@ def get_knowledge_base_content():
         # Convert embedding_id to list of floats for JSON serialization
         for item in content:
             if 'embedding_id' in item['metadata']:
-                item['metadata']['embedding_id'] = item['metadata']['embedding_id'].tolist()
+                embedding_id = item['metadata']['embedding_id']
+                if isinstance(embedding_id, list):
+                    item['metadata']['embedding_id'] = embedding_id
+                else:
+                    item['metadata']['embedding_id'] = embedding_id.tolist()
         return jsonify({'content': content}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
