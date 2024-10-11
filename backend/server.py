@@ -446,14 +446,14 @@ def query_knowledge_base():
     try:
         data = request.json
         query = data.get('query')
-        model = data.get('model', 'gemini-1.5-pro-002')
+        chat_history = data.get('chatHistory', [])
 
         if not query:
             return jsonify({'error': 'Query is required'}), 400
 
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
-        result = agent_manager.generate_with_retrieval(query)
+        result = agent_manager.generate_with_retrieval(query, chat_history)
 
         return jsonify({'result': result}), 200
     except Exception as e:
