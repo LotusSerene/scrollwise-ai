@@ -105,7 +105,9 @@ class AgentManager:
     
         new_characters = {}
         if self.check_new_characters(chapter, characters_dict):
-            new_characters = self.extract_new_characters(chapter, characters_dict)
+            extraction_response = self.extract_new_characters(chapter, characters_dict)
+            self.add_character_to_knowledge_base(extraction_response)
+            new_characters = extraction_response
 
         return chapter, title, new_characters
 
@@ -477,9 +479,11 @@ class AgentManager:
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
 
 
-    def add_character_to_knowledge_base(self, character: Dict[str, Any]):
-        text = f"Character {character['id']}: {character['name']}\n{character['description']}"
-        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
+    def add_character_to_knowledge_base(self, extraction_response: Dict[str, str]):
+        for character_name, character_description in extraction_response.items():
+            character = {"id": character_name, "name": character_name, "description": character_description}
+            text = f"Character {character['id']}: {character['description']}"
+            self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
 
     def remove_character_from_knowledge_base(self, character_id: str):
         self.vector_store.delete([character_id])

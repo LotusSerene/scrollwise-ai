@@ -284,7 +284,8 @@ def create_character():
         character = db_instance.create_character(data['name'], data['description'], user_id)
 
         agent_manager = AgentManager(user_id)
-        agent_manager.add_character_to_knowledge_base(character)
+        character_info = {"id": character['id'], "name": character['name'], "description": character['description']}
+        agent_manager.add_character_to_knowledge_base({character['name']: character['description']})
 
         # Log the adding of the character to the knowledge base
         logging.info(f"Character {character['name']} added to the knowledge base")
@@ -303,7 +304,8 @@ def update_character(character_id):
         updated_character = db_instance.update_character(character_id, data['name'], data['description'], user_id)
 
         agent_manager = AgentManager(user_id)
-        agent_manager.update_character_in_knowledge_base(updated_character)
+        character_info = {"id": updated_character['id'], "name": updated_character['name'], "description": updated_character['description']}
+        agent_manager.add_character_to_knowledge_base({updated_character['name']: updated_character['description']})
 
         return jsonify(updated_character), 200
     except Exception as e:
