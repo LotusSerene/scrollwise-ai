@@ -397,6 +397,29 @@ def check_api_key():
         logging.error(f"An error occurred in check_api_key: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/model-settings', methods=['GET'])
+@jwt_required()
+def get_model_settings():
+    try:
+        user_id = get_current_user_id()
+        settings = db_instance.get_model_settings(user_id)
+        return jsonify(settings), 200
+    except Exception as e:
+        logging.error(f"An error occurred in get_model_settings: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/model-settings', methods=['POST'])
+@jwt_required()
+def save_model_settings():
+    try:
+        user_id = get_current_user_id()
+        settings = request.json
+        db_instance.save_model_settings(user_id, settings)
+        return jsonify({'message': 'Model settings saved successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in save_model_settings: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/remove-api-key', methods=['DELETE'])
 @jwt_required()
 def remove_api_key():

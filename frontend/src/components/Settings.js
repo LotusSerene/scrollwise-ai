@@ -46,6 +46,27 @@ function Settings() {
     }
   };
 
+  const fetchModelSettings = async () => {
+    try {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, {
+        headers: headers
+      });
+      if (response.status === 200 && response.data) {
+        setModelSettings(response.data);
+      } else {
+        throw new Error('Failed to fetch model settings');
+      }
+    } catch (error) {
+      console.error('Error fetching model settings:', error);
+      if (error.response && error.response.status === 401) {
+        setMessage('Your session has expired. Please log in again.');
+      } else {
+        setMessage('Error fetching model settings. Please try again later.');
+      }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -58,6 +79,7 @@ function Settings() {
         setIsKeySet(true);
         setIsEditing(false);
         checkApiKeyStatus(); // Refresh the masked API key
+        fetchModelSettings(); // Refresh the model settings
       } else {
         throw new Error('Failed to save API key');
       }
