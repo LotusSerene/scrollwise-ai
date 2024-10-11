@@ -262,7 +262,7 @@ class AgentManager:
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
 
-    def generate_with_retrieval(self, query: str) -> str:
+    def generate_with_retrieval(self, query: str, chat_history: List[Tuple[str, str]] = None) -> str:
         self.logger.debug(f"Generating response for query: {query}")
         qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -272,6 +272,11 @@ class AgentManager:
             return_messages=True,
             output_key="answer"
         )
+        
+        # If chat history is provided, add it to the memory
+        if chat_history:
+            for message in chat_history:
+                memory.chat_memory.add_user_message(message[0]) if message[1] == 'user' else memory.chat_memory.add_ai_message(message[0])
         
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=qa_llm,
@@ -294,11 +299,6 @@ class AgentManager:
         response = f"{answer}\n\nSources:\n"
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
-        
-        # Update chat history
-        self.chat_history.append({"role": "user", "content": query})
-        self.chat_history.append({"role": "assistant", "content": answer})
-        db_instance.save_chat_history(self.user_id, self.chat_history)
         
         return response
 
