@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Button, TextField, Typography, Paper, List, ListItem, ListItemText, Divider } from '@mui/material';
 import axios from 'axios';
 import { getAuthHeaders } from '../utils/auth';
+import './KnowledgeBase.css';
 
 const KnowledgeBase = () => {
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
@@ -56,49 +56,36 @@ const KnowledgeBase = () => {
   };
 
   return (
-    <Paper elevation={3} style={{ padding: '20px', marginTop: '20px' }}>
-      <Typography variant="h5" gutterBottom>Knowledge Base</Typography>
-      
-      <Typography variant="h6" gutterBottom>Current Knowledge Base Content</Typography>
-      <List>
+    <div className="knowledge-base-container">
+      <h2>Knowledge Base</h2>
+        
+      <h3>Current Knowledge Base Content</h3>
+      <ul>
         {knowledgeBaseContent.map((item, index) => (
-          <React.Fragment key={index}>
-            <ListItem>
-              <ListItemText
-                primary={`Type: ${item.type}`}
-                secondary={
-                  <>
-                    <Typography component="span" variant="body2" color="textPrimary">
-                      Content: <div className="content">{item.content}</div>
-                    </Typography>
-                    <br />
-                    <Typography component="span" variant="body2" color="textSecondary">
-                      Metadata: {JSON.stringify(item.metadata, null, 2)}
-                    </Typography>
-                  </>
-                }
-              />
-            </ListItem>
-            {index < knowledgeBaseContent.length - 1 && <Divider />}
-          </React.Fragment>
+          <li key={index}>
+            <div>
+              <strong>Type:</strong> {item.type}
+              <br />
+              <strong>Content:</strong> <div className="content">{item.content}</div>
+              <br />
+              <strong>Metadata:</strong> {JSON.stringify(item.metadata, null, 2)}
+            </div>
+            {index < knowledgeBaseContent.length - 1 && <hr />}
+          </li>
         ))}
-      </List>
+      </ul>
 
-      <Typography variant="h6" gutterBottom style={{ marginTop: '20px' }}>Add to Knowledge Base</Typography>
+      <h3 style={{ marginTop: '20px' }}>Add to Knowledge Base</h3>
       <form onSubmit={handleTextSubmit}>
-        <TextField
-          fullWidth
-          multiline
-          rows={4}
-          variant="outlined"
-          label="Add text to knowledge base"
-          value={textInput}
-          onChange={(e) => setTextInput(e.target.value)}
-          style={{ marginBottom: '10px' }}
-        />
-        <Button type="submit" variant="contained" color="primary">
-          Add Text
-        </Button>
+        <label>
+          Add text to knowledge base:
+          <textarea
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            style={{ marginBottom: '10px' }}
+          />
+        </label>
+        <button type="submit">Add Text</button>
       </form>
 
       <form onSubmit={handleFileUpload} style={{ marginTop: '20px' }}>
@@ -107,11 +94,9 @@ const KnowledgeBase = () => {
           onChange={(e) => setFile(e.target.files[0])}
           style={{ marginBottom: '10px' }}
         />
-        <Button type="submit" variant="contained" color="secondary">
-          Upload Document
-        </Button>
+        <button type="submit">Upload Document</button>
       </form>
-    </Paper>
+    </div>
   );
 };
 
