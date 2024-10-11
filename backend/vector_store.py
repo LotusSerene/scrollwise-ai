@@ -48,12 +48,12 @@ class VectorStore:
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         self.logger.debug(f"Retrieving all knowledge base content for user {self.user_id}")
         collection = self.vector_store._collection
-        results = collection.get(include=['metadatas', 'documents', 'ids'])
+        results = collection.get(include=['metadatas', 'documents'])
         
         content = []
         for i, doc in enumerate(results['documents']):
             metadata = results['metadatas'][i] if i < len(results['metadatas']) else {}
-            embedding_id = results['ids'][i] if i < len(results['ids']) else None
+            embedding_id = metadata.get('embedding_id')  # Assuming embedding_id is stored in metadata
             content.append({
                 "type": metadata.get('type', 'Unknown') if metadata else 'Unknown',
                 "content": doc[:100] if doc else "",  # Return first 100 characters of content
