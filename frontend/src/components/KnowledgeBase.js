@@ -36,8 +36,7 @@ function KnowledgeBase() {
     try {
       const headers = getAuthHeaders();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        documents: documents.split('\n'),
-        user_id: userId
+        documents: documents.split('\n')
       }, {
         headers: headers
       });
@@ -70,8 +69,6 @@ function KnowledgeBase() {
 
     const formData = new FormData();
     formData.append('file', selectedFile);
-    formData.append('user_id', userId);
-
     try {
       const headers = getAuthHeaders();
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/upload-document`, formData, {

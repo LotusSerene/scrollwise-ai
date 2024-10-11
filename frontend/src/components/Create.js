@@ -49,8 +49,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
           minWordCount,
           additionalInstructions: instructions
         },
-        previousChapters,
-        user_id: userId
+        previousChapters
       }, {
         headers: headers
       });
