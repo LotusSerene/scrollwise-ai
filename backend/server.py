@@ -372,7 +372,7 @@ def upload_document():
 
             user_id = get_jwt_identity()
             agent_manager = AgentManager(user_id)
-            agent_manager.add_to_knowledge_base([extracted_text])
+            agent_manager.add_to_knowledge_base([extracted_text], metadata={"type": "doc"})
 
             os.remove(file_path)
             os.rmdir(temp_dir)
@@ -472,15 +472,19 @@ def get_knowledge_base_content():
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
         content = agent_manager.get_knowledge_base_content()
-        # Convert embedding_id to list of floats for JSON serialization
-        for item in content:
-            if 'embedding_id' in item['metadata']:
-                embedding_id = item['metadata']['embedding_id']
-                if isinstance(embedding_id, list):
-                    item['metadata']['embedding_id'] = embedding_id
-                else:
-                    item['metadata']['embedding_id'] = embedding_id.tolist()
-        return jsonify({'content': content}), 200
+        
+        # Format the content for frontend display
+        formatted_content = []
+        if content:
+            for item in content:
+                formatted_item = {
+                    'type': item['metadata'].get('type', 'Unknown'),
+                    'content': item['page_content'],
+                    'embedding_id': item['id']
+                }
+                formatted_content.append(formatted_item)
+        
+        return jsonify({'content': formatted_content}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -497,16 +501,25 @@ def reset_chat_history():
         logging.error(f"An error occurred in reset_chat_history: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/knowledge-base/<embedding_id>', methods=['DELETE'])
+@app.route('/api/knowledge-base/<embedding_id>', methods=['DELETE', 'PUT'])
 @jwt_required()
-def delete_from_knowledge_base(embedding_id):
+def manage_knowledge_base_item(embedding_id):
     try:
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
-        agent_manager.vector_store.delete([embedding_id])
-        return jsonify({'message': 'Item deleted from knowledge base successfully'}), 200
+
+        if request.method == 'DELETE':
+            agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
+            return jsonify({'message': 'Item deleted from knowledge base successfully'}), 200
+        elif request.method == 'PUT':
+            data = request.json
+            new_content = data.get('content')
+            new_metadata = data.get('metadata')
+            agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content, new_metadata)
+            return jsonify({'message': 'Item updated in knowledge base successfully'}), 200
+
     except Exception as e:
-        logging.error(f"An error occurred in delete_from_knowledge_base: {str(e)}", exc_info=True)
+        logging.error(f"An error occurred in manage_knowledge_base_item: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
