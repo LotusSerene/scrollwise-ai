@@ -1,7 +1,6 @@
-# backend/server.py
 from flask import Flask, request, jsonify, Blueprint
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, verify_jwt_in_request, jwt_required
 import os
 from dotenv import load_dotenv
 import logging
@@ -14,6 +13,7 @@ from werkzeug.utils import secure_filename
 import tempfile
 import pypdf
 import docx2txt
+from vector_store import VectorStore
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -40,6 +40,10 @@ jwt = JWTManager(app)
 # Create a test user if they don't already exist
 if not db_instance.get_user_by_email("test@example.com"):
     db_instance.create_user("test@example.com", "password")
+
+# Replace the get_user_id_from_headers function with this:
+def get_current_user_id():
+    return get_jwt_identity()
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -89,41 +93,30 @@ def login():
 def generate_chapters():
     try:
         data = request.json
-        #logging.debug(f"Received data: {data}")
-        
+        user_id = get_current_user_id()
+
         num_chapters = int(data.get('numChapters', 1))
         plot = data.get('plot', '')
         writing_style = data.get('writingStyle', '')
         instructions = data.get('instructions', {})
         style_guide = instructions.get('styleGuide', '')
-        generation_model = data.get('generationModel', 'gemini-1.5-pro-002')
-        check_model = data.get('checkModel', 'gemini-1.5-pro-002')
         min_word_count = int(instructions.get('minWordCount', 1000))
-        previous_chapters = chapters = db_instance.get_all_chapters()
-        #logging.debug(f"Received previousChapters: {previous_chapters}")
-        
-        user_id = get_jwt_identity()  # Get user ID from JWT token
-        
+        previous_chapters = db_instance.get_all_chapters(user_id)
+
         try:
-            agent_manager = AgentManager(user_id, generation_model, check_model)
+            agent_manager = AgentManager(user_id)
         except ValueError as e:
             return jsonify({'error': str(e)}), 400  # Return 400 Bad Request if API key is not set
-       # logging.debug("AgentManager initialized")
 
         generated_chapters = []
         validities = []
 
         # Get the current chapter count from the database
-        current_chapter_count = get_chapter_count()
+        current_chapter_count = get_chapter_count(user_id)
 
         for i in range(num_chapters):
             chapter_number = current_chapter_count + i + 1
-            #logging.debug(f"Generating chapter {chapter_number}")
-            # Log the characters being sent to the agent
-            #logging.debug(f"Sending characters to agent: {db.get_all_characters()}")
-
-            characters = db_instance.get_all_characters()
-           # logging.debug(f"Retrieved {len(characters)} characters")
+            characters = db_instance.get_all_characters(user_id)
 
             try:
                 chapter_content, chapter_title, new_characters = agent_manager.generate_chapter(
@@ -139,7 +132,6 @@ def generate_chapters():
                     previous_chapters=previous_chapters, 
                     characters=characters
                 )
-                logging.debug(f"Chapter {chapter_number} generated successfully")
             except Exception as e:
                 logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
                 raise
@@ -147,17 +139,24 @@ def generate_chapters():
             # Check for new characters
             if new_characters:
                 for name, description in new_characters.items():
-                    db_instance.create_character(name, description)
-                
+                    db_instance.create_character(name, description, user_id)
+
             # Save the chapter to the database
-            chapter_id = db_instance.create_chapter(chapter_title, chapter_content)
-                
+            chapter_id = db_instance.create_chapter(chapter_title, chapter_content, user_id)
+
+            # Add the chapter to the knowledge base
+            agent_manager.add_chapter_to_knowledge_base({
+                'id': chapter_id,
+                'title': chapter_title,
+                'content': chapter_content
+            })
+
             # Get validity from the agent's check_chapter method
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                
+
             # Save validity to the database
-            db_instance.save_validity_check(chapter_id, chapter_title, validity)
-                
+            db_instance.save_validity_check(chapter_id, chapter_title, validity, user_id)
+
             generated_chapters.append({
                 'id': chapter_id,
                 'content': chapter_content,
@@ -176,17 +175,19 @@ def generate_chapters():
 @jwt_required()
 def get_chapters():
     try:
-        chapters = db_instance.get_all_chapters()
-        logging.debug(f"Retrieved {len(chapters)} chapters")
+        user_id = get_current_user_id()
+        chapters = db_instance.get_all_chapters(user_id)
         return jsonify({'chapters': chapters}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters/<chapter_id>', methods=['PUT'])
+@jwt_required()
 def update_chapter(chapter_id):
     try:
         data = request.json
-        updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'))
+        user_id = get_current_user_id()
+        updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'), user_id)
         if updated_chapter:
             return jsonify(updated_chapter), 200
         else:
@@ -196,9 +197,11 @@ def update_chapter(chapter_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chapters/<chapter_id>', methods=['DELETE'])
+@jwt_required()
 def delete_chapter(chapter_id):
     try:
-        if db_instance.delete_chapter(chapter_id):
+        user_id = get_current_user_id()
+        if db_instance.delete_chapter(chapter_id, user_id):
             return jsonify({'message': 'Chapter deleted successfully'}), 200
         else:
             return jsonify({'error': 'Chapter not found'}), 404
@@ -207,45 +210,51 @@ def delete_chapter(chapter_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/validity-checks', methods=['GET'])
+@jwt_required()
 def get_validity_checks():
     try:
-        validity_checks = db_instance.get_all_validity_checks()
+        user_id = get_current_user_id()
+        validity_checks = db_instance.get_all_validity_checks(user_id)
         return jsonify({'validityChecks': validity_checks}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_validity_checks: {str(e)}", exc_info=True)
         return jsonify({'error': 'An internal server error occurred'}), 500
 
 @app.route('/api/validity-checks/<check_id>', methods=['DELETE'])
+@jwt_required()
 def delete_validity_check(check_id):
     try:
-        if db_instance.delete_validity_check(check_id):
+        user_id = get_current_user_id()
+        if db_instance.delete_validity_check(check_id, user_id):
             return jsonify({'message': 'Validity check deleted successfully'}), 200
         else:
             return jsonify({'error': 'Validity check not found'}), 404
     except Exception as e:
         logging.error(f"Error deleting validity check: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'An error occurred while deleting the validity check: {str(e)}'}), 500
 
 @app.route('/api/chapters', methods=['POST'])
 @jwt_required()
 def create_chapter():
     try:
         data = request.get_json()
-        chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''))
-        
-        user_id = get_jwt_identity()
-        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        user_id = get_current_user_id()
+        chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), user_id)
+
+        agent_manager = AgentManager(user_id)
         agent_manager.add_chapter_to_knowledge_base(chapter)
-        
+
         return jsonify({'message': 'Chapter created successfully', 'id': chapter['id']}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/characters', methods=['GET'])
+@jwt_required()
 def get_characters():
     try:
-        characters = db_instance.get_all_characters()
+        user_id = get_current_user_id()
+        characters = db_instance.get_all_characters(user_id)
         return jsonify({'characters': characters}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -254,38 +263,39 @@ def get_characters():
 @jwt_required()
 def delete_character(character_id):
     try:
-        character = db_instance.get_character_by_id(character_id)
+        user_id = get_current_user_id()
+        character = db_instance.get_character_by_id(character_id, user_id)
         if character:
-            db_instance.delete_character(character_id)
-            
-            user_id = get_jwt_identity()
-            agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+            db_instance.delete_character(character_id, user_id)
+
+            agent_manager = AgentManager(user_id)
             agent_manager.remove_character_from_knowledge_base(character)
-            
+
             return jsonify({'message': 'Character deleted successfully'}), 200
         else:
             return jsonify({'error': 'Character not found'}), 404
     except Exception as e:
-        logging.error(f"Error deleting character: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Error deleting character: {str(e)}", exc_info=True)
+        return jsonify({'error': f'An error occurred while deleting the character: {str(e)}'}), 500
 
 @app.route('/api/characters', methods=['POST'])
 @jwt_required()
 def create_character():
     try:
         data = request.json
-        character = db_instance.create_character(data['name'], data['description'])
-        
-        user_id = get_jwt_identity()
-        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+        user_id = get_current_user_id()
+        character = db_instance.create_character(data['name'], data['description'], user_id)
+
+        agent_manager = AgentManager(user_id)
         agent_manager.add_character_to_knowledge_base(character)
-        
+
         return jsonify(character), 201
     except Exception as e:
         logging.error(f"Error creating character: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge-base', methods=['POST'])
+@jwt_required()
 def add_to_knowledge_base():
     try:
         data = request.json
@@ -293,9 +303,13 @@ def add_to_knowledge_base():
         if not documents:
             return jsonify({'error': 'Documents are required'}), 400
 
-        user_id = get_jwt_identity()  # Get user ID from JWT token
-        agent_manager = AgentManager(user_id, 'gemini-1.5-flash-002', 'gemini-1.5-flash-002')  # Pass user ID to AgentManager
-        agent_manager.add_to_knowledge_base(documents)
+        user_id = get_current_user_id()
+        api_key = db_instance.get_api_key(user_id)
+        model_settings = db_instance.get_model_settings(user_id)
+        vector_store = VectorStore(api_key, model_settings['embeddingsModel'])
+
+        for doc in documents:
+            vector_store.add_to_knowledge_base(doc)
 
         return jsonify({'message': 'Documents added to the knowledge base successfully'}), 200
     except Exception as e:
@@ -311,7 +325,7 @@ def save_api_key():
         if not api_key:
             return jsonify({'error': 'API key is required'}), 400
 
-        user_id = get_jwt_identity()
+        user_id = get_current_user_id()
         db_instance.save_api_key(user_id, api_key)
 
         return jsonify({'message': 'API key saved successfully'}), 200
@@ -320,6 +334,7 @@ def save_api_key():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/upload-document', methods=['POST'])
+@jwt_required()
 def upload_document():
     try:
         if 'file' not in request.files:
@@ -340,8 +355,8 @@ def upload_document():
             extracted_text = extract_text_from_document(file_path)
 
             # Add the processed document to the knowledge base
-            user_id = get_jwt_identity()
-            agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
+            user_id = get_current_user_id()
+            agent_manager = AgentManager(user_id)
             agent_manager.add_to_knowledge_base([extracted_text])
 
             # Remove the temporary file
@@ -373,7 +388,7 @@ def extract_text_from_document(file_path):
 @jwt_required()
 def check_api_key():
     try:
-        user_id = get_jwt_identity()
+        user_id = get_current_user_id()
         api_key = db_instance.get_api_key(user_id)
         is_set = bool(api_key)
         masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
@@ -386,7 +401,7 @@ def check_api_key():
 @jwt_required()
 def remove_api_key():
     try:
-        user_id = get_jwt_identity()
+        user_id = get_current_user_id()
         db_instance.remove_api_key(user_id)
         return jsonify({'message': 'API key removed successfully'}), 200
     except Exception as e:
@@ -400,12 +415,12 @@ def query_knowledge_base():
         data = request.json
         query = data.get('query')
         model = data.get('model', 'gemini-1.5-pro-002')
-        
+
         if not query:
             return jsonify({'error': 'Query is required'}), 400
 
-        user_id = get_jwt_identity()
-        agent_manager = AgentManager(user_id, model, model)
+        user_id = get_current_user_id()
+        agent_manager = AgentManager(user_id)
         result = agent_manager.generate_with_retrieval(query)
 
         return jsonify({'result': result}), 200
@@ -417,12 +432,49 @@ def query_knowledge_base():
 @jwt_required()
 def get_knowledge_base_content():
     try:
-        user_id = get_jwt_identity()
-        agent_manager = AgentManager(user_id, 'gemini-1.5-pro-002', 'gemini-1.5-pro-002')
-        content = agent_manager.get_knowledge_base_content()
+        user_id = get_current_user_id()
+        api_key = db_instance.get_api_key(user_id)
+        model_settings = db_instance.get_model_settings(user_id)
+        vector_store = VectorStore(api_key, model_settings['embeddingsModel'])
+        content = vector_store.get_knowledge_base_content()
         return jsonify({'content': content}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/reset-chat-history', methods=['POST'])
+@jwt_required()
+def reset_chat_history():
+    try:
+        user_id = get_current_user_id()
+        agent_manager = AgentManager(user_id)
+        agent_manager.reset_memory()
+        return jsonify({'message': 'Chat history reset successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in reset_chat_history: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/model-settings', methods=['GET'])
+@jwt_required()
+def get_model_settings():
+    try:
+        user_id = get_current_user_id()
+        settings = db_instance.get_model_settings(user_id)
+        return jsonify(settings), 200
+    except Exception as e:
+        logging.error(f"An error occurred in get_model_settings: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/model-settings', methods=['POST'])
+@jwt_required()
+def save_model_settings():
+    try:
+        user_id = get_current_user_id()
+        settings = request.json
+        db_instance.save_model_settings(user_id, settings)
+        return jsonify({'message': 'Model settings saved successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in save_model_settings: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Settings.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 
 function Settings() {
   const [apiKey, setApiKey] = useState('');
@@ -18,13 +18,8 @@ function Settings() {
   });
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (token) {
-      checkApiKeyStatus();
-      fetchModelSettings();
-    } else {
-      setMessage('Please log in to access settings.');
-    }
+    checkApiKeyStatus();
+    fetchModelSettings();
   }, []);
 
   const checkApiKeyStatus = async () => {
@@ -33,9 +28,13 @@ function Settings() {
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-api-key`, {
         headers: headers
       });
-      setIsKeySet(response.data.isSet);
-      if (response.data.isSet) {
-        setApiKey(response.data.apiKey);
+      if (response.status === 200 && response.data) {
+        setIsKeySet(response.data.isSet);
+        if (response.data.isSet) {
+          setApiKey(response.data.apiKey);
+        }
+      } else {
+        throw new Error('Failed to check API key status');
       }
     } catch (error) {
       console.error('Error checking API key status:', error);
@@ -54,10 +53,14 @@ function Settings() {
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/save-api-key`, { apiKey }, {
         headers: headers
       });
-      setMessage(response.data.message);
-      setIsKeySet(true);
-      setIsEditing(false);
-      checkApiKeyStatus(); // Refresh the masked API key
+      if (response.status === 200) {
+        setMessage(response.data.message);
+        setIsKeySet(true);
+        setIsEditing(false);
+        checkApiKeyStatus(); // Refresh the masked API key
+      } else {
+        throw new Error('Failed to save API key');
+      }
     } catch (error) {
       console.error('Error saving API key:', error);
       if (error.response && error.response.status === 401) {
@@ -93,7 +96,11 @@ function Settings() {
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, {
         headers: headers
       });
-      setModelSettings(response.data);
+      if (response.status === 200 && response.data) {
+        setModelSettings(response.data);
+      } else {
+        throw new Error('Failed to fetch model settings');
+      }
     } catch (error) {
       console.error('Error fetching model settings:', error);
       if (error.response && error.response.status === 401) {
@@ -111,10 +118,14 @@ function Settings() {
   const saveModelSettings = async () => {
     try {
       const headers = getAuthHeaders();
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, {
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, {
         headers: headers
       });
-      setMessage('Model settings saved successfully');
+      if (response.status === 200) {
+        setMessage('Model settings saved successfully');
+      } else {
+        throw new Error('Failed to save model settings');
+      }
     } catch (error) {
       console.error('Error saving model settings:', error);
       if (error.response && error.response.status === 401) {
