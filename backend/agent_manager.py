@@ -476,14 +476,6 @@ class AgentManager:
         chain = prompt | title_llm | StrOutputParser()
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
 
-    def add_character_to_knowledge_base(self, character: Dict[str, Any]):
-
-
-    def remove_character_from_knowledge_base(self, character_id: str):
-
-
-    def update_character_in_knowledge_base(self, character: Dict[str, Any]):
-
 
     def add_character_to_knowledge_base(self, character: Dict[str, Any]):
         text = f"Character {character['id']}: {character['name']}\n{character['description']}"
