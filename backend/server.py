@@ -489,5 +489,17 @@ def reset_chat_history():
         logging.error(f"An error occurred in reset_chat_history: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/knowledge-base/<embedding_id>', methods=['DELETE'])
+@jwt_required()
+def delete_from_knowledge_base(embedding_id):
+    try:
+        user_id = get_jwt_identity()
+        agent_manager = AgentManager(user_id)
+        agent_manager.vector_store.delete([embedding_id])
+        return jsonify({'message': 'Item deleted from knowledge base successfully'}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in delete_from_knowledge_base: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True)
