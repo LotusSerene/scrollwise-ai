@@ -24,7 +24,7 @@ function Settings() {
 
   const checkApiKeyStatus = async () => {
     try {
-      const response = await axios.get('/api/check-api-key', { headers: getAuthHeaders() });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-api-key`, { headers: getAuthHeaders() });
       setIsKeySet(response.data.isSet);
       if (response.data.isSet) {
         setApiKey(response.data.apiKey);
@@ -36,7 +36,7 @@ function Settings() {
 
   const fetchModelSettings = async () => {
     try {
-      const response = await axios.get('/api/model-settings', { headers: getAuthHeaders() });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, { headers: getAuthHeaders() });
       setModelSettings(response.data);
     } catch (error) {
       console.error('Error fetching model settings:', error);
@@ -45,7 +45,7 @@ function Settings() {
 
   const handleSaveApiKey = async () => {
     try {
-      await axios.post('/api/save-api-key', { apiKey }, { headers: getAuthHeaders() });
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/save-api-key`, { apiKey }, { headers: getAuthHeaders() });
       setMessage('API key saved successfully');
       setIsKeySet(true);
       setIsEditing(false);
@@ -56,7 +56,7 @@ function Settings() {
 
   const handleRemoveApiKey = async () => {
     try {
-      await axios.delete('/api/remove-api-key', { headers: getAuthHeaders() });
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/remove-api-key`, { headers: getAuthHeaders() });
       setMessage('API key removed successfully');
       setIsKeySet(false);
       setApiKey('');
@@ -67,7 +67,7 @@ function Settings() {
 
   const handleSaveModelSettings = async () => {
     try {
-      await axios.post('/api/model-settings', modelSettings, { headers: getAuthHeaders() });
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, { headers: getAuthHeaders() });
       setMessage('Model settings saved successfully');
     } catch (error) {
       setMessage('Error saving model settings');
