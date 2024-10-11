@@ -477,8 +477,9 @@ def get_knowledge_base_content():
         formatted_content = []
         if content:
             for item in content:
+                metadata = item.get('metadata', {})
                 formatted_item = {
-                    'type': item['metadata'].get('type', 'Unknown'),
+                    'type': metadata.get('type', 'Unknown'),
                     'content': item['page_content'],
                     'embedding_id': item['id']
                 }
