@@ -300,6 +300,9 @@ class AgentManager:
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
         
+        # Save the chat history to the database
+        self.save_chat_history(chat_history)
+        
         return response
 
     def _get_qa_prompt(self):
