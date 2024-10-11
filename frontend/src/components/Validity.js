@@ -10,7 +10,7 @@ function Validity() {
 
   useEffect(() => {
     fetchValidityChecks();
-  }, [userId]);
+  }, []);
 
   const fetchValidityChecks = async () => {
     try {
