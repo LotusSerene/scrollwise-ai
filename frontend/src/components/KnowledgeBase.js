@@ -69,11 +69,11 @@ const KnowledgeBase = () => {
                 secondary={
                   <>
                     <Typography component="span" variant="body2" color="textPrimary">
-                      Content: {item.content}
+                      Content: <div className="content">{item.content}</div>
                     </Typography>
                     <br />
                     <Typography component="span" variant="body2" color="textSecondary">
-                      Metadata: {JSON.stringify(item.metadata)}
+                      Metadata: {JSON.stringify(item.metadata, null, 2)}
                     </Typography>
                   </>
                 }

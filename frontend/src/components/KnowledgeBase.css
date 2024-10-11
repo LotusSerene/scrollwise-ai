@@ -77,3 +77,14 @@
   font-size: 14px;
   margin-top: 10px;
 }
+
+.knowledge-base-container .content {
+  background-color: #333333;
+  color: #ffffff;
+  border: 1px solid #555555;
+  border-radius: 5px;
+  padding: 10px;
+  font-size: 16px;
+  margin-top: 10px;
+  white-space: pre-wrap; /* Preserve whitespace and wrap text */
+}

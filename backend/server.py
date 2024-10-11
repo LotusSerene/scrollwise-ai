@@ -319,7 +319,7 @@ def add_to_knowledge_base():
         user_id = get_jwt_identity()
         api_key = db_instance.get_api_key(user_id)
         model_settings = db_instance.get_model_settings(user_id)
-        vector_store = VectorStore(api_key, model_settings['embeddingsModel'])
+        vector_store = VectorStore(user_id, api_key, model_settings['embeddingsModel'])
 
         for doc in documents:
             vector_store.add_to_knowledge_base(doc)
