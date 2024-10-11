@@ -53,7 +53,7 @@ class VectorStore:
         content = []
         for i, doc in enumerate(results['documents']):
             metadata = results['metadatas'][i] if i < len(results['metadatas']) else {}
-            embedding_id = results['embeddings'][i] if i < len(results['embeddings']) else None
+            embedding_id = results['embeddings'][i].tolist() if i < len(results['embeddings']) else None
             content.append({
                 "type": metadata.get('type', 'Unknown') if metadata else 'Unknown',
                 "content": doc[:100] if doc else "",  # Return first 100 characters of content

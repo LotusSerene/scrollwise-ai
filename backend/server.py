@@ -472,6 +472,10 @@ def get_knowledge_base_content():
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
         content = agent_manager.get_knowledge_base_content()
+        # Convert embedding_id to list of floats for JSON serialization
+        for item in content:
+            if 'embedding_id' in item['metadata']:
+                item['metadata']['embedding_id'] = item['metadata']['embedding_id'].tolist()
         return jsonify({'content': content}), 200
     except Exception as e:
         logging.error(f"An error occurred in get_knowledge_base_content: {str(e)}", exc_info=True)
