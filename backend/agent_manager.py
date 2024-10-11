@@ -487,6 +487,7 @@ class AgentManager:
 
     def remove_character_from_knowledge_base(self, character_id: str):
         self.vector_store.delete([character_id])
+        self.logger.info(f"Removed character with ID {character_id} from the knowledge base for user {self.user_id}")
 
     def update_character_in_knowledge_base(self, character: Dict[str, Any]):
         text = f"Character {character['id']}: {character['name']}\n{character['description']}"
@@ -498,6 +499,7 @@ class AgentManager:
 
     def remove_chapter_from_knowledge_base(self, chapter_id: str):
         self.vector_store.delete([chapter_id])
+        self.logger.info(f"Removed chapter with ID {chapter_id} from the knowledge base for user {self.user_id}")
 
     def update_chapter_in_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"

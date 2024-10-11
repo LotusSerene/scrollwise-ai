@@ -34,7 +34,17 @@ class VectorStore:
     def delete(self, ids: List[str]):
         for id in ids:
             if id:
-                self.vector_store.delete(id)
+                # Find the embedding ID for the given ID
+                documents = self.vector_store.similarity_search(id, k=1)
+                if documents:
+                    embedding_id = documents[0].metadata.get('id')
+                    if embedding_id:
+                        self.vector_store.delete(embedding_id)
+                        self.logger.info(f"Deleted document with embedding ID {embedding_id} for user {self.user_id}")
+                    else:
+                        self.logger.warning(f"No embedding ID found for document with ID {id} for user {self.user_id}")
+                else:
+                    self.logger.warning(f"No matching document found for deletion for user {self.user_id}: {id}")
 
     def similarity_search(self, query: str, k: int = 5) -> List[Document]:
         self.logger.debug(f"Performing similarity search for user {self.user_id} and query: {query}")
@@ -51,9 +61,9 @@ class VectorStore:
         for i, doc in enumerate(results['documents']):
             metadata = results['metadatas'][i] if i < len(results['metadatas']) else {}
             content.append({
-                "type": metadata.get('type', 'Unknown'),
+                "type": metadata.get('type', 'Unknown') if metadata else 'Unknown',
                 "content": doc[:100] if doc else "",  # Return first 100 characters of content
-                "metadata": metadata
+                "metadata": metadata if metadata else {}
             })
         
         self.logger.info(f"Retrieved {len(content)} documents from knowledge base for user {self.user_id}")
@@ -88,10 +98,10 @@ class VectorStore:
             search_kwargs = {"k": 5}
         return self.vector_store.as_retriever(search_kwargs=search_kwargs)
 
-    def update_document(self, doc_id: str, new_content: str, new_metadata: Dict[str, Any] = None):
-        if new_metadata is None:
-            new_metadata = {}
-        self.vector_store.update_document(doc_id, Document(page_content=new_content, metadata=new_metadata))
+    def update_document(self, doc_id: str, new_content: str, metadata: Dict[str, Any] = None):
+        if metadata is None:
+            metadata = {}
+        self.vector_store.update_document(doc_id, Document(page_content=new_content, metadata=metadata))
 
     def clear(self):
         self.vector_store.delete_collection()
