@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './Editor.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 function Editor({ chapters, setChapters }) {
@@ -13,7 +13,6 @@ function Editor({ chapters, setChapters }) {
   const logging = {
     debug: (message) => console.debug(message),
   };
-  const userId = getUserId();
 
   const fetchChapters = useCallback(async () => {
     try {

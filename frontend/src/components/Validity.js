@@ -2,12 +2,11 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Validity.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 
 function Validity() {
   const [validityChecks, setValidityChecks] = useState([]);
   const [selectedCheck, setSelectedCheck] = useState(null);
-  const userId = getUserId();
 
   useEffect(() => {
     fetchValidityChecks();

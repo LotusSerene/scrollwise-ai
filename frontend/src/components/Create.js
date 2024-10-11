@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Create.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 
 const CreateChapter = ({ onChapterGenerated }) => {
   const [numChapters, setNumChapters] = useState(1);
@@ -15,7 +15,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [error, setError] = useState(null);
   const [previousChapters, setPreviousChapters] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const userId = getUserId();
 
   useEffect(() => {
     const fetchPreviousChapters = async () => {

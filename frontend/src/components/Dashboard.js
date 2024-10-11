@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import './Dashboard.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 
 const Dashboard = () => {
   const [characters, setCharacters] = useState([]);
@@ -11,7 +11,6 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const chatContainerRef = useRef(null);
-  const userId = getUserId();
 
   const fetchCharacters = async () => {
     try {

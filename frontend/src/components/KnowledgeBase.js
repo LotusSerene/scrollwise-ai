@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './KnowledgeBase.css';
-import { getAuthToken, getUserId, getAuthHeaders } from '../utils/auth';
+import { getAuthHeaders } from '../utils/auth';
 
 function KnowledgeBase() {
   const [documents, setDocuments] = useState('');
@@ -10,7 +10,6 @@ function KnowledgeBase() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
-  const userId = getUserId();
 
   useEffect(() => {
     fetchKnowledgeBaseContent();
