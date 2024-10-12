@@ -273,9 +273,6 @@ def create_chapter():
         user_id = get_jwt_identity()
         chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), user_id)
 
-        agent_manager = AgentManager(user_id)
-        agent_manager.add_chapter_to_knowledge_base(chapter)
-
         return jsonify({'message': 'Chapter created successfully', 'id': chapter['id']}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
