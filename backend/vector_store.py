@@ -23,6 +23,7 @@ class VectorStore:
             f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
         )
 
+
     def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
         self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
         if metadata is None:
@@ -36,33 +37,7 @@ class VectorStore:
             self.logger.error(
                 f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
             )
-
-
-def flatten_metadata(metadata):
-    flattened = {}
-    for key, value in metadata.items():
-        if isinstance(value, dict):
-            for subkey, subvalue in value.items():
-                flattened[f"{key}_{subkey}"] = subvalue
-        else:
-            flattened[key] = value
-    return flattened
-
-
-def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
-    self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
-    if metadata is None:
-        metadata = {}
-    metadata["user_id"] = self.user_id
-    flattened_metadata = flatten_metadata(metadata)
-    try:
-        self.vector_store.add_texts([text], metadatas=[flattened_metadata])
-        self.logger.info(f"Added content to knowledge base for user {self.user_id}")
-    except Exception as e:
-        self.logger.error(
-            f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
-        )
-
+    
     def delete_from_knowledge_base(self, embedding_id: str):
         self.logger.debug(
             f"Attempting to delete from knowledge base for user {self.user_id}, embedding ID: {embedding_id}"
