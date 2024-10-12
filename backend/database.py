@@ -38,19 +38,6 @@ class Chapter(db.Model):
             'chapter_number': self.chapter_number
         }
 
-class ValidityCheck(db.Model):
-    id = db.Column(db.String, primary_key=True)
-    chapter_id = db.Column(db.String, nullable=False)
-    chapter_title = db.Column(db.String, nullable=False)
-    is_valid = db.Column(db.Boolean, nullable=False)
-    feedback = db.Column(db.Text, nullable=False)
-    review = db.Column(db.Text, nullable=True)
-    style_guide_adherence = db.Column(db.Boolean, nullable=True)
-    style_guide_feedback = db.Column(db.Text, nullable=True)
-    continuity = db.Column(db.Boolean, nullable=True)
-    continuity_feedback = db.Column(db.Text, nullable=True)
-    test_results = db.Column(db.Text, nullable=True)
-    user_id = db.Column(db.String, nullable=False)
 
 class ChatHistory(db.Model):
     id = db.Column(db.String, primary_key=True)
@@ -222,50 +209,6 @@ class Database:
         cursor.close()
         return {'id': row[0], 'title': row[1], 'content': row[2], 'chapter_number': row[3]} if row else None
 
-    def save_validity_check(self, chapter_id, chapter_title, validity, user_id):
-        cursor = self.conn.cursor()
-        try:
-            logging.debug(f"Inserting validity check: id={uuid.uuid4().hex}, chapter_id={chapter_id}, chapter_title={chapter_title}, validity={validity}, user_id={user_id}")
-        
-            # Convert the validity dictionary to a JSON string
-            validity_json = json.dumps(validity)
-        
-            # Ensure all values are of the correct type and handle None values
-            is_valid = 1 if validity.get('is_valid', False) else 0
-            feedback = validity.get('feedback', '')
-            review = validity.get('review', '')
-            style_guide_adherence = 1 if validity.get('style_guide_adherence', False) else 0
-            style_guide_feedback = validity.get('style_guide_feedback', '')
-            continuity = 1 if validity.get('continuity', False) else 0
-            continuity_feedback = validity.get('continuity_feedback', '')
-            test_results = validity.get('test_results', '')
-        
-            cursor.execute('''
-                INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                uuid.uuid4().hex,
-                chapter_id,
-                chapter_title,
-                is_valid,
-                feedback,
-                review,
-                style_guide_adherence,
-                style_guide_feedback,
-                continuity,
-                continuity_feedback,
-                test_results,
-                user_id
-            ))
-            self.conn.commit()
-            cursor.close()
-        except sqlite3.InterfaceError as e:
-            logging.error(f"Error binding parameters: {e}")
-            logging.error(f"Parameters: id={uuid.uuid4().hex}, chapter_id={chapter_id}, chapter_title={chapter_title}, validity={validity_json}, user_id={user_id}")
-            raise
-        except Exception as e:
-            logging.error(f"An error occurred while saving validity check: {e}")
-            raise
 
     def get_all_validity_checks(self, user_id):
         cursor = self.conn.cursor()
