@@ -21,14 +21,21 @@ function Login({ onLogin }) {
 
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem("token", data.token);
-        console.log("Login successful!");
-        onLogin(data.token); // Call the onLogin prop to handle the login
-        navigate("/dashboard"); // Redirect to the /dashboard route after login
+        console.log("Received data:", data); // Log the received data
+
+        if (data.access_token && typeof data.access_token === 'string' && data.access_token.split('.').length === 3) {
+          localStorage.setItem("token", data.access_token);
+          console.log("Login successful!");
+          onLogin(data.access_token);
+          navigate("/dashboard");
+        } else {
+          console.error("Invalid token structure:", data.access_token);
+          alert("Login failed: Invalid token received");
+        }
       } else {
         const errorData = await response.json();
-        console.error("Login failed:", errorData.message);
-        alert("Login failed: " + errorData.message);
+        console.error("Login failed:", errorData);
+        alert("Login failed: " + (errorData.message || "Unknown error"));
       }
     } catch (error) {
       console.error("An error occurred during login:", error);

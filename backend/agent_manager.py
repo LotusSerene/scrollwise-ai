@@ -13,12 +13,13 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_community.vectorstores import Chroma
+from langchain_core.output_parsers import PydanticOutputParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 import logging
 import uuid
 from database import db, db_instance
-from pydantic import BaseModel  # Ensure you import directly from pydantic
+from pydantic import BaseModel, Field
 import json
 # Load environment variables
 load_dotenv()
@@ -27,6 +28,14 @@ from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from vector_store import VectorStore
+from langchain.output_parsers import OutputFixingParser
+
+class NewCharacter(BaseModel):
+    name: str = Field(default="", description="Name of the new character")
+    description: str = Field(default="", description="Brief description of the new character")
+
+class CharacterExtraction(BaseModel):
+    new_characters: List[NewCharacter] = Field(default_factory=list, description="List of new characters found in the chapter")
 
 class AgentManager:
     def __init__(self, user_id: str):
@@ -65,11 +74,11 @@ class AgentManager:
     def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, 
                          instructions: Dict[str, Any],
                          previous_chapters: List[Dict[str, Any]],
-                         characters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, Any]]:
+                         characters: List[Dict[str, Any]]) -> Tuple[str, str, Dict[str, str]]:
         characters_dict = {char['name']: char['description'] for char in characters}
         context = self._construct_context(plot, writing_style, instructions, characters_dict, previous_chapters)
         prompt = self._construct_prompt(instructions, context)
-    
+
         chat_history = ChatMessageHistory()
         total_tokens = 0
         max_history_tokens = self.MAX_INPUT_TOKENS // 4  # Reserve a quarter of the tokens for chat history
@@ -93,9 +102,9 @@ class AgentManager:
             {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
             config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
         )
-    
+
         title = self._generate_title(chapter, chapter_number)
-    
+
         min_word_count = instructions.get('min_word_count', 0)
         if len(chapter.split()) < min_word_count:
             chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
@@ -105,21 +114,69 @@ class AgentManager:
         self.logger.debug(f"Chapter title: {chapter_title}")
         self.logger.debug("Calling check_chapter method")
         validity = self.check_chapter(chapter, instructions, previous_chapters)
-        #self.logger.debug(f"check_chapter returned: {validity}")
-        #self.logger.debug(f"Validity JSON: {json.dumps(validity)}")
-    
-        new_characters = {}
-        if self.check_new_characters(chapter, characters_dict):
-            extraction_response = self.extract_new_characters(chapter, characters_dict)
-            for name, description in extraction_response.items():
-                self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
-                self.logger.info(f"Character {name} added to the knowledge base")
-            new_characters = extraction_response
+
+        new_characters = self.check_and_extract_new_characters(chapter, characters_dict)
+        for name, description in new_characters.items():
+            self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
+            self.logger.info(f"Character {name} added to the knowledge base")
 
         # Save the chapter to the knowledge base
         self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
 
         return chapter, title, new_characters
+
+    def check_and_extract_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
+        character_names = list(characters.keys())
+        
+        parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
+        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
+        
+        prompt = ChatPromptTemplate.from_template("""
+        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify any new characters that are not in the provided list of existing characters.
+
+        For each new character you find:
+        1. Provide their name
+        2. Write a brief description of the character based on information in the chapter
+
+        If you find no new characters, explicitly state "No new characters found."
+
+        Chapter:
+        {chapter}
+
+        Existing Characters:
+        {characters}
+
+        Remember, only include characters that are not in the list of existing characters.
+
+        {format_instructions}
+        """)
+
+        extraction_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | fixing_parser
+
+        try:
+            result = extraction_chain.invoke({
+                "chapter": chapter,
+                "characters": ", ".join(character_names),
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            self.logger.debug(f"check_and_extract_new_characters returned: {result}")
+            self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
+            self.logger.debug(f"Result type: {type(result)}")
+            self.logger.debug(f"Result content: {result}")
+            self.logger.debug(f"Result new_characters: {result.new_characters}")
+            self.logger.debug(f"Sent chapter: {chapter}")
+
+            new_characters = {char.name: char.description for char in result.new_characters}
+            
+            if not new_characters:
+                self.logger.warning("No new characters were extracted. This might be correct, or there might be an issue with character extraction.")
+            
+            return new_characters
+
+        except Exception as e:
+            self.logger.error(f"Error in check_and_extract_new_characters: {str(e)}")
+            return {}
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
                            characters: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
@@ -419,77 +476,6 @@ class AgentManager:
         """
         return ChatPromptTemplate.from_template(template)
 
-    def check_new_characters(self, chapter: str, characters: Dict[str, str]) -> bool:
-        character_names = list(characters.keys())
-        prompt = ChatPromptTemplate.from_template("""
-        Analyze the following chapter and check for any new characters based on the provided list:
-        
-        Chapter:
-        {chapter}
-        
-        Existing Characters:
-        {characters}
-        
-        Are there any new characters introduced in this chapter? Respond with "Yes" or "No" Only, please do not say anything else.
-        """)
-
-        check_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | StrOutputParser()
-        result = check_chain.invoke({
-            "chapter": chapter,
-            "characters": ", ".join(character_names)
-        })
-
-        self.logger.debug("check_new_characters returned: " + result)
-
-        return "Yes" in result
-
-    def extract_new_characters(self, chapter: str, existing_characters: Dict[str, str]) -> Dict[str, str]:
-        extraction_llm = self._initialize_llm(self.model_settings['characterExtractionLLM'])
-        existing_names = set(existing_characters.keys())
-        
-        prompt = ChatPromptTemplate.from_template("""
-        Analyze the following chapter and extract any new characters that are not in the provided list. 
-        For each new character, provide their name and a brief description in the following JSON format:
-
-        ```json
-        {{
-"character_name": "description",
-"character_name": "description"
-        }}
-        ```
-
-        Chapter:
-        {chapter}
-
-        Existing Characters:
-        {existing_characters}
-
-        New Characters:
-        """)
-
-        extraction_chain = prompt | extraction_llm | StrOutputParser()
-        result = extraction_chain.invoke({
-            "chapter": chapter,
-            "existing_characters": ", ".join(existing_names)
-        })
-            # Log the raw response
-        #self.logger.debug(f"Raw new characters response: {result}")
-
-        # Strip leading and trailing backticks
-        result = result.strip().strip('```json').strip('```')
-
-        if not result.strip():
-            self.logger.error("Empty response from new characters check.")
-            return {}
-
-        new_characters = {}
-        try:
-            new_characters = json.loads(result)
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding JSON: {e}")
-            # Handle the error appropriately, e.g., log it or return an empty dictionary
-
-        return new_characters
 
     def _truncate_previous_chapters(self, previous_chapters: List[Dict[str, Any]]) -> str:
         truncated = ""

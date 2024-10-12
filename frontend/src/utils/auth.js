@@ -9,7 +9,7 @@ export const getUserId = () => {
   const token = getAuthToken();
   if (token) {
     const decodedToken = jwtDecode(token);
-    return decodedToken.user_id || null;
+    return decodedToken.sub || null;
   }
   return null;
 };
@@ -24,12 +24,16 @@ export const removeAuthToken = () => {
 
 export const getAuthHeaders = () => {
   const token = getAuthToken();
-  const userId = getUserId();
-  if (token && userId) {
+  if (token) {
+    // Check if the token has the correct format
+    if (token.split('.').length !== 3) {
+      console.error('Invalid token format');
+      return {};
+    }
     return {
-      'Authorization': `Bearer ${token}`,
-      'user_id': userId
+      'Authorization': `Bearer ${token}`
     };
   }
+  console.warn('No auth token found');
   return {};
 };

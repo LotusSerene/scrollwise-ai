@@ -16,10 +16,7 @@ function Validity() {
     try {
       const headers = getAuthHeaders();
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/validity-checks`, {
-        headers: headers,
-        params: {
-          user_id: userId
-        }
+        headers: headers
       });
       setValidityChecks(response.data.validityChecks);
     } catch (error) {
@@ -40,10 +37,7 @@ function Validity() {
     try {
       const headers = getAuthHeaders();
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/validity-checks/${checkId}`, {
-        headers: headers,
-        params: {
-          user_id: userId
-        }
+        headers: headers
       });
       fetchValidityChecks(); // Refresh the list after deletion
       if (selectedCheck && selectedCheck.id === checkId) {
@@ -59,7 +53,7 @@ function Validity() {
       ...check,
       review: check.review || 'N/A',
       style_guide_adherence: check.style_guide_adherence ? 'Yes' : 'No',
-      style_guide_feedback: check.style_guide_adherence_feedback || 'N/A',
+      style_guide_feedback: check.style_guide_feedback || 'N/A',
       continuity: check.continuity ? 'Yes' : 'No',
       continuity_feedback: check.continuity_feedback || 'N/A',
       test_results: check.test_results || 'N/A'

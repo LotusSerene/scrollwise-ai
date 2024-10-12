@@ -24,6 +24,9 @@ function Header({ isLoggedIn, onLogout }) {
               <li>
                 <Link to="/knowledge-base">Knowledge Base</Link>
               </li>
+              <li>
+                <Link to="/settings">Settings</Link>
+              </li>
             </>
           )}
         </ul>

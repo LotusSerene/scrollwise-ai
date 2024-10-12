@@ -24,7 +24,7 @@ function Settings() {
 
   const checkApiKey = async () => {
     try {
-      const response = await axios.get('/api/check-api-key', { headers: getAuthHeaders() });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-api-key`, { headers: getAuthHeaders() });
       setIsKeySet(response.data.isSet);
       setApiKey(response.data.apiKey || '');
     } catch (error) {
@@ -34,7 +34,7 @@ function Settings() {
 
   const fetchModelSettings = async () => {
     try {
-      const response = await axios.get('/api/model-settings', { headers: getAuthHeaders() });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/model-settings`, { headers: getAuthHeaders() });
       setModelSettings(response.data);
     } catch (error) {
       console.error('Error fetching model settings:', error);
@@ -43,7 +43,7 @@ function Settings() {
 
   const handleSaveApiKey = async () => {
     try {
-      await axios.post('/api/save-api-key', { apiKey }, { headers: getAuthHeaders() });
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/save-api-key`, { apiKey }, { headers: getAuthHeaders() });
       setMessage('API key saved successfully');
       setIsKeySet(true);
       setIsEditing(false);
@@ -54,7 +54,7 @@ function Settings() {
 
   const handleRemoveApiKey = async () => {
     try {
-      await axios.delete('/api/remove-api-key', { headers: getAuthHeaders() });
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/remove-api-key`, { headers: getAuthHeaders() });
       setMessage('API key removed successfully');
       setIsKeySet(false);
       setApiKey('');
@@ -65,7 +65,7 @@ function Settings() {
 
   const handleSaveModelSettings = async () => {
     try {
-      await axios.post('/api/model-settings', modelSettings, { headers: getAuthHeaders() });
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/model-settings`, modelSettings, { headers: getAuthHeaders() });
       setMessage('Model settings saved successfully');
     } catch (error) {
       setMessage('Error saving model settings');
@@ -83,8 +83,8 @@ function Settings() {
   ];
 
   const embeddingsOptions = [
-    { value: 'models/text-embedding-004', label: 'Text Embedding 004' },
-    { value: 'models/embedding-001', label: 'Text Embedding 001' }
+    { value: 'models/embedding-001', label: 'Embedding 001' },
+    { value: 'models/text-embedding-004', label: 'Text Embedding 004' }
   ];
 
   return (
@@ -95,8 +95,8 @@ function Settings() {
         {isKeySet && !isEditing ? (
           <>
             <p>API Key: {apiKey}</p>
-            <button onClick={() => setIsEditing(true)}>Edit API Key</button>
-            <button onClick={handleRemoveApiKey}>Remove API Key</button>
+            <button className="btn" onClick={() => setIsEditing(true)}>Edit API Key</button>
+            <button className="btn" onClick={handleRemoveApiKey}>Remove API Key</button>
           </>
         ) : (
           <>
@@ -106,7 +106,7 @@ function Settings() {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="Enter your API key"
             />
-            <button onClick={handleSaveApiKey}>Save API Key</button>
+            <button className="btn" onClick={handleSaveApiKey}>Save API Key</button>
           </>
         )}
       </div>
@@ -125,7 +125,7 @@ function Settings() {
             </select>
           </div>
         ))}
-        <button onClick={handleSaveModelSettings}>Save Model Settings</button>
+        <button className="btn" onClick={handleSaveModelSettings}>Save Model Settings</button>
       </div>
       {message && <p className="message">{message}</p>}
     </div>

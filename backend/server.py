@@ -15,7 +15,7 @@ import tempfile
 import pypdf
 import docx2txt
 from vector_store import VectorStore
-from agent_manager import AgentManager
+
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -166,7 +166,7 @@ def generate_chapters():
                 app.logger.debug(f"Chapter ID: {chapter_id}")
 
                 # Log the parameters being passed to save_validity_check
-                app.logger.debug(f"Saving validity check with parameters: {validity}")
+                #app.logger.debug(f"Saving validity check with parameters: {validity}")
                 db_instance.save_validity_check(
                     chapter_id=chapter_id,
                     chapter_title=chapter_title,
@@ -217,7 +217,51 @@ def update_chapter(chapter_id):
     try:
         data = request.json
         user_id = get_jwt_identity()
+        
+        # Get the existing chapter
+        existing_chapter = db_instance.get_chapter(chapter_id, user_id)
+        if not existing_chapter:
+            return jsonify({'error': 'Chapter not found'}), 404
+
+        # Update the chapter in the database
         updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'), user_id)
+
+        # Update the chapter in the knowledge base
+        agent_manager = AgentManager(user_id)
+        
+        # Get all knowledge base content
+        kb_content = agent_manager.get_knowledge_base_content()
+        
+        # Find the embedding_id for this chapter
+        embedding_id = None
+        for item in kb_content:
+            if item['metadata'].get('type') == 'chapter' and item['metadata'].get('chapter_number') == existing_chapter.get('chapter_number'):
+                embedding_id = item['id']
+                break
+
+        new_metadata = {
+            'type': 'chapter',
+            'user_id': user_id,
+            'chapter_number': existing_chapter.get('chapter_number'),
+            'title': data.get('title')
+        }
+        
+        if embedding_id:
+            # Update existing embedding
+            agent_manager.vector_store.update_in_knowledge_base(
+                embedding_id=embedding_id,
+                new_content=data.get('content'),
+                new_metadata=new_metadata
+            )
+        else:
+            # If there's no embedding_id, create a new embedding
+            new_embedding_ids = agent_manager.vector_store.add_texts(
+                [data.get('content', '')],
+                [new_metadata]
+            )
+            if new_embedding_ids:
+                new_embedding_id = new_embedding_ids[0]
+                # Note: We don't need to update the database with the embedding_id
 
         # Log the updated chapter
         app.logger.debug(f"Updated chapter: {json.dumps(updated_chapter)}")
@@ -233,7 +277,24 @@ def delete_chapter(chapter_id):
     app.logger.debug('Delete chapter function called for chapter_id: %s', chapter_id)
     try:
         user_id = get_jwt_identity()
+        
+        # Get the chapter before deleting it
+        chapter = db_instance.get_chapter(chapter_id, user_id)
+        if not chapter:
+            return jsonify({'error': 'Chapter not found'}), 404
+
+        # Delete the chapter from the database
         if db_instance.delete_chapter(chapter_id, user_id):
+            # Delete the chapter from the knowledge base
+            agent_manager = AgentManager(user_id)
+            kb_content = agent_manager.get_knowledge_base_content()
+            
+            for item in kb_content:
+                if (item['metadata'].get('type') == 'chapter' and 
+                    item['metadata'].get('chapter_number') == chapter['chapter_number']):
+                    agent_manager.vector_store.delete_from_knowledge_base(item['id'])
+                    break
+
             return jsonify({'message': 'Chapter deleted successfully'}), 200
         else:
             return jsonify({'error': 'Chapter not found'}), 404
@@ -273,6 +334,27 @@ def create_chapter():
         user_id = get_jwt_identity()
         chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), user_id)
 
+        # Add the new chapter to the knowledge base
+        agent_manager = AgentManager(user_id)
+        
+        metadata = {
+            "type": "chapter",
+            "user_id": user_id,
+            "chapter_number": chapter['chapter_number'],
+            "title": data.get('title', 'Untitled')
+        }
+        
+        # Use add_texts to get the embedding_id
+        embedding_ids = agent_manager.vector_store.add_texts(
+            [data.get('content', '')],
+            [metadata]
+        )
+        
+        if embedding_ids:
+            embedding_id = embedding_ids[0]
+            # Note: We don't need to update the database with the embedding_id anymore
+            # So we remove the embedding_id argument from the update_chapter call
+
         return jsonify({'message': 'Chapter created successfully', 'id': chapter['id']}), 201
     except Exception as e:
         logging.error(f"Error creating chapter: {str(e)}")
@@ -295,7 +377,18 @@ def delete_character(character_id):
         user_id = get_jwt_identity()
         character = db_instance.get_character_by_id(character_id, user_id)
         if character:
+            # Delete the character from the database
             db_instance.delete_character(character_id, user_id)
+
+            # Delete the character from the knowledge base
+            agent_manager = AgentManager(user_id)
+            kb_content = agent_manager.get_knowledge_base_content()
+            
+            for item in kb_content:
+                if (item['metadata'].get('type') == 'character' and 
+                    item['metadata'].get('name') == character['name']):
+                    agent_manager.vector_store.delete_from_knowledge_base(item['id'])
+                    break
 
             return jsonify({'message': 'Character deleted successfully'}), 200
         else:
@@ -328,9 +421,55 @@ def update_character(character_id):
     try:
         data = request.json
         user_id = get_jwt_identity()
+        
+        # Get the existing character
+        existing_character = db_instance.get_character_by_id(character_id, user_id)
+        if not existing_character:
+            return jsonify({'error': 'Character not found'}), 404
+
+        # Update the character in the database
         updated_character = db_instance.update_character(character_id, data['name'], data['description'], user_id)
 
-        character_info = {"id": updated_character['id'], "name": updated_character['name'], "description": updated_character['description']}
+        # Update the character in the knowledge base
+        agent_manager = AgentManager(user_id)
+        
+        # Get all knowledge base content
+        kb_content = agent_manager.get_knowledge_base_content()
+        
+        # Find the embedding_id for this character
+        embedding_id = None
+        for item in kb_content:
+            if item['metadata'].get('type') == 'character' and item['metadata'].get('name') == existing_character['name']:
+                embedding_id = item['id']
+                break
+
+        new_metadata = {
+            'type': 'character',
+            'user_id': user_id,
+            'name': data['name']
+        }
+        
+        new_content = f"{data['name']}: {data['description']}"
+        
+        if embedding_id:
+            # Update existing embedding
+            agent_manager.vector_store.update_in_knowledge_base(
+                embedding_id=embedding_id,
+                new_content=new_content,
+                new_metadata=new_metadata
+            )
+        else:
+            # If there's no embedding_id, create a new embedding
+            new_embedding_ids = agent_manager.vector_store.add_texts(
+                [new_content],
+                [new_metadata]
+            )
+            if new_embedding_ids:
+                new_embedding_id = new_embedding_ids[0]
+                # Note: We don't need to update the database with the embedding_id
+
+        # Log the updated character
+        app.logger.debug(f"Updated character: {json.dumps(updated_character)}")
 
         return jsonify(updated_character), 200
     except Exception as e:

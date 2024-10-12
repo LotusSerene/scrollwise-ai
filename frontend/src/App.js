@@ -7,6 +7,7 @@ import Create from "./components/Create";
 import Dashboard from "./components/Dashboard";
 import Validity from "./components/Validity";
 import KnowledgeBase from "./components/KnowledgeBase";
+import Settings from "./components/Settings";
 import "./App.css";
 
 function App() {
@@ -61,6 +62,10 @@ function App() {
           <Route
             path="/knowledge-base"
             element={isLoggedIn ? <KnowledgeBase /> : <Navigate to="/login" />}
+          />
+          <Route
+            path="/settings"
+            element={isLoggedIn ? <Settings /> : <Navigate to="/login" />}
           />
           <Route
             path="/"
