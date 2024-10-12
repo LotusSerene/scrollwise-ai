@@ -147,11 +147,24 @@ def generate_chapters():
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
 
             try:
-                db.save_validity_check(chapter_id, chapter_title, validity, user_id)
+                db_instance.save_validity_check(
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    is_valid=validity['is_valid'],
+                    feedback=validity['feedback'],
+                    review=validity.get('review', ''),
+                    style_guide_adherence=validity['style_guide_adherence'],
+                    style_guide_feedback=validity.get('style_guide_feedback', ''),
+                    continuity=validity['continuity'],
+                    continuity_feedback=validity.get('continuity_feedback', ''),
+                    test_results=validity.get('test_results', ''),
+                    user_id=user_id
+                )
             except Exception as e:
                 logging.error(f"Error saving validity check: {str(e)}")
                 # Optionally, you can choose to continue generating chapters even if saving the validity check fails
                 # If you want to stop the process on error, you can re-raise the exception here
+                # raise
 
             generated_chapters.append({
                 'id': chapter_id,
