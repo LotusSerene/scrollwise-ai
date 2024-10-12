@@ -310,6 +310,9 @@ class AgentManager:
     def _get_qa_prompt(self):
         template = """Use the following pieces of context to answer the human's question. 
         If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+        Chat History:
+        {chat_history}
         
         Context:
         {context}
@@ -485,25 +488,19 @@ class AgentManager:
             text = f"Character {character['id']}: {character['description']}"
             self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
 
-    def remove_character_from_knowledge_base(self, character_id: str):
-        self.vector_store.delete([character_id])
-        self.logger.info(f"Removed character with ID {character_id} from the knowledge base for user {self.user_id}")
+    def update_or_remove_from_knowledge_base(self, embedding_id: str, action: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
+        if action == 'delete':
+            self.vector_store.delete_from_knowledge_base(embedding_id)
+        elif action == 'update':
+            if new_content is None and new_metadata is None:
+                raise ValueError("Either new_content or new_metadata must be provided for update action")
+            self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+        else:
+            raise ValueError("Invalid action. Must be 'delete' or 'update'")
 
-    def update_character_in_knowledge_base(self, character: Dict[str, Any]):
-        text = f"Character {character['id']}: {character['name']}\n{character['description']}"
-        self.vector_store.update_document(character['id'], text, metadata={"type": "Character", "id": character['id']})
-
-    def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None):
+    def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.vector_store.add_to_knowledge_base(text, metadata=metadata or {"type": "Chapter", "id": chapter['id']})
-
-    def remove_chapter_from_knowledge_base(self, chapter_id: str):
-        self.vector_store.delete([chapter_id])
-        self.logger.info(f"Removed chapter with ID {chapter_id} from the knowledge base for user {self.user_id}")
-
-    def update_chapter_in_knowledge_base(self, chapter: Dict[str, Any]):
-        text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.vector_store.update_document(chapter['id'], text, metadata={"type": "Chapter", "id": chapter['id']})
+        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
 
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
