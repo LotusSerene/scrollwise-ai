@@ -116,6 +116,9 @@ class AgentManager:
                 self.logger.info(f"Character {name} added to the knowledge base")
             new_characters = extraction_response
 
+        # Save the chapter to the knowledge base
+        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
+
         return chapter, title, new_characters
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
