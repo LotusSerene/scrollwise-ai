@@ -29,7 +29,7 @@ const KnowledgeBase = () => {
     try {
       const headers = getAuthHeaders();
       await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, 
-        { documents: [textInput] },
+        { documents: [textInput], metadata: { type: "doc" } },
         { headers }
       );
       setTextInput('');
@@ -82,13 +82,13 @@ const KnowledgeBase = () => {
           {knowledgeBaseContent.map((item, index) => (
             <li key={index}>
               <div>
-                <strong>Type:</strong> {item.type}
+                <strong>Type:</strong> {item.type || item.metadata?.type || 'Unknown'}
                 <br />
-                <strong>Content:</strong> {item.content}
+                <strong>Content:</strong> {(item.content || item.page_content || '').substring(0, 100)}...
                 <br />
-                <strong>Embedding ID:</strong> {item.metadata.embedding_id}
+                <strong>Embedding ID:</strong> {item.embedding_id || item.id || 'Unknown'}
               </div>
-              <button onClick={() => handleDelete(item.metadata.embedding_id)} className="delete-button">Delete</button>
+              <button onClick={() => handleDelete(item.embedding_id || item.id)} className="delete-button">Delete</button>
             </li>
           ))}
         </ul>
