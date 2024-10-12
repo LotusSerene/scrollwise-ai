@@ -226,6 +226,7 @@ class Database:
                 'feedback': row[4],
                 'review': row[5] if len(row) > 5 else None,
                 'style_guide_adherence': bool(row[6]) if len(row) > 6 else None,
+                'style_guide_feedback': row[7] if len(row) > 7 else None,
                 'continuity': bool(row[8]) if len(row) > 8 else None,
                 'continuity_feedback': row[9] if len(row) > 9 else None,
                 'test_results': row[10] if len(row) > 10 else None
