@@ -105,8 +105,8 @@ class AgentManager:
         self.logger.debug(f"Chapter title: {chapter_title}")
         self.logger.debug("Calling check_chapter method")
         validity = self.check_chapter(chapter, instructions, previous_chapters)
-        self.logger.debug(f"check_chapter returned: {validity}")
-        self.logger.debug(f"Validity JSON: {json.dumps(validity)}")
+        #self.logger.debug(f"check_chapter returned: {validity}")
+        #self.logger.debug(f"Validity JSON: {json.dumps(validity)}")
     
         new_characters = {}
         if self.check_new_characters(chapter, characters_dict):
@@ -427,7 +427,7 @@ class AgentManager:
         Existing Characters:
         {characters}
         
-        Are there any new characters introduced in this chapter? Respond with "Yes" or "No".
+        Are there any new characters introduced in this chapter? Respond with "Yes" or "No" Only, please do not say anything else.
         """)
 
         check_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | StrOutputParser()
@@ -435,6 +435,8 @@ class AgentManager:
             "chapter": chapter,
             "characters": ", ".join(character_names)
         })
+
+        self.logger.debug("check_new_characters returned: " + result)
 
         return "Yes" in result
 
@@ -468,7 +470,7 @@ class AgentManager:
             "existing_characters": ", ".join(existing_names)
         })
             # Log the raw response
-        self.logger.debug(f"Raw new characters response: {result}")
+        #self.logger.debug(f"Raw new characters response: {result}")
 
         # Strip leading and trailing backticks
         result = result.strip().strip('```json').strip('```')
