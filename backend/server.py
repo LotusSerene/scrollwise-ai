@@ -159,7 +159,7 @@ def generate_chapters():
                 test_results = str(validity.get('test_results', ''))
 
                 # Ensure chapter_id is a string
-                chapter_id = str(chapter_id)
+                chapter_id = str(chapter_id['id']) if isinstance(chapter_id, dict) else str(chapter_id)
 
                 # Log the chapter_id before saving
                 app.logger.debug(f"Chapter ID: {chapter_id}")
