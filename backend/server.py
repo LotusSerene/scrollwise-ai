@@ -557,6 +557,14 @@ def reset_chat_history():
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
         agent_manager.reset_memory()
+
+        # Delete chat history from the database
+        db_instance.delete_chat_history(user_id)
+
+        # Delete chat history from the Chroma vector store
+        vector_store = VectorStore(user_id, db_instance.get_api_key(user_id), db_instance.get_model_settings(user_id)['embeddingsModel'])
+        vector_store.clear()
+
         return jsonify({'message': 'Chat history reset successfully'}), 200
     except Exception as e:
         logging.error(f"An error occurred in reset_chat_history: {str(e)}", exc_info=True)
