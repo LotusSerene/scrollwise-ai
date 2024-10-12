@@ -52,6 +52,13 @@ class Database:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
 
+    def delete_chat_history(self, user_id: str):
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM chat_history WHERE user_id = ?', (user_id,))
+        self.conn.commit()
+        cursor.close()
+        self.logger.debug(f"Chat history deleted for user_id: {user_id}")
+
     def create_tables(self):
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -345,7 +352,7 @@ class Database:
         chapter_id = str(chapter_id)
 
         # Log the parameters being passed to the database
-        self.logger.debug(f"Saving validity check with parameters: chapter_id={chapter_id}, chapter_title={chapter_title}, is_valid={is_valid}, feedback={feedback}, review={review}, style_guide_adherence={style_guide_adherence}, style_guide_feedback={style_guide_feedback}, continuity={continuity}, continuity_feedback={continuity_feedback}, test_results={test_results}, user_id={user_id}")
+        #self.logger.debug(f"Saving validity check with parameters: chapter_id={chapter_id}, chapter_title={chapter_title}, is_valid={is_valid}, feedback={feedback}, review={review}, style_guide_adherence={style_guide_adherence}, style_guide_feedback={style_guide_feedback}, continuity={continuity}, continuity_feedback={continuity_feedback}, test_results={test_results}, user_id={user_id}")
 
         try:
             cursor = self.conn.cursor()
