@@ -101,7 +101,9 @@ class AgentManager:
             chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
         
         chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
+        self.logger.debug("Calling check_chapter method")
         validity = self.check_chapter(chapter, instructions, previous_chapters)
+        self.logger.debug(f"check_chapter returned: {validity}")
     
         new_characters = {}
         if self.check_new_characters(chapter, characters_dict):
