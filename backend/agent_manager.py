@@ -111,7 +111,9 @@ class AgentManager:
         new_characters = {}
         if self.check_new_characters(chapter, characters_dict):
             extraction_response = self.extract_new_characters(chapter, characters_dict)
-            self.add_character_to_knowledge_base(extraction_response)
+            for name, description in extraction_response.items():
+                self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
+                self.logger.info(f"Character {name} added to the knowledge base")
             new_characters = extraction_response
 
         return chapter, title, new_characters
@@ -267,7 +269,8 @@ class AgentManager:
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
         chapter_id = db.create_chapter(chapter_title, chapter, self.user_id)
-        self.logger.info(f"Chapter {chapter_number} saved to the database with ID: {chapter_id}")
+        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
+        self.logger.info(f"Chapter {chapter_number} saved to the knowledge base with ID: {chapter_id}")
         return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
