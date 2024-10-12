@@ -1,5 +1,9 @@
 # backend/database.py
 import logging
+from flask_sqlalchemy import SQLAlchemy
+import sqlite3
+import uuid
+import json
 
 db = SQLAlchemy()
 
