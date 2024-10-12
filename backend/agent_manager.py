@@ -257,10 +257,23 @@ class AgentManager:
         db.save_validity_check(chapter_id, chapter_title, result, self.user_id)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
-    def add_to_knowledge_base(self, documents: List[str]):
-        for doc in documents:
-            self.vector_store.add_to_knowledge_base(doc)
-        self.logger.info(f"Added {len(documents)} documents to the knowledge base for user {self.user_id}")
+    def add_to_knowledge_base(self, item_type, content, metadata=None):
+        if metadata is None:
+            metadata = {}
+        metadata['type'] = item_type
+        metadata['user_id'] = self.user_id
+        embedding_id = self.vector_store.add_to_knowledge_base(content, metadata)
+        return embedding_id
+
+    def update_or_remove_from_knowledge_base(self, embedding_id, action, new_content=None, new_metadata=None):
+        if action == 'delete':
+            self.vector_store.delete_from_knowledge_base(embedding_id)
+        elif action == 'update':
+            if new_content is None and new_metadata is None:
+                raise ValueError("Either new_content or new_metadata must be provided for update action")
+            self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+        else:
+            raise ValueError("Invalid action. Must be 'delete' or 'update'")
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
@@ -480,29 +493,7 @@ class AgentManager:
         
         chain = prompt | title_llm | StrOutputParser()
         return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
-
-
-    def add_character_to_knowledge_base(self, extraction_response: Dict[str, str]):
-        for character_name, character_description in extraction_response.items():
-            character = {"id": character_name, "name": character_name, "description": character_description}
-            text = f"Character {character['id']}: {character['description']}"
-            self.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
-
-    def update_or_remove_from_knowledge_base(self, embedding_id: str, action: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
-        if action == 'delete':
-            self.vector_store.delete_from_knowledge_base(embedding_id)
-        elif action == 'update':
-            if new_content is None and new_metadata is None:
-                raise ValueError("Either new_content or new_metadata must be provided for update action")
-            self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
-        else:
-            raise ValueError("Invalid action. Must be 'delete' or 'update'")
-
-    def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
-        text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
     
-
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
 
