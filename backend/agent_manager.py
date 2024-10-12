@@ -500,14 +500,8 @@ class AgentManager:
 
     def add_chapter_to_knowledge_base(self, chapter: Dict[str, Any]):
         text = f"Chapter {chapter['id']}: {chapter['title']}\n{chapter['content']}"
-        metadata = {
-            "type": "Chapter",
-            "id": chapter['id'],
-            "title": chapter['title'],
-            "content": chapter['content'],
-            "chapter_number": chapter['chapter_number']
-        }
-        self.vector_store.add_to_knowledge_base(text, metadata=metadata)
+        self.vector_store.add_to_knowledge_base(text, metadata={"type": "Chapter", "id": chapter['id']})
+    
 
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
