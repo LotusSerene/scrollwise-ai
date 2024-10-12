@@ -5,6 +5,16 @@ from typing import List, Dict, Any
 import os
 import logging
 
+def flatten_metadata(metadata):
+    flattened = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict):
+            for subkey, subvalue in value.items():
+                flattened[f"{key}_{subkey}"] = subvalue
+        else:
+            flattened[key] = value
+    return flattened
+
 
 class VectorStore:
     def __init__(self, user_id, api_key, embeddings_model):
