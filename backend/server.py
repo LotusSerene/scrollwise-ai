@@ -8,6 +8,7 @@ import jwt
 import datetime
 import uuid
 from database import db_instance, get_chapter_count, Character
+from agent_manager import AgentManager
 from werkzeug.utils import secure_filename
 import tempfile
 import pypdf
@@ -143,6 +144,7 @@ def generate_chapters():
             chapter_id = db_instance.create_chapter(chapter_title, chapter_content, user_id)
 
 
+            agent_manager = AgentManager(user_id)
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
 
             db_instance.save_validity_check(chapter_id, chapter_title, validity, user_id)
