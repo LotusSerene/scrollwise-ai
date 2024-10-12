@@ -162,7 +162,8 @@ def generate_chapters():
                 {
                     'id': chapter_id,
                     'title': chapter_title,
-                    'content': chapter_content
+                    'content': chapter_content,
+                    'chapter_number': chapter_number
                 }
             )
 
