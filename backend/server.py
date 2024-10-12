@@ -453,6 +453,17 @@ def save_model_settings():
         logging.error(f"An error occurred in save_model_settings: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/chat-history', methods=['GET'])
+@jwt_required()
+def get_chat_history():
+    try:
+        user_id = get_jwt_identity()
+        chat_history = db_instance.get_chat_history(user_id)
+        return jsonify({'chatHistory': chat_history}), 200
+    except Exception as e:
+        logging.error(f"An error occurred in get_chat_history: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/remove-api-key', methods=['DELETE'])
 @jwt_required()
 def remove_api_key():
