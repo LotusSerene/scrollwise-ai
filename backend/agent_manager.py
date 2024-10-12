@@ -278,10 +278,10 @@ class AgentManager:
         
         # Load chat history
         for message in chat_history:
-            if message['role'] == 'user':
-                memory.chat_memory.add_user_message(message['content'])
-            else:
-                memory.chat_memory.add_ai_message(message['content'])
+            if isinstance(message, HumanMessage):
+                memory.chat_memory.add_user_message(message.content)
+            elif isinstance(message, AIMessage):
+                memory.chat_memory.add_ai_message(message.content)
         
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=qa_llm,
