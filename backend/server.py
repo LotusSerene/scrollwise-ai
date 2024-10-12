@@ -7,7 +7,7 @@ import logging
 import jwt
 import datetime
 import uuid
-from database import db_instance, get_chapter_count, Character
+from database import db_instance, get_chapter_count, Character, db
 from agent_manager import AgentManager
 from werkzeug.utils import secure_filename
 import tempfile
@@ -143,11 +143,15 @@ def generate_chapters():
 
             chapter_id = db_instance.create_chapter(chapter_title, chapter_content, user_id)
 
-
             agent_manager = AgentManager(user_id)
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
 
-            db_instance.save_validity_check(chapter_id, chapter_title, validity, user_id)
+            try:
+                db.save_validity_check(chapter_id, chapter_title, validity, user_id)
+            except Exception as e:
+                logging.error(f"Error saving validity check: {str(e)}")
+                # Optionally, you can choose to continue generating chapters even if saving the validity check fails
+                # If you want to stop the process on error, you can re-raise the exception here
 
             generated_chapters.append({
                 'id': chapter_id,
