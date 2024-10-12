@@ -1,8 +1,4 @@
 # backend/database.py
-from flask_sqlalchemy import SQLAlchemy
-import sqlite3
-import uuid
-import json
 import logging
 
 db = SQLAlchemy()
@@ -49,6 +45,8 @@ class Database:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.create_tables()
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
 
     def create_tables(self):
         cursor = self.conn.cursor()
