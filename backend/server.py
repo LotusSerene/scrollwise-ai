@@ -158,6 +158,12 @@ def generate_chapters():
                 continuity_feedback = str(validity.get('continuity_feedback', ''))
                 test_results = str(validity.get('test_results', ''))
 
+                # Ensure chapter_id is a string
+                chapter_id = str(chapter_id)
+
+                # Log the chapter_id before saving
+                app.logger.debug(f"Chapter ID: {chapter_id}")
+
                 # Log the parameters being passed to save_validity_check
                 app.logger.debug(f"Saving validity check with parameters: {validity}")
                 db_instance.save_validity_check(
