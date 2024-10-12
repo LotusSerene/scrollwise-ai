@@ -332,6 +332,17 @@ class Database:
         }
 
     def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str):
+        # Ensure all parameters are of the correct type
+        chapter_title = str(chapter_title)
+        is_valid = bool(is_valid)
+        feedback = str(feedback)
+        review = str(review) if review is not None else ''
+        style_guide_adherence = bool(style_guide_adherence)
+        style_guide_feedback = str(style_guide_feedback) if style_guide_feedback is not None else ''
+        continuity = bool(continuity)
+        continuity_feedback = str(continuity_feedback) if continuity_feedback is not None else ''
+        test_results = str(test_results) if test_results is not None else ''
+
         cursor = self.conn.cursor()
         validity_id = uuid.uuid4().hex
         cursor.execute('''
@@ -340,6 +351,7 @@ class Database:
         ''', (validity_id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id))
         self.conn.commit()
         cursor.close()
+        self.logger.debug(f"Validity check saved successfully for chapter_id: {chapter_id}, user_id: {user_id}")
 
     def save_chat_history(self, user_id: str, messages: list):
         cursor = self.conn.cursor()
