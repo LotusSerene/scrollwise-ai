@@ -218,6 +218,8 @@ def update_chapter(chapter_id):
         user_id = get_jwt_identity()
         updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'), user_id)
 
+        # Log the updated chapter
+        app.logger.debug(f"Updated chapter: {json.dumps(updated_chapter)}")
 
         return jsonify(updated_chapter), 200
     except Exception as e:
