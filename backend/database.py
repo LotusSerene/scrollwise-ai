@@ -343,6 +343,9 @@ class Database:
         continuity_feedback = str(continuity_feedback) if continuity_feedback is not None else ''
         test_results = str(test_results) if test_results is not None else ''
 
+        # Log the parameters being passed to the database
+        self.logger.debug(f"Saving validity check with parameters: chapter_id={chapter_id}, chapter_title={chapter_title}, is_valid={is_valid}, feedback={feedback}, review={review}, style_guide_adherence={style_guide_adherence}, style_guide_feedback={style_guide_feedback}, continuity={continuity}, continuity_feedback={continuity_feedback}, test_results={test_results}, user_id={user_id}")
+
         cursor = self.conn.cursor()
         validity_id = uuid.uuid4().hex
         cursor.execute('''
