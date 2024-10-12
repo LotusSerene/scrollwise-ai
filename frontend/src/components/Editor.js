@@ -47,17 +47,19 @@ function Editor({ chapters, setChapters }) {
   const handleDeleteChapter = async (chapterId) => {
     try {
       const headers = getAuthHeaders();
-      
-      // Fetch the chapter to get the chapter ID
-
+      const chapter = chapters.find(ch => ch.id === chapterId);
+      const embeddingId = chapter ? chapter.embedding_id : null;
 
       // Delete the chapter from the normal database using chapterId
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, { headers: headers });
 
-      
       // Remove chapter from knowledge base using embedding_id
       if (embeddingId) {
         await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-
+          headers: headers,
+          data: { embedding_id: embeddingId }
+        });
+      }
 
       fetchChapters();
     } catch (error) {
