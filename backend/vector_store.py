@@ -23,6 +23,20 @@ class VectorStore:
             f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
         )
 
+    def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
+        self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
+        if metadata is None:
+            metadata = {}
+        metadata["user_id"] = self.user_id
+        flattened_metadata = flatten_metadata(metadata)
+        try:
+            self.vector_store.add_texts([text], metadatas=[flattened_metadata])
+            self.logger.info(f"Added content to knowledge base for user {self.user_id}")
+        except Exception as e:
+            self.logger.error(
+                f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
+            )
+
 
 def flatten_metadata(metadata):
     flattened = {}
