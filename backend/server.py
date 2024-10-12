@@ -147,19 +147,30 @@ def generate_chapters():
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
 
             try:
+                # Ensure all parameters are of the correct type
+                chapter_title = str(chapter_title)
+                is_valid = bool(validity['is_valid'])
+                feedback = str(validity['feedback'])
+                review = str(validity.get('review', ''))
+                style_guide_adherence = bool(validity['style_guide_adherence'])
+                style_guide_feedback = str(validity.get('style_guide_feedback', ''))
+                continuity = bool(validity['continuity'])
+                continuity_feedback = str(validity.get('continuity_feedback', ''))
+                test_results = str(validity.get('test_results', ''))
+
                 # Log the parameters being passed to save_validity_check
                 app.logger.debug(f"Saving validity check with parameters: {validity}")
                 db_instance.save_validity_check(
                     chapter_id=chapter_id,
                     chapter_title=chapter_title,
-                    is_valid=validity['is_valid'],
-                    feedback=validity['feedback'],
-                    review=validity.get('review', ''),
-                    style_guide_adherence=validity['style_guide_adherence'],
-                    style_guide_feedback=validity.get('style_guide_feedback', ''),
-                    continuity=validity['continuity'],
-                    continuity_feedback=validity.get('continuity_feedback', ''),
-                    test_results=validity.get('test_results', ''),
+                    is_valid=is_valid,
+                    feedback=feedback,
+                    review=review,
+                    style_guide_adherence=style_guide_adherence,
+                    style_guide_feedback=style_guide_feedback,
+                    continuity=continuity,
+                    continuity_feedback=continuity_feedback,
+                    test_results=test_results,
                     user_id=user_id
                 )
             except Exception as e:
