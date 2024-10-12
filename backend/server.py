@@ -7,6 +7,7 @@ import logging
 import jwt
 import datetime
 import uuid
+import json  # Add this import
 from database import db_instance, get_chapter_count, Character, db
 from agent_manager import AgentManager
 from werkzeug.utils import secure_filename
