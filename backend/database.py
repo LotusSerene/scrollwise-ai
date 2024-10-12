@@ -331,6 +331,16 @@ class Database:
             'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
         }
 
+    def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str):
+        cursor = self.conn.cursor()
+        validity_id = uuid.uuid4().hex
+        cursor.execute('''
+            INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (validity_id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id))
+        self.conn.commit()
+        cursor.close()
+
     def save_chat_history(self, user_id: str, messages: list):
         cursor = self.conn.cursor()
         messages_json = json.dumps(messages)
