@@ -62,7 +62,10 @@ const KnowledgeBase = () => {
   const handleDelete = async (embeddingId) => {
     try {
       const headers = getAuthHeaders();
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base/${embeddingId}`, { headers });
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+        headers,
+        data: { embedding_id: embeddingId }
+      });
       fetchKnowledgeBaseContent();
     } catch (error) {
       console.error('Error deleting item from knowledge base:', error);
