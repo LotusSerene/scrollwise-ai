@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 import json
 
+
 db = SQLAlchemy()
 
 class Character(db.Model):
@@ -202,10 +203,6 @@ class Database:
         ''', (content, title, chapter_id, user_id))
         self.conn.commit()
         cursor.close()
-
-        # Update the knowledge base
-        agent_manager = AgentManager(user_id)
-        agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'update', new_content=content, new_metadata={"type": "chapter", "user_id": user_id, "chapter_number": self.get_chapter(chapter_id, user_id)['chapter_number']})
 
         return self.get_chapter(chapter_id, user_id)
 
