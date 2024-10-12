@@ -232,13 +232,13 @@ class Database:
             chapter_id,
             chapter_title,
             1 if validity['is_valid'] else 0,
-            validity['feedback'],
-            validity.get('review', ''),
+            str(validity['feedback']),
+            str(validity.get('review', '')),
             1 if validity.get('style_guide_adherence', False) else 0,
-            validity.get('style_guide_feedback', ''),
+            str(validity.get('style_guide_feedback', '')),
             1 if validity.get('continuity', False) else 0,
-            validity.get('continuity_feedback', ''),
-            validity.get('test_results', ''),
+            str(validity.get('continuity_feedback', '')),
+            str(validity.get('test_results', '')),
             user_id
         ))
         self.conn.commit()
