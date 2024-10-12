@@ -148,7 +148,7 @@ def generate_chapters():
 
             try:
                 # Log the parameters being passed to save_validity_check
-                self.logger.debug(f"Saving validity check with parameters: {validity}")
+                app.logger.debug(f"Saving validity check with parameters: {validity}")
                 db_instance.save_validity_check(
                     chapter_id=chapter_id,
                     chapter_title=chapter_title,
@@ -167,7 +167,7 @@ def generate_chapters():
                 # Optionally, you can choose to continue generating chapters even if saving the validity check fails
                 # If you want to stop the process on error, you can re-raise the exception here
                 # raise
-                self.logger.error(f"Failed to save validity check for chapter_id: {chapter_id}, user_id: {user_id}")
+                app.logger.error(f"Failed to save validity check for chapter_id: {chapter_id}, user_id: {user_id}")
 
             generated_chapters.append({
                 'id': chapter_id,
