@@ -14,7 +14,6 @@ import tempfile
 import pypdf
 import docx2txt
 from vector_store import VectorStore
-from langchain_core.messages import HumanMessage, AIMessage
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -89,7 +88,6 @@ def login():
         logging.error(f"An error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/api/generate', methods=['POST'])
 @jwt_required()
 def generate_chapters():
@@ -135,11 +133,7 @@ def generate_chapters():
                 )
             except Exception as e:
                 logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                continue
-
-            if not chapter_content:
-                logging.warning(f"Empty chapter generated for chapter {chapter_number}")
-                continue
+                raise
 
             if new_characters:
                 for name, description in new_characters.items():
@@ -147,25 +141,11 @@ def generate_chapters():
 
             chapter_id = db_instance.create_chapter(chapter_title, chapter_content, user_id)
 
-            # Create metadata dictionary
-            metadata = {
+            agent_manager.add_chapter_to_knowledge_base({
                 'id': chapter_id,
                 'title': chapter_title,
-                'type': 'Chapter',
-                'chapter_number': chapter_number
-            }
-
-            # Filter out any complex types from metadata
-            filtered_metadata = {k: v for k, v in metadata.items() if isinstance(v, (str, int, float, bool))}
-
-            agent_manager.add_chapter_to_knowledge_base(
-                {
-                    'id': chapter_id,
-                    'title': chapter_title,
-                    'content': chapter_content,
-                    'chapter_number': chapter_number
-                }
-            )
+                'content': chapter_content
+            })
 
             validity = agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
 
@@ -204,12 +184,7 @@ def update_chapter(chapter_id):
         updated_chapter = db_instance.update_chapter(chapter_id, data.get('title'), data.get('content'), user_id)
 
         agent_manager = AgentManager(user_id)
-        knowledge_base_content = agent_manager.get_knowledge_base_content()
-        embedding_id = next((item['embedding_id'] for item in knowledge_base_content if item['type'] == 'Chapter' and item['original_id'] == chapter_id), None)
-
-        if embedding_id:
-            text = f"Chapter {updated_chapter['title']}: {updated_chapter['content']}"
-            agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content=text, new_metadata={"type": "Chapter", "id": chapter_id})
+        agent_manager.update_chapter_in_knowledge_base(updated_chapter)
 
         return jsonify(updated_chapter), 200
     except Exception as e:
@@ -223,24 +198,13 @@ def delete_chapter(chapter_id):
         user_id = get_jwt_identity()
         if db_instance.delete_chapter(chapter_id, user_id):
             agent_manager = AgentManager(user_id)
-            # Get the embedding ID for this chapter
-            knowledge_base_content = agent_manager.get_knowledge_base_content()
-            embedding_id = next((item['id'] for item in knowledge_base_content 
-                                 if item['metadata'].get('type') == 'Chapter' 
-                                 and item['metadata'].get('id') == chapter_id), None)
-
-            if embedding_id:
-                agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
-            else:
-                logging.warning(f"No embedding found for chapter {chapter_id}")
-
+            agent_manager.remove_chapter_from_knowledge_base(chapter_id)
             return jsonify({'message': 'Chapter deleted successfully'}), 200
         else:
             return jsonify({'error': 'Chapter not found'}), 404
     except Exception as e:
         logging.error(f"Error deleting chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/validity-checks', methods=['GET'])
 @jwt_required()
@@ -272,18 +236,14 @@ def create_chapter():
     try:
         data = request.get_json()
         user_id = get_jwt_identity()
-        title = data.get('title', 'Untitled')
-        content = data.get('content', '')
-        
-        chapter = db_instance.create_chapter(title, content, user_id)
+        chapter = db_instance.create_chapter(data.get('title', 'Untitled'), data.get('content', ''), user_id)
 
         agent_manager = AgentManager(user_id)
-        text = f"Chapter {chapter['title']}: {chapter['content']}"
-        embedding_id = agent_manager.add_to_knowledge_base([text], metadata={"type": "Chapter", "id": chapter['id']})
+        agent_manager.add_chapter_to_knowledge_base(chapter)
 
-        return jsonify({'message': 'Chapter created successfully', 'id': chapter['id'], 'embedding_id': embedding_id}), 201
+        return jsonify({'message': 'Chapter created successfully', 'id': chapter['id']}), 201
     except Exception as e:
-        logging.error(f"Error creating chapter: {str(e)}", exc_info=True)
+        logging.error(f"Error creating chapter: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/characters', methods=['GET'])
@@ -296,28 +256,25 @@ def get_characters():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/characters/<character_id>', methods=['DELETE'])
 @jwt_required()
 def delete_character(character_id):
     try:
         user_id = get_jwt_identity()
-        if db_instance.delete_character(character_id, user_id):
-            agent_manager = AgentManager(user_id)
-            knowledge_base_content = agent_manager.get_knowledge_base_content()
-            embedding_id = next((item['id'] for item in knowledge_base_content 
-                                 if item['metadata'].get('type') == 'Character' 
-                                 and item['metadata'].get('id') == character_id), None)
+        character = db_instance.get_character_by_id(character_id, user_id)
+        if character:
+            db_instance.delete_character(character_id, user_id)
 
-            if embedding_id:
-                agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
+            agent_manager = AgentManager(user_id)
+            agent_manager.remove_character_from_knowledge_base(character_id)
+
             return jsonify({'message': 'Character deleted successfully'}), 200
         else:
             return jsonify({'error': 'Character not found'}), 404
     except Exception as e:
         logging.error(f"Error deleting character: {str(e)}", exc_info=True)
         return jsonify({'error': f'An error occurred while deleting the character: {str(e)}'}), 500
-    
+
 @app.route('/api/characters', methods=['POST'])
 @jwt_required()
 def create_character():
@@ -326,11 +283,11 @@ def create_character():
         user_id = get_jwt_identity()
         character = db_instance.create_character(data['name'], data['description'], user_id)
 
-        # Add character to knowledge base
         agent_manager = AgentManager(user_id)
-        text = f"Character {character['name']}: {character['description']}"
-        agent_manager.vector_store.add_to_knowledge_base(text, metadata={"type": "Character", "id": character['id']})
+        character_info = {"id": character['id'], "name": character['name'], "description": character['description']}
+        agent_manager.add_character_to_knowledge_base({character['name']: character['description']})
 
+        # Log the adding of the character to the knowledge base
         logging.info(f"Character {character['name']} added to the knowledge base")
 
         return jsonify(character), 201
@@ -347,12 +304,8 @@ def update_character(character_id):
         updated_character = db_instance.update_character(character_id, data['name'], data['description'], user_id)
 
         agent_manager = AgentManager(user_id)
-        knowledge_base_content = agent_manager.get_knowledge_base_content()
-        embedding_id = next((item['embedding_id'] for item in knowledge_base_content if item['type'] == 'Character' and item['original_id'] == character_id), None)
-
-        if embedding_id:
-            text = f"Character {updated_character['name']}: {updated_character['description']}"
-            agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content=text, new_metadata={"type": "Character", "id": character_id})
+        character_info = {"id": updated_character['id'], "name": updated_character['name'], "description": updated_character['description']}
+        agent_manager.add_character_to_knowledge_base({updated_character['name']: updated_character['description']})
 
         return jsonify(updated_character), 200
     except Exception as e:
@@ -369,15 +322,12 @@ def add_to_knowledge_base():
             return jsonify({'error': 'Documents are required'}), 400
 
         user_id = get_jwt_identity()
-        agent_manager = AgentManager(user_id)
+        api_key = db_instance.get_api_key(user_id)
+        model_settings = db_instance.get_model_settings(user_id)
+        vector_store = VectorStore(user_id, api_key, model_settings['embeddingsModel'])
 
         for doc in documents:
-            content = doc.get('content', '')
-            metadata = doc.get('metadata', {})
-            metadata['user_id'] = user_id
-            if 'source' not in metadata:
-                metadata['source'] = 'Manual Input'
-            agent_manager.add_to_knowledge_base([content], metadata=metadata)
+            vector_store.add_to_knowledge_base(doc)
 
         return jsonify({'message': 'Documents added to the knowledge base successfully'}), 200
     except Exception as e:
@@ -422,7 +372,7 @@ def upload_document():
 
             user_id = get_jwt_identity()
             agent_manager = AgentManager(user_id)
-            agent_manager.add_to_knowledge_base([extracted_text], metadata={"type": "doc", "user_id": user_id, "source": filename})
+            agent_manager.add_to_knowledge_base([extracted_text], metadata={"type": "doc"})
 
             os.remove(file_path)
             os.rmdir(temp_dir)
@@ -508,21 +458,7 @@ def query_knowledge_base():
 
         user_id = get_jwt_identity()
         agent_manager = AgentManager(user_id)
-
-        # Convert chat history to LangChain message format
-        langchain_history = [
-            HumanMessage(content=msg['content']) if msg['role'] == 'user' else AIMessage(content=msg['content'])
-            for msg in chat_history
-        ]
-
-        result = agent_manager.generate_with_retrieval(query, langchain_history)
-
-        # Save the updated chat history
-        updated_history = chat_history + [
-            {'role': 'user', 'content': query},
-            {'role': 'ai', 'content': result}
-        ]
-        db_instance.save_chat_history(user_id, updated_history)
+        result = agent_manager.generate_with_retrieval(query, chat_history)
 
         return jsonify({'result': result}), 200
     except Exception as e:
@@ -541,14 +477,10 @@ def get_knowledge_base_content():
         formatted_content = []
         if content:
             for item in content:
-                metadata = item.get('metadata', {}) or {}  # Use an empty dict if metadata is None
                 formatted_item = {
-                    'type': metadata.get('type', 'Unknown'),
-                    'content': item.get('page_content', ''),
-                    'embedding_id': item.get('id', ''),  # This is the embedding ID
-                    'original_id': metadata.get('id', ''),  # This is the original ID (chapter or character ID)
-                    'title': metadata.get('title', ''),  # Include title for chapters
-                    'name': metadata.get('name', '')  # Include name for characters
+                    'type': item['metadata'].get('type', 'Unknown'),
+                    'content': item['page_content'],
+                    'embedding_id': item['id']
                 }
                 formatted_content.append(formatted_item)
         
@@ -562,7 +494,8 @@ def get_knowledge_base_content():
 def reset_chat_history():
     try:
         user_id = get_jwt_identity()
-        db_instance.save_chat_history(user_id, [])
+        agent_manager = AgentManager(user_id)
+        agent_manager.reset_memory()
         return jsonify({'message': 'Chat history reset successfully'}), 200
     except Exception as e:
         logging.error(f"An error occurred in reset_chat_history: {str(e)}", exc_info=True)
@@ -587,17 +520,6 @@ def manage_knowledge_base_item(embedding_id):
 
     except Exception as e:
         logging.error(f"An error occurred in manage_knowledge_base_item: {str(e)}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/chat-history', methods=['GET'])
-@jwt_required()
-def get_chat_history():
-    try:
-        user_id = get_jwt_identity()
-        chat_history = db_instance.get_chat_history(user_id)
-        return jsonify({'chatHistory': chat_history}), 200
-    except Exception as e:
-        logging.error(f"An error occurred in get_chat_history: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
