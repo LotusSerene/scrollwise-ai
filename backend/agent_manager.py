@@ -100,7 +100,9 @@ class AgentManager:
         if len(chapter.split()) < min_word_count:
             chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
         
+        self.logger.debug("Getting chapter title from instructions")
         chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
+        self.logger.debug(f"Chapter title: {chapter_title}")
         self.logger.debug("Calling check_chapter method")
         validity = self.check_chapter(chapter, instructions, previous_chapters)
         self.logger.debug(f"check_chapter returned: {validity}")
