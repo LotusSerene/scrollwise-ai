@@ -224,6 +224,7 @@ class Database:
 
     def save_validity_check(self, chapter_id, chapter_title, validity, user_id):
         cursor = self.conn.cursor()
+        logging.debug(f"Inserting validity check: id={uuid.uuid4().hex}, chapter_id={chapter_id}, chapter_title={chapter_title}, is_valid={1 if validity['is_valid'] else 0}, feedback={validity['feedback']}, review={validity.get('review', '')}, style_guide_adherence={1 if validity.get('style_guide_adherence', False) else 0}, style_guide_feedback={validity.get('style_guide_feedback', '')}, continuity={1 if validity.get('continuity', False) else 0}, continuity_feedback={validity.get('continuity_feedback', '')}, test_results={validity.get('test_results', '')}, user_id={user_id}")
         cursor.execute('''
             INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -232,13 +233,13 @@ class Database:
             chapter_id,
             chapter_title,
             1 if validity['is_valid'] else 0,
-            json.dumps(validity['feedback']),
-            json.dumps(validity.get('review', '')),
+            validity['feedback'],
+            validity.get('review', ''),
             1 if validity.get('style_guide_adherence', False) else 0,
-            json.dumps(validity.get('style_guide_feedback', '')),
+            validity.get('style_guide_feedback', ''),
             1 if validity.get('continuity', False) else 0,
-            json.dumps(validity.get('continuity_feedback', '')),
-            json.dumps(validity.get('test_results', '')),
+            validity.get('continuity_feedback', ''),
+            validity.get('test_results', ''),
             user_id
         ))
         self.conn.commit()
