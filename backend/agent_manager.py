@@ -507,8 +507,7 @@ class AgentManager:
             "content": chapter['content'],
             "chapter_number": chapter['chapter_number']
         }
-        metadata_json = json.dumps(metadata)
-        self.vector_store.add_to_knowledge_base(text, metadata=metadata_json)
+        self.vector_store.add_to_knowledge_base(text, metadata=metadata)
 
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
