@@ -47,9 +47,18 @@ function Editor({ chapters, setChapters }) {
   const handleDeleteChapter = async (chapterId) => {
     try {
       const headers = getAuthHeaders();
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
-        headers: headers
-      });
+      
+      // Fetch the chapter to get the chapter ID
+
+
+      // Delete the chapter from the normal database using chapterId
+
+      
+      // Remove chapter from knowledge base using embedding_id
+      if (embeddingId) {
+        await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+
+
       fetchChapters();
     } catch (error) {
       console.error('Error deleting chapter:', error);
@@ -67,27 +76,63 @@ function Editor({ chapters, setChapters }) {
     const chapterId = selectedChapter ? selectedChapter.id : uuidv4();
 
     try {
+      let response;
+      let embeddingId;
+
       if (selectedChapter) {
         // Update existing chapter
-        await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
+        response = await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
           title: chapterTitle,  
-          content: chapterContent,
-          user_id: userId
+          content: chapterContent
         }, {
           headers: headers
         });
+
+        embeddingId = response.data.embedding_id;
+
+        // Update in knowledge base
+        if (embeddingId) {
+          await axios.put(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+            embedding_id: embeddingId,
+            content: chapterContent,
+            metadata: { title: chapterTitle, chapterId: chapterId }
+          }, { headers: headers });
+        } else {
+          // If no embedding_id, create new entry in knowledge base
+          const knowledgeBaseResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+            type: 'Chapter',
+            content: chapterContent,
+            metadata: { title: chapterTitle, chapterId: chapterId }
+          }, { headers: headers });
+          embeddingId = knowledgeBaseResponse.data.embedding_id;
+
+          // Update chapter with new embedding_id
+          await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
+            embedding_id: embeddingId
+          }, { headers: headers });
+        }
       } else {
         // Create new chapter
-        const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
+        response = await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
           title: chapterTitle,
-          content: chapterContent,
-          user_id: userId
+          content: chapterContent
         }, {
           headers: headers
         });
-        
-        // Set the newly created chapter as the selected chapter to prevent duplicate creation
-        setSelectedChapter(response.data);
+
+        // Add to knowledge base
+        const knowledgeBaseResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+          type: 'Chapter',
+          content: chapterContent,
+          metadata: { title: chapterTitle, chapterId: response.data.id }
+        }, { headers: headers });
+
+        embeddingId = knowledgeBaseResponse.data.embedding_id;
+
+        // Update chapter with embedding_id
+        await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${response.data.id}`, {
+          embedding_id: embeddingId
+        }, { headers: headers });
       }
 
       fetchChapters();
