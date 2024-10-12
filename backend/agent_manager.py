@@ -106,6 +106,7 @@ class AgentManager:
         self.logger.debug("Calling check_chapter method")
         validity = self.check_chapter(chapter, instructions, previous_chapters)
         self.logger.debug(f"check_chapter returned: {validity}")
+        self.logger.debug(f"Validity JSON: {json.dumps(validity)}")
     
         new_characters = {}
         if self.check_new_characters(chapter, characters_dict):
