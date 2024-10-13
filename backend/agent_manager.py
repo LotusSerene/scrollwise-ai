@@ -24,10 +24,10 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from vector_store import VectorStore
 from langchain.output_parsers import OutputFixingParser
-from langchain_community.cache import SQLiteCache, InMemoryCache
+from langchain_community.cache import SQLiteCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.rate_limiters import InMemoryRateLimiter
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class NewCharacter(BaseModel):
@@ -36,21 +36,6 @@ class NewCharacter(BaseModel):
 
 class CharacterExtraction(BaseModel):
     new_characters: List[NewCharacter] = Field(default_factory=list, description="List of new characters found in the chapter")
-
-class ApiException(Exception):
-    pass
-
-class ChapterOutput(BaseModel):
-    content: str
-    title: str
-    new_characters: Dict[str, str] = Field(default_factory=dict, description="Dictionary of new characters, where key is the character name and value is the character description", min_items=1)
-
-class GenerationInterruptedException(Exception):
-    def __init__(self, partial_content, message="Generation interrupted"):
-        self.partial_content = partial_content
-        self.message = message
-        super().__init__(self.message)
-
 
 class AgentManager:
     def __init__(self, user_id: str):
@@ -66,9 +51,8 @@ class AgentManager:
 
         self.setup_caching()
         self.setup_rate_limiter()
-        self.llm_cache = InMemoryCache()
-        self.llm = self._initialize_llm(self.model_settings['mainLLM'], cache=self.llm_cache)
-        self.check_llm = self._initialize_llm(self.model_settings['checkLLM'], cache=self.llm_cache)
+        self.llm = self._initialize_llm(self.model_settings['mainLLM'])
+        self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.api_key, self.model_settings['embeddingsModel'])
 
     def _get_api_key(self) -> str:
@@ -99,114 +83,30 @@ class AgentManager:
                 max_bucket_size=15
             )
 
-    @retry(stop=stop_after_attempt(3), 
-           wait=wait_exponential(multiplier=1, min=4, max=10),
-           retry=retry_if_exception_type(ApiException))
-    def _initialize_llm(self, model: str, cache: Optional[InMemoryCache] = None) -> ChatGoogleGenerativeAI:
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
         return ChatGoogleGenerativeAI(
             model=model,
             google_api_key=self.api_key,
             temperature=0.7,
             max_output_tokens=self.MAX_OUTPUT_TOKENS,
             max_input_tokens=self.MAX_INPUT_TOKENS,
-            streaming=True,
+            caching=True,
             rate_limiter=self.rate_limiter,
-            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
-            cache=cache
+            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()])
         )
-
-    def estimate_token_count(self, text: str) -> int:
-        return self.llm.get_num_tokens(text)
-
-    @retry(stop=stop_after_attempt(3), 
-           wait=wait_exponential(multiplier=1, min=4, max=10),
-           retry=retry_if_exception_type(ApiException))
-    def _api_call(self, func, *args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            raise ApiException(f"API call failed: {str(e)}")
 
     def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, 
                          instructions: Dict[str, Any],
                          previous_chapters: List[Dict[str, Any]],
                          characters: List[Dict[str, Any]]):
-        try:
-            structured_llm = self.llm.with_structured_output(ChapterOutput)
-            self.logger.debug(f"ChapterOutput model: {ChapterOutput.model_json_schema()}")
-            self.logger.debug(f"structured_llm: {structured_llm}")
-            
-            characters_dict = {char['name']: char['description'] for char in characters}
-            context = self._construct_context(plot, writing_style, instructions, characters_dict, previous_chapters)
-            prompt = self._construct_prompt(instructions, context)
+        characters_dict = {char['name']: char['description'] for char in characters}
+        context = self._construct_context(plot, writing_style, instructions, characters_dict, previous_chapters)
+        prompt = self._construct_prompt(instructions, context)
 
-            chat_history = self._prepare_chat_history(previous_chapters)
-
-            chain = RunnableWithMessageHistory(
-                prompt | structured_llm,
-                lambda session_id: chat_history,
-                input_messages_key="context",
-                history_messages_key="chat_history",
-            )
-
-            result = self._api_call(chain.invoke, {
-                "chapter_number": chapter_number,
-                "context": context,
-                "instructions": instructions,
-                "characters": characters_dict
-            }, config={"configurable": {"session_id": f"chapter_{chapter_number}"}})
-
-            self.logger.debug(f"API call result: {result}")
-
-            chapter, title, new_characters = result.content, result.title, result.new_characters
-
-            # Ensure new_characters is non-empty
-            if not new_characters:
-                new_characters = {"NoNewCharacters": "No new characters found in this chapter."}
-
-            min_word_count = instructions.get('min_word_count', 0)
-            if len(chapter.split()) < min_word_count:
-                chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
-
-            validity = self.check_chapter(chapter, instructions, previous_chapters)
-
-            for name, description in new_characters.items():
-                self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
-                self.logger.info(f"Character {name} added to the knowledge base")
-
-            self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
-
-            return chapter, title, new_characters, validity
-
-        except RetryError as e:
-            self.logger.error(f"RetryError in generate_chapter: {str(e)}")
-            self.logger.error(f"Last exception: {e.last_attempt.exception()}")
-            raise ApiException("Failed to generate chapter after multiple retries")
-        except GenerationInterruptedException as e:
-            self.logger.warning(f"Generation interrupted: {str(e)}")
-            partial_result = e.partial_content
-            # Implement continuation logic here
-            return self._continue_generation(partial_result, chapter_number, plot, writing_style, instructions, previous_chapters, characters)
-        except Exception as e:
-            self.logger.error(f"Unexpected error in generate_chapter: {str(e)}")
-            raise
-
-    def _api_call(self, func, *args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            self.logger.error(f"API call failed: {str(e)}")
-            raise ApiException(f"API call failed: {str(e)}")
-
-    def _continue_generation(self, partial_result, *args, **kwargs):
-        # Implement logic to continue from partial result
-        # This is a placeholder and should be implemented based on your specific requirements
-        pass
-
-    def _prepare_chat_history(self, previous_chapters: List[Dict[str, Any]]) -> ChatMessageHistory:
         chat_history = ChatMessageHistory()
         total_tokens = 0
-        max_history_tokens = self.MAX_INPUT_TOKENS // 4
+        max_history_tokens = self.MAX_INPUT_TOKENS // 4  # Reserve a quarter of the tokens for chat history
         for i, chapter in enumerate(reversed(previous_chapters), 1):
             chapter_content = f"Chapter {chapter.get('chapter_number', i)}: {chapter['content']}"
             chapter_tokens = self.estimate_token_count(chapter_content)
@@ -215,7 +115,41 @@ class AgentManager:
             chat_history.add_user_message(chapter_content)
             chat_history.add_ai_message("Understood.")
             total_tokens += chapter_tokens
-        return chat_history
+
+        chain = RunnableWithMessageHistory(
+            prompt | self.llm | StrOutputParser(),
+            lambda session_id: chat_history,
+            input_messages_key="context",
+            history_messages_key="chat_history",
+        )
+
+        chapter = chain.invoke(
+            {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
+            config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
+        )
+
+        title = self._generate_title(chapter, chapter_number)
+
+        min_word_count = instructions.get('min_word_count', 0)
+        if len(chapter.split()) < min_word_count:
+            chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
+        
+        self.logger.debug("Getting chapter title from instructions")
+        chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
+        self.logger.debug(f"Chapter title: {chapter_title}")
+        self.logger.debug("Calling check_chapter method")
+        validity = self.check_chapter(chapter, instructions, previous_chapters)
+
+        new_characters = self.check_and_extract_new_characters(chapter, characters_dict)
+        for name, description in new_characters.items():
+            self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
+            self.logger.info(f"Character {name} added to the knowledge base")
+
+        # Save the chapter to the knowledge base
+        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
+
+        return chapter, title, new_characters
+
 
     def check_and_extract_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
         character_names = list(characters.keys())
@@ -303,6 +237,10 @@ class AgentManager:
         context += chapters_content
 
         return context
+
+    def estimate_token_count(self, text: str) -> int:
+        # Gemini models use about 4 characters per token
+        return self.llm.get_num_tokens(text)
 
     def get_embedding(self, text: str) -> List[float]:
         return self.embeddings.embed_query(text)
