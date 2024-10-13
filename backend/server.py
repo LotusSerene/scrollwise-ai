@@ -374,11 +374,9 @@ def get_characters():
 def delete_character(character_id):
     try:
         user_id = get_jwt_identity()
-        character = db_instance.get_character_by_id(character_id, user_id)
-        if character:
-            # Delete the character from the database
-            db_instance.delete_character(character_id, user_id)
-
+        
+        # Delete the character from the database
+        if db_instance.delete_character(character_id, user_id):
             # Delete the character from the knowledge base
             agent_manager = AgentManager(user_id)
             kb_content = agent_manager.get_knowledge_base_content()
