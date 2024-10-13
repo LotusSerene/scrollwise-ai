@@ -9,6 +9,7 @@ function Login({ onLogin }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    console.log("Login form submitted");
 
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/token`, {
@@ -19,6 +20,7 @@ function Login({ onLogin }) {
         body: JSON.stringify({ username: email, password }),
       });
 
+      console.log("Login response status:", response.status);
       if (response.ok) {
         const data = await response.json();
         console.log("Received data:", data); // Log the received data
@@ -45,6 +47,7 @@ function Login({ onLogin }) {
 
   const handleRegister = async (event) => {
     event.preventDefault();
+    console.log("Register form submitted");
 
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/register`, {
@@ -55,6 +58,7 @@ function Login({ onLogin }) {
         body: JSON.stringify({ username: email, password }),
       });
 
+      console.log("Register response status:", response.status);
       if (response.ok) {
         const data = await response.json();
         console.log("Registration successful!");
