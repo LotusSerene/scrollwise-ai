@@ -1,35 +1,33 @@
 # backend/database.py
 import logging
-from flask_sqlalchemy import SQLAlchemy
-import sqlite3
-import uuid
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.pool import QueuePool
 import json
+import os
+from dotenv import load_dotenv
+import uuid
 
+load_dotenv()
 
-db = SQLAlchemy()
+Base = declarative_base()
 
-class Character(db.Model):
-    id = db.Column(db.String, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    user_id = db.Column(db.String, nullable=False)
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(String, primary_key=True)
+    email = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
+    api_key = Column(String)
+    model_settings = Column(Text)
 
-    @classmethod
-    def get_or_create(cls, user_id, name, description):
-        existing_character = cls.query.filter_by(user_id=user_id, name=name).first()
-        if existing_character:
-            return existing_character
-        new_character = cls(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
-        db.session.add(new_character)
-        db.session.commit()
-        return new_character
-
-class Chapter(db.Model):
-    id = db.Column(db.String, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    content = db.Column(db.Text, nullable=False)
-    chapter_number = db.Column(db.Integer, nullable=False)
-    user_id = db.Column(db.String, nullable=False)
+class Chapter(Base):
+    __tablename__ = 'chapters'
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
 
     def to_dict(self):
         return {
@@ -39,353 +37,391 @@ class Chapter(db.Model):
             'chapter_number': self.chapter_number
         }
 
+class ValidityCheck(Base):
+    __tablename__ = 'validity_checks'
+    id = Column(String, primary_key=True)
+    chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
+    chapter_title = Column(String)
+    is_valid = Column(Boolean)
+    feedback = Column(Text)
+    review = Column(Text)
+    style_guide_adherence = Column(Boolean)
+    style_guide_feedback = Column(Text)
+    continuity = Column(Boolean)
+    continuity_feedback = Column(Text)
+    test_results = Column(Text)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
 
-class ChatHistory(db.Model):
-    id = db.Column(db.String, primary_key=True)
-    user_id = db.Column(db.String, nullable=False)
-    messages = db.Column(db.Text, nullable=False)
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'chapterId': self.chapter_id,
+            'chapterTitle': self.chapter_title,
+            'isValid': self.is_valid,
+            'feedback': self.feedback,
+            'review': self.review,
+            'style_guide_adherence': self.style_guide_adherence,
+            'style_guide_feedback': self.style_guide_feedback,
+            'continuity': self.continuity,
+            'continuity_feedback': self.continuity_feedback,
+            'test_results': self.test_results
+        }
+
+class Character(Base):
+    __tablename__ = 'characters'
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description
+        }
+
+class ChatHistory(Base):
+    __tablename__ = 'chat_history'
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    messages = Column(Text, nullable=False)
 
 class Database:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.create_tables()
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
+        
+        db_url = os.getenv('DATABASE_URL')
+        if not db_url:
+            raise ValueError("DATABASE_URL environment variable is not set")
+        
+        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=20, max_overflow=0)
+        self.Session = scoped_session(sessionmaker(bind=self.engine))
+        
+        Base.metadata.create_all(self.engine)
 
-    def delete_chat_history(self, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('DELETE FROM chat_history WHERE user_id = ?', (user_id,))
-        self.conn.commit()
-        cursor.close()
-        self.logger.debug(f"Chat history deleted for user_id: {user_id}")
-
-    def create_tables(self):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE,
-                password TEXT,
-                api_key TEXT,
-                model_settings TEXT
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS chapters (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                content TEXT,
-                chapter_number INTEGER,
-                user_id TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS validity_checks (
-                id TEXT PRIMARY KEY,
-                chapter_id TEXT,
-                chapter_title TEXT,
-                is_valid INTEGER,
-                feedback TEXT,
-                review TEXT,
-                style_guide_adherence INTEGER,
-                style_guide_feedback TEXT,
-                continuity INTEGER,
-                continuity_feedback TEXT,
-                test_results TEXT,
-                user_id TEXT,
-                FOREIGN KEY (chapter_id) REFERENCES chapters (id),
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS characters (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                description TEXT,
-                user_id TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                messages TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
-        self.conn.commit()
-        
-        # Add the chapter_title column if it doesn't exist
-        cursor.execute('PRAGMA table_info(validity_checks)')
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'chapter_title' not in columns:
-            cursor.execute('ALTER TABLE validity_checks ADD COLUMN chapter_title TEXT')
-            self.conn.commit()
-        
-        # Ensure all columns are present
-        required_columns = ['id', 'chapter_id', 'chapter_title', 'is_valid', 'feedback', 'review', 'style_guide_adherence', 'style_guide_feedback', 'continuity', 'continuity_feedback', 'test_results', 'user_id']
-        for column in required_columns:
-            if column not in columns:
-                cursor.execute(f'ALTER TABLE validity_checks ADD COLUMN {column} TEXT')
-                self.conn.commit()
-        
-        # Ensure the api_key column exists in the users table
-        cursor.execute('PRAGMA table_info(users)')
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'api_key' not in columns:
-            cursor.execute('ALTER TABLE users ADD COLUMN api_key TEXT')
-            self.conn.commit()
-        
-        # Add the model_settings column if it doesn't exist
-        cursor.execute('PRAGMA table_info(users)')
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'model_settings' not in columns:
-            cursor.execute('ALTER TABLE users ADD COLUMN model_settings TEXT')
-            self.conn.commit()
-        
-        cursor.close()
+    def get_session(self):
+        return self.Session()
 
     def create_user(self, email, password):
-        cursor = self.conn.cursor()
-        user_id = uuid.uuid4().hex
-        cursor.execute('INSERT INTO users (id, email, password) VALUES (?, ?, ?)', (user_id, email, password))
-        self.conn.commit()
-        cursor.close()
-        return user_id
+        session = self.get_session()
+        try:
+            user = User(id=str(uuid.uuid4()), email=email, password=password)
+            session.add(user)
+            session.commit()
+            return user.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating user: {str(e)}")
+            raise
+        finally:
+            session.close()
 
     def get_user_by_email(self, email):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
-        row = cursor.fetchone()
-        cursor.close()
-        if row:
-            # Ensure the row has the expected number of columns
-            if len(row) == 5:
-                return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': row[3], 'model_settings': row[4]}
-            else:
-                # If the row has fewer columns, handle it gracefully
-                return {'id': row[0], 'email': row[1], 'password': row[2], 'api_key': None, 'model_settings': None}
-        return None
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(email=email).first()
+            if user:
+                return {
+                    'id': user.id,
+                    'email': user.email,
+                    'password': user.password,
+                    'api_key': user.api_key,
+                    'model_settings': json.loads(user.model_settings) if user.model_settings else None
+                }
+            return None
+        finally:
+            session.close()
 
-    def get_all_chapters(self, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM chapters WHERE user_id = ? ORDER BY chapter_number', (user_id,))
-        rows = cursor.fetchall()
-        cursor.close()
-        return [{'id': row[0], 'title': row[1], 'content': row[2], 'chapter_number': row[3]} for row in rows]
+    def get_all_chapters(self, user_id):
+        session = self.get_session()
+        try:
+            chapters = session.query(Chapter).filter_by(user_id=user_id).order_by(Chapter.chapter_number).all()
+            return [chapter.to_dict() for chapter in chapters]
+        finally:
+            session.close()
 
     def create_chapter(self, title, content, user_id):
-        chapter_id = str(uuid.uuid4())
-        chapter_number = self.get_chapter_count(user_id) + 1
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO chapters (id, title, content, chapter_number, user_id)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (chapter_id, title, content, chapter_number, user_id))
-        self.conn.commit()
-        cursor.close()
-        return {
-            'id': chapter_id,
-            'title': title,
-            'content': content,
-            'chapter_number': chapter_number
-        }
+        session = self.get_session()
+        try:
+            chapter_number = session.query(Chapter).filter_by(user_id=user_id).count() + 1
+            chapter = Chapter(id=str(uuid.uuid4()), title=title, content=content, chapter_number=chapter_number, user_id=user_id)
+            session.add(chapter)
+            session.commit()
+            return chapter.to_dict()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating chapter: {str(e)}")
+            raise
+        finally:
+            session.close()
 
     def update_chapter(self, chapter_id, title, content, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE chapters
-            SET content = ?, title = ?
-            WHERE id = ? AND user_id = ?
-        ''', (content, title, chapter_id, user_id))
-        self.conn.commit()
-        cursor.close()
-
-        return self.get_chapter(chapter_id, user_id)
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            if chapter:
+                chapter.title = title
+                chapter.content = content
+                session.commit()
+                return chapter.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating chapter: {str(e)}")
+            raise
+        finally:
+            session.close()
 
     def delete_chapter(self, chapter_id, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('DELETE FROM chapters WHERE id = ? AND user_id = ?', (chapter_id, user_id))
-        self.conn.commit()
-        cursor.close()
-        return cursor.rowcount > 0
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            if chapter:
+                session.delete(chapter)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting chapter: {str(e)}")
+            raise
+        finally:
+            session.close()
 
     def get_chapter(self, chapter_id, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM chapters WHERE id = ? AND user_id = ?', (chapter_id, user_id))
-        row = cursor.fetchone()
-        cursor.close()
-        return {'id': row[0], 'title': row[1], 'content': row[2], 'chapter_number': row[3]} if row else None
-
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            return chapter.to_dict() if chapter else None
+        finally:
+            session.close()
 
     def get_all_validity_checks(self, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM validity_checks WHERE user_id = ?', (user_id,))
-        rows = cursor.fetchall()
-        cursor.close()
-        return [
-            {
-                'id': row[0],
-                'chapterId': row[1],
-                'chapterTitle': row[2],
-                'isValid': bool(row[3]),
-                'feedback': row[4],
-                'review': row[5] if len(row) > 5 else None,
-                'style_guide_adherence': bool(row[6]) if len(row) > 6 else None,
-                'style_guide_feedback': row[7] if len(row) > 7 else None,
-                'continuity': bool(row[8]) if len(row) > 8 else None,
-                'continuity_feedback': row[9] if len(row) > 9 else None,
-                'test_results': row[10] if len(row) > 10 else None
-            }
-            for row in rows
-        ]
+        session = self.get_session()
+        try:
+            checks = session.query(ValidityCheck).filter_by(user_id=user_id).all()
+            return [check.to_dict() for check in checks]
+        finally:
+            session.close()
 
     def delete_validity_check(self, check_id, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('DELETE FROM validity_checks WHERE id = ? AND user_id = ?', (check_id, user_id))
-        self.conn.commit()
-        cursor.close()
-        return cursor.rowcount > 0
+        session = self.get_session()
+        try:
+            check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id).first()
+            if check:
+                session.delete(check)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting validity check: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def create_character(self, name: str, description: str, user_id: str) -> str:
-        cursor = self.conn.cursor()
-        character_id = uuid.uuid4().hex
-        cursor.execute('INSERT INTO characters (id, name, description, user_id) VALUES (?, ?, ?, ?)', (character_id, name, description, user_id))
-        self.conn.commit()
-        cursor.close()
-        return character_id
+    def create_character(self, name, description, user_id):
+        session = self.get_session()
+        try:
+            character = Character(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
+            session.add(character)
+            session.commit()
+            return character.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating character: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def get_all_characters(self, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM characters WHERE user_id = ?', (user_id,))
-        rows = cursor.fetchall()
-        cursor.close()
-        return [{'id': row[0], 'name': row[1], 'description': row[2]} for row in rows]
+    def get_all_characters(self, user_id):
+        session = self.get_session()
+        try:
+            characters = session.query(Character).filter_by(user_id=user_id).all()
+            return [character.to_dict() for character in characters]
+        finally:
+            session.close()
 
-    def update_character(self, character_id: str, name: str, description: str, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE characters
-            SET name = ?, description = ?
-            WHERE id = ? AND user_id = ?
-        ''', (name, description, character_id, user_id))
-        self.conn.commit()
-        cursor.close()
+    def update_character(self, character_id, name, description, user_id):
+        session = self.get_session()
+        try:
+            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
+            if character:
+                character.name = name
+                character.description = description
+                session.commit()
+                return character.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating character: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def delete_character(self, character_id: str, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('DELETE FROM characters WHERE id = ? AND user_id = ?', (character_id, user_id))
-        self.conn.commit()
-        cursor.close()
-        return cursor.rowcount > 0
+    def delete_character(self, character_id, user_id):
+        session = self.get_session()
+        try:
+            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
+            if character:
+                session.delete(character)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting character: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def get_chapter_count(self, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM chapters WHERE user_id = ?", (user_id,))
-        count = cursor.fetchone()[0]
-        cursor.close()
-        return count
+    def get_character_by_id(self, character_id, user_id):
+        session = self.get_session()
+        try:
+            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
+            return character.to_dict() if character else None
+        finally:
+            session.close()
 
-    def get_character_by_id(self, character_id: str, user_id: str):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM characters WHERE id = ? AND user_id = ?', (character_id, user_id))
-        row = cursor.fetchone()
-        cursor.close()
-        return {'id': row[0], 'name': row[1], 'description': row[2]} if row else None
+    def save_api_key(self, user_id, api_key):
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.api_key = api_key
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving API key: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def save_api_key(self, user_id: str, api_key: str):
-        cursor = self.conn.cursor()
-        cursor.execute('UPDATE users SET api_key = ? WHERE id = ?', (api_key, user_id))
-        self.conn.commit()
-        cursor.close()
-
-    def get_api_key(self, user_id: str) -> str:
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT api_key FROM users WHERE id = ?', (user_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        return row[0] if row else None
+    def get_api_key(self, user_id):
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            return user.api_key if user else None
+        finally:
+            session.close()
 
     def remove_api_key(self, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('UPDATE users SET api_key = NULL WHERE id = ?', (user_id,))
-        self.conn.commit()
-        cursor.close()
-
-    def save_model_settings(self, user_id: str, settings: dict):
-        cursor = self.conn.cursor()
-        settings_json = json.dumps(settings)
-        cursor.execute('UPDATE users SET model_settings = ? WHERE id = ?', (settings_json, user_id))
-        self.conn.commit()
-        cursor.close()
-
-    def get_model_settings(self, user_id: str) -> dict:
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT model_settings FROM users WHERE id = ?', (user_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        if row and row[0]:
-            return json.loads(row[0])
-        return {
-            'mainLLM': 'gemini-1.5-pro-002',
-            'checkLLM': 'gemini-1.5-pro-002',
-            'embeddingsModel': 'models/text-embedding-004',
-            'titleGenerationLLM': 'gemini-1.5-pro-002',
-            'characterExtractionLLM': 'gemini-1.5-pro-002',
-            'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
-        }
-
-    def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str):
-        # Ensure all parameters are of the correct type
-        chapter_title = str(chapter_title)
-        is_valid = bool(is_valid)
-        feedback = str(feedback)
-        review = str(review) if review is not None else ''
-        style_guide_adherence = bool(style_guide_adherence)
-        style_guide_feedback = str(style_guide_feedback) if style_guide_feedback is not None else ''
-        continuity = bool(continuity)
-        continuity_feedback = str(continuity_feedback) if continuity_feedback is not None else ''
-        test_results = str(test_results) if test_results is not None else ''
-
-        # Ensure chapter_id is a string
-        chapter_id = str(chapter_id)
-
-        # Log the parameters being passed to the database
-        #self.logger.debug(f"Saving validity check with parameters: chapter_id={chapter_id}, chapter_title={chapter_title}, is_valid={is_valid}, feedback={feedback}, review={review}, style_guide_adherence={style_guide_adherence}, style_guide_feedback={style_guide_feedback}, continuity={continuity}, continuity_feedback={continuity_feedback}, test_results={test_results}, user_id={user_id}")
-
+        session = self.get_session()
         try:
-            cursor = self.conn.cursor()
-            validity_id = uuid.uuid4().hex
-            cursor.execute('''
-                INSERT INTO validity_checks (id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (validity_id, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id))
-            self.conn.commit()
-            cursor.close()
-            self.logger.debug(f"Validity check saved successfully for chapter_id: {chapter_id}, user_id: {user_id}")
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.api_key = None
+                session.commit()
         except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error removing API key: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def save_model_settings(self, user_id, settings):
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.model_settings = json.dumps(settings)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving model settings: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_model_settings(self, user_id):
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user and user.model_settings:
+                return json.loads(user.model_settings)
+            return {
+                'mainLLM': 'gemini-1.5-pro-002',
+                'checkLLM': 'gemini-1.5-pro-002',
+                'embeddingsModel': 'models/text-embedding-004',
+                'titleGenerationLLM': 'gemini-1.5-pro-002',
+                'characterExtractionLLM': 'gemini-1.5-pro-002',
+                'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+            }
+        finally:
+            session.close()
+
+    def save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
+        session = self.get_session()
+        try:
+            validity_check = ValidityCheck(
+                id=str(uuid.uuid4()),
+                chapter_id=chapter_id,
+                chapter_title=chapter_title,
+                is_valid=is_valid,
+                feedback=feedback,
+                review=review,
+                style_guide_adherence=style_guide_adherence,
+                style_guide_feedback=style_guide_feedback,
+                continuity=continuity,
+                continuity_feedback=continuity_feedback,
+                test_results=test_results,
+                user_id=user_id
+            )
+            session.add(validity_check)
+            session.commit()
+        except Exception as e:
+            session.rollback()
             self.logger.error(f"Error saving validity check: {str(e)}")
             raise
+        finally:
+            session.close()
 
-    def save_chat_history(self, user_id: str, messages: list):
-        cursor = self.conn.cursor()
-        messages_json = json.dumps(messages)
-        cursor.execute('INSERT OR REPLACE INTO chat_history (id, user_id, messages) VALUES (?, ?, ?)',
-                       (user_id, user_id, messages_json))
-        self.conn.commit()
-        cursor.close()
+    def save_chat_history(self, user_id, messages):
+        session = self.get_session()
+        try:
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            if chat_history:
+                chat_history.messages = json.dumps(messages)
+            else:
+                chat_history = ChatHistory(id=str(uuid.uuid4()), user_id=user_id, messages=json.dumps(messages))
+                session.add(chat_history)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving chat history: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-    def get_chat_history(self, user_id: str) -> list:
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT messages FROM chat_history WHERE user_id = ?', (user_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        return json.loads(row[0]) if row else []
+    def get_chat_history(self, user_id):
+        session = self.get_session()
+        try:
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            return json.loads(chat_history.messages) if chat_history else []
+        finally:
+            session.close()
 
-db_instance = Database('novel_generator.db')
+    def delete_chat_history(self, user_id):
+        session = self.get_session()
+        try:
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            if chat_history:
+                session.delete(chat_history)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting chat history: {str(e)}")
+            raise
+        finally:
+            session.close()
 
-def get_chapter_count(user_id: str):
-    return len(db_instance.get_all_chapters(user_id))
+db_instance = Database()
+
+def get_chapter_count(user_id):
+    session = db_instance.get_session()
+    try:
+        return session.query(Chapter).filter_by(user_id=user_id).count()
+    finally:
+        session.close()
