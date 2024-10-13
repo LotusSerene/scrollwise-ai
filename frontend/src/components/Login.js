@@ -11,12 +11,12 @@ function Login({ onLogin }) {
     event.preventDefault();
 
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/login`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username: email, password }),
       });
 
       if (response.ok) {
@@ -47,12 +47,12 @@ function Login({ onLogin }) {
     event.preventDefault();
 
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/register`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username: email, password }),
       });
 
       if (response.ok) {
@@ -61,8 +61,8 @@ function Login({ onLogin }) {
         alert("Registration successful! Please log in.");
       } else {
         const errorData = await response.json();
-        console.error("Registration failed:", errorData.message);
-        alert("Registration failed: " + errorData.message);
+        console.error("Registration failed:", errorData.detail);
+        alert("Registration failed: " + errorData.detail);
       }
     } catch (error) {
       console.error("An error occurred during registration:", error);
