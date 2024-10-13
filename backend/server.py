@@ -375,6 +375,11 @@ def delete_character(character_id):
     try:
         user_id = get_jwt_identity()
         
+        # Get the character from the database
+        character = db_instance.get_character_by_id(character_id, user_id)
+        if not character:
+            return jsonify({'error': 'Character not found'}), 404
+
         # Delete the character from the database
         if db_instance.delete_character(character_id, user_id):
             # Delete the character from the knowledge base
