@@ -2,19 +2,15 @@
 import os
 from typing import Dict, Any, List, Tuple, Optional
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
-from langchain.schema.runnable import Runnable
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.chains import LLMChain
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 import logging
 import uuid
@@ -23,10 +19,9 @@ from pydantic import BaseModel, Field
 import json
 # Load environment variables
 load_dotenv()
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from vector_store import VectorStore
 from langchain.output_parsers import OutputFixingParser
 
@@ -49,7 +44,6 @@ class AgentManager:
         self.logger.setLevel(logging.DEBUG)
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
-        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.chat_history = db_instance.get_chat_history(user_id)
         self.logger.info(f"AgentManager initialized for user: {user_id}")
 
@@ -132,13 +126,15 @@ class AgentManager:
         fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
         
         prompt = ChatPromptTemplate.from_template("""
-        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify any new characters that are not in the provided list of existing characters.
+        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify ANY new characters that are not in the provided list of existing characters.
 
         For each new character you find:
         1. Provide their name
         2. Write a brief description of the character based on information in the chapter
 
-        If you find no new characters, explicitly state "No new characters found."
+        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters.
+
+        If you truly find no new characters after a thorough analysis, explicitly state "No new characters found."
 
         Chapter:
         {chapter}
@@ -146,7 +142,7 @@ class AgentManager:
         Existing Characters:
         {characters}
 
-        Remember, only include characters that are not in the list of existing characters.
+        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem.
 
         {format_instructions}
         """)
@@ -162,10 +158,8 @@ class AgentManager:
 
             self.logger.debug(f"check_and_extract_new_characters returned: {result}")
             self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
-            self.logger.debug(f"Result type: {type(result)}")
             self.logger.debug(f"Result content: {result}")
             self.logger.debug(f"Result new_characters: {result.new_characters}")
-            self.logger.debug(f"Sent chapter: {chapter}")
 
             new_characters = {char.name: char.description for char in result.new_characters}
             
@@ -259,8 +253,8 @@ class AgentManager:
 
             # Log the raw response
             #self.logger.debug(f"Raw validity check response: {result}")
-          #  self.logger.debug(f"Truncated previous chapters: {truncated_previous_chapters}")
-           # self.logger.debug(f"previous_chapters: {previous_chapters}")
+            #self.logger.debug(f"Truncated previous chapters: {truncated_previous_chapters}")
+            #self.logger.debug(f"previous_chapters: {previous_chapters}")
 
             # Strip leading and trailing backticks
             result = result.strip().strip('```json').strip('```')
@@ -349,6 +343,7 @@ class AgentManager:
     def update_or_remove_from_knowledge_base(self, embedding_id, action, new_content=None, new_metadata=None):
         if action == 'delete':
             self.vector_store.delete_from_knowledge_base(embedding_id)
+
         elif action == 'update':
             if new_content is None and new_metadata is None:
                 raise ValueError("Either new_content or new_metadata must be provided for update action")
@@ -364,58 +359,54 @@ class AgentManager:
         qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
         
-        memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
-        )
-        
-        # Load chat history
+        # Create a history-aware retriever
+        condense_question_prompt = ChatPromptTemplate.from_messages([
+            ("system", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+        ])
+        history_aware_retriever = create_history_aware_retriever(qa_llm, retriever, condense_question_prompt)
+
+        # Create the QA chain
+        qa_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            ("human", "Context: {context}"),
+        ])
+        qa_chain = create_stuff_documents_chain(qa_llm, qa_prompt)
+
+        # Create the retrieval chain
+        retrieval_chain = create_retrieval_chain(history_aware_retriever, qa_chain)
+
+        # Prepare chat history
+        messages = []
         for message in chat_history:
-            if isinstance(message, HumanMessage):
-                memory.chat_memory.add_user_message(message.content)
-            elif isinstance(message, AIMessage):
-                memory.chat_memory.add_ai_message(message.content)
-        
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=qa_llm,
-            retriever=retriever,
-            memory=memory,
-            return_source_documents=True,
-            combine_docs_chain_kwargs={"prompt": self._get_qa_prompt()},
-            chain_type="stuff",
-        )
-        
-        self.logger.debug("Invoking ConversationalRetrievalChain")
-        result = qa_chain.invoke({"question": query})
-        
+            if isinstance(message, dict):
+                if message.get('type') == 'human':
+                    messages.append(HumanMessage(content=message['content']))
+                elif message.get('type') == 'ai':
+                    messages.append(AIMessage(content=message['content']))
+            elif isinstance(message, (HumanMessage, AIMessage)):
+                messages.append(message)
+
+        # Invoke the chain
+        result = retrieval_chain.invoke({
+            "input": query,
+            "chat_history": messages
+        })
+
         answer = result['answer']
-        source_documents = result['source_documents']
-        
+        source_documents = result.get('source_documents', [])
+
         self.logger.info(f"Generated response. Number of source documents: {len(source_documents)}")
-        
+
         # Format the response with source information
         response = f"{answer}\n\nSources:\n"
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
-        
+
         return response
-
-    def _get_qa_prompt(self):
-        template = """Use the following pieces of context to answer the human's question. 
-        If you don't know the answer, just say that you don't know, don't try to make up an answer.
-
-        Chat History:
-        {chat_history}
-        
-        Context:
-        {context}
-        
-        Human: {question}
-        AI: """
-        return PromptTemplate(
-            template=template, input_variables=["context", "question"]
-        )
 
     def _construct_query_context(self, relevant_docs: List[Document]) -> str:
         context = "\n".join([doc.page_content for doc in relevant_docs])
@@ -510,4 +501,5 @@ class AgentManager:
         return self.vector_store.get_knowledge_base_content()
 
     def reset_memory(self):
-        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+        self.chat_history = []
+        self.logger.info("Chat history has been reset.")
