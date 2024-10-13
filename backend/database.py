@@ -125,8 +125,9 @@ class Database:
             if user:
                 return {
                     'id': user.id,
+                    'username': user.email,  # Map email to username
+                    'hashed_password': user.password,  # Use hashed_password instead of password
                     'email': user.email,
-                    'password': user.password,
                     'api_key': user.api_key,
                     'model_settings': json.loads(user.model_settings) if user.model_settings else None
                 }
