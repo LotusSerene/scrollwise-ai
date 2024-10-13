@@ -45,19 +45,8 @@ const Dashboard = () => {
     try {
       const headers = getAuthHeaders();
 
-      const character = characters.find(ch => ch.id === characterId);
-      const embeddingId = character ? character.embedding_id : null;
-
       // Delete the character from the normal database
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/characters/${characterId}`, { headers: headers });
-
-      // Remove character from knowledge base
-      if (embeddingId) {
-        await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-          headers: headers,
-          data: { embedding_id: embeddingId }
-        });
-      }
 
       // Update the local state
       setCharacters(characters.filter(char => char.id !== characterId));
@@ -131,56 +120,17 @@ const Dashboard = () => {
     try {
       const headers = getAuthHeaders();
       let response;
-      let embeddingId;
 
       if (character.id) {
         // Update existing character
         response = await axios.put(`${process.env.REACT_APP_API_URL}/api/characters/${character.id}`, character, {
           headers: headers
         });
-
-        embeddingId = response.data.embedding_id;
-
-        // Update in knowledge base
-        if (embeddingId) {
-          await axios.put(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-            embedding_id: embeddingId,
-            content: character.description,
-            metadata: { name: character.name, characterId: character.id }
-          }, { headers: headers });
-        } else {
-          // If no embedding_id, create new entry in knowledge base
-          const knowledgeBaseResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-            type: 'Character',
-            content: character.description,
-            metadata: { name: character.name, characterId: character.id }
-          }, { headers: headers });
-          embeddingId = knowledgeBaseResponse.data.embedding_id;
-
-          // Update character with new embedding_id
-          await axios.put(`${process.env.REACT_APP_API_URL}/api/characters/${character.id}`, {
-            embedding_id: embeddingId
-          }, { headers: headers });
-        }
       } else {
         // Create new character
         response = await axios.post(`${process.env.REACT_APP_API_URL}/api/characters`, character, {
           headers: headers
         });
-
-        // Add to knowledge base
-        const knowledgeBaseResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-          type: 'Character',
-          content: character.description,
-          metadata: { name: character.name, characterId: response.data.id }
-        }, { headers: headers });
-
-        embeddingId = knowledgeBaseResponse.data.embedding_id;
-
-        // Update character with embedding_id
-        await axios.put(`${process.env.REACT_APP_API_URL}/api/characters/${response.data.id}`, {
-          embedding_id: embeddingId
-        }, { headers: headers });
       }
 
       fetchCharacters();
