@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from jose import JWTError, jwt, JWKError
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from database import db_instance
 from agent_manager import AgentManager
@@ -124,7 +124,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     try:
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
-    except JWKError as e:
+    except JWTError as e:
         logging.error(f"Error encoding JWT: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
