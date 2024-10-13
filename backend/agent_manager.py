@@ -43,7 +43,7 @@ class ApiException(Exception):
 class ChapterOutput(BaseModel):
     content: str
     title: str
-    new_characters: Dict[str, str] = Field(default_factory=dict, description="Dictionary of new characters, where key is the character name and value is the character description")
+    new_characters: Dict[str, str] = Field(default_factory=dict, description="Dictionary of new characters, where key is the character name and value is the character description", min_items=1)
 
 class GenerationInterruptedException(Exception):
     def __init__(self, partial_content, message="Generation interrupted"):
@@ -159,6 +159,10 @@ class AgentManager:
             self.logger.debug(f"API call result: {result}")
 
             chapter, title, new_characters = result.content, result.title, result.new_characters
+
+            # Ensure new_characters is non-empty
+            if not new_characters:
+                new_characters = {"NoNewCharacters": "No new characters found in this chapter."}
 
             min_word_count = instructions.get('min_word_count', 0)
             if len(chapter.split()) < min_word_count:
