@@ -11,7 +11,7 @@ function Login({ onLogin }) {
     event.preventDefault();
 
     try {
-      console.log("Attempting login...");
+      console.log("Attempting login with email:", email);
       const response = await fetch(`${process.env.REACT_APP_API_URL}/token`, {
         method: "POST",
         headers: {
@@ -30,7 +30,7 @@ function Login({ onLogin }) {
       if (response.ok) {
         if (data.access_token && typeof data.access_token === 'string' && data.access_token.split('.').length === 3) {
           localStorage.setItem("token", data.access_token);
-          console.log("Login successful!");
+          console.log("Login successful with token:", data.access_token);
           onLogin(data.access_token);
           navigate("/dashboard");
         } else {
@@ -38,7 +38,7 @@ function Login({ onLogin }) {
           alert("Login failed: Invalid token received");
         }
       } else {
-        console.error("Login failed:", data);
+        console.error("Login failed with status:", response.status, "and data:", data);
         alert("Login failed: " + (data.detail || "Unknown error"));
       }
     } catch (error) {
@@ -51,6 +51,7 @@ function Login({ onLogin }) {
     event.preventDefault();
 
     try {
+      console.log("Attempting registration with email:", email);
       const response = await fetch(`${process.env.REACT_APP_API_URL}/register`, {
         method: "POST",
         headers: {
@@ -61,11 +62,11 @@ function Login({ onLogin }) {
 
       if (response.ok) {
         const data = await response.json();
-        console.log("Registration successful!");
+        console.log("Registration successful with data:", data);
         alert("Registration successful! Please log in.");
       } else {
         const errorData = await response.json();
-        console.error("Registration failed:", errorData);
+        console.error("Registration failed with status:", response.status, "and data:", errorData);
         if (errorData.detail === "Username already registered") {
           alert("Registration failed: User already exists");
         } else {
