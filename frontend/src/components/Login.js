@@ -9,22 +9,25 @@ function Login({ onLogin }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    console.log("Login form submitted");
 
     try {
+      console.log("Attempting login...");
       const response = await fetch(`${process.env.REACT_APP_API_URL}/token`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: JSON.stringify({ username: email, password }),
+        body: new URLSearchParams({
+          username: email,
+          password: password,
+        }),
       });
 
-      console.log("Login response status:", response.status);
-      if (response.ok) {
-        const data = await response.json();
-        console.log("Received data:", data); // Log the received data
+      console.log("Response status:", response.status);
+      const data = await response.json();
+      console.log("Response data:", data);
 
+      if (response.ok) {
         if (data.access_token && typeof data.access_token === 'string' && data.access_token.split('.').length === 3) {
           localStorage.setItem("token", data.access_token);
           console.log("Login successful!");
@@ -35,9 +38,8 @@ function Login({ onLogin }) {
           alert("Login failed: Invalid token received");
         }
       } else {
-        const errorData = await response.json();
-        console.error("Login failed:", errorData);
-        alert("Login failed: " + (errorData.message || "Unknown error"));
+        console.error("Login failed:", data);
+        alert("Login failed: " + (data.detail || "Unknown error"));
       }
     } catch (error) {
       console.error("An error occurred during login:", error);
@@ -47,7 +49,6 @@ function Login({ onLogin }) {
 
   const handleRegister = async (event) => {
     event.preventDefault();
-    console.log("Register form submitted");
 
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/register`, {
@@ -58,15 +59,14 @@ function Login({ onLogin }) {
         body: JSON.stringify({ username: email, password }),
       });
 
-      console.log("Register response status:", response.status);
       if (response.ok) {
         const data = await response.json();
         console.log("Registration successful!");
         alert("Registration successful! Please log in.");
       } else {
         const errorData = await response.json();
-        console.error("Registration failed:", errorData.detail);
-        alert("Registration failed: " + errorData.detail);
+        console.error("Registration failed:", errorData);
+        alert("Registration failed: " + (errorData.detail || "Unknown error"));
       }
     } catch (error) {
       console.error("An error occurred during registration:", error);
