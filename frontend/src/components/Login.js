@@ -66,7 +66,11 @@ function Login({ onLogin }) {
       } else {
         const errorData = await response.json();
         console.error("Registration failed:", errorData);
-        alert("Registration failed: " + (errorData.detail || "Unknown error"));
+        if (errorData.detail === "Username already registered") {
+          alert("Registration failed: User already exists");
+        } else {
+          alert("Registration failed: " + (errorData.detail || "Unknown error"));
+        }
       }
     } catch (error) {
       console.error("An error occurred during registration:", error);
