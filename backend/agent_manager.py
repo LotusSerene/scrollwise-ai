@@ -132,7 +132,7 @@ class AgentManager:
         1. Provide their name
         2. Write a brief description of the character based on information in the chapter
 
-        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters.
+        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new character.
 
         If you truly find no new characters after a thorough analysis, explicitly state "No new characters found."
 
@@ -142,7 +142,7 @@ class AgentManager:
         Existing Characters:
         {characters}
 
-        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem.
+        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem. Be thorough and precise in your analysis.
 
         {format_instructions}
         """)
