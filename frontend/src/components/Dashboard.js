@@ -45,14 +45,20 @@ const Dashboard = () => {
     try {
       const headers = getAuthHeaders();
       
+      // Fetch the character to get the embedding ID
+      const characterResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/characters/${characterId}`, { headers: headers });
+      const character = characterResponse.data;
+
       // Delete the character from the normal database
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/characters/${characterId}`, { headers: headers });
 
       // Remove character from knowledge base
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        headers: headers,
-        data: { type: 'character', id: characterId }
-      });
+      if (character.embedding_id) {
+        await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
+          headers: headers,
+          data: { embedding_id: character.embedding_id }
+        });
+      }
 
       // Update the local state
       setCharacters(characters.filter(char => char.id !== characterId));
