@@ -67,8 +67,15 @@ class User(BaseModel):
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
 
-class UserInDB(User):
+class UserInDB(BaseModel):
+    id: str
+    username: str
     hashed_password: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+    api_key: Optional[str] = None
+    model_settings: Optional[dict] = None
 
 class ChapterCreate(BaseModel):
     title: str
@@ -105,6 +112,7 @@ def get_user(username: str):
     user_dict = db_instance.get_user_by_email(username)
     if user_dict:
         return UserInDB(**user_dict)
+    return None
 
 def authenticate_user(username: str, password: str):
     user = get_user(username)
@@ -155,18 +163,23 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 # Routes
 @app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = authenticate_user(form_data.username, form_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        logging.error(f"Error in login_for_access_token: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.post("/register")
 async def register(user: User):
     existing_user = get_user(user.username)
