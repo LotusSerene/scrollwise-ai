@@ -77,6 +77,9 @@ class UserInDB(BaseModel):
     api_key: Optional[str] = None
     model_settings: Optional[dict] = None
 
+    class Config:
+        protected_namespaces = ()
+
 class ChapterCreate(BaseModel):
     title: str
     content: str
