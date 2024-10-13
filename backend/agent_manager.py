@@ -28,6 +28,8 @@ from langchain_community.cache import SQLiteCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from tenacity import retry, stop_after_attempt, wait_exponential
+from langchain.chains.summarize import load_summarize_chain
+from langchain.docstore.document import Document
 
 
 class NewCharacter(BaseModel):
@@ -54,6 +56,7 @@ class AgentManager:
         self.llm = self._initialize_llm(self.model_settings['mainLLM'])
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.api_key, self.model_settings['embeddingsModel'])
+        self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -229,6 +232,11 @@ class AgentManager:
             chapter_tokens = self.estimate_token_count(chapter_content)
 
             if total_tokens + chapter_tokens > max_chapter_tokens:
+                # Summarize the chapter if it exceeds the token limit
+                chapter_content = self.summarize_chapter(chapter_content)
+                chapter_tokens = self.estimate_token_count(chapter_content)
+
+            if total_tokens + chapter_tokens > max_chapter_tokens:
                 break
 
             chapters_content = chapter_content + chapters_content
@@ -237,6 +245,11 @@ class AgentManager:
         context += chapters_content
 
         return context
+
+    def summarize_chapter(self, chapter_content: str) -> str:
+        document = Document(page_content=chapter_content)
+        summary = self.summarize_chain.run([document])
+        return summary
 
     def estimate_token_count(self, text: str) -> int:
         # Gemini models use about 4 characters per token
@@ -508,8 +521,15 @@ class AgentManager:
             chapter_num = chapter.get('chapter_number', i)  # Use index as fallback
             chapter_content = f"Chapter {chapter_num}: {chapter['content']}\n"
             chapter_tokens = self.estimate_token_count(chapter_content)
+
+            if total_tokens + chapter_tokens > max_tokens:
+                # Summarize the chapter if it exceeds the token limit
+                chapter_content = self.summarize_chapter(chapter_content)
+                chapter_tokens = self.estimate_token_count(chapter_content)
+
             if total_tokens + chapter_tokens > max_tokens:
                 break
+
             truncated = chapter_content + truncated
             total_tokens += chapter_tokens
         return truncated
