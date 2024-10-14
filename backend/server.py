@@ -18,6 +18,7 @@ import os
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.routing import APIRouter
 import io
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
 load_dotenv()
@@ -219,6 +220,7 @@ async def register(user: User):
     return {"message": "User registered successfully", "user_id": user_id}
 
 # Chapter routes
+
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: ChapterGenerationRequest,
@@ -236,61 +238,85 @@ async def generate_chapters(
         }
 
         async def generate():
-            for i in range(request.numChapters):
-                chapter_number = len(previous_chapters) + i + 1
-                try:
-                    chapter_content = ""
-                    async for chunk in agent_manager.generate_chapter_stream(
-                        chapter_number=chapter_number,
-                        plot=request.plot,
-                        writing_style=request.writingStyle,
-                        instructions=instructions,
-                        previous_chapters=previous_chapters,
-                        characters=characters
-                    ):
-                        if isinstance(chunk, dict) and 'content' in chunk:
-                            chapter_content += chunk['content']
-                        yield json.dumps(chunk)
+            try:
+                for i in range(request.numChapters):
+                    chapter_number = len(previous_chapters) + i + 1
+                    try:
+                        logging.debug(f"Starting generation for chapter {chapter_number}")
+                        chapter_content = ""
+                        async for chunk in agent_manager.generate_chapter_stream(
+                            chapter_number=chapter_number,
+                            plot=request.plot,
+                            writing_style=request.writingStyle,
+                            instructions=instructions,
+                            previous_chapters=previous_chapters,
+                            characters=characters
+                        ):
+                            if isinstance(chunk, dict) and 'content' in chunk:
+                                chapter_content += chunk['content']
+                            yield json.dumps(chunk)
 
-                    # After generation is complete, perform post-processing
-                    chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                    validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                    logging.debug(f"Starting to check and extract new characters for chapter {chapter_number}")
-                    new_characters = await agent_manager.check_and_extract_new_characters(chapter_content, characters)
-                    logging.debug(f"New characters extracted: {new_characters}")
-                    logging.debug(f"Type of new_characters: {type(new_characters)}")
+                        logging.debug(f"Chapter {chapter_number} content generated")
 
-                    # Save chapter and validity check
-                    chapter_id = db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
-                    db_instance.save_validity_check(
-                        chapter_id=str(chapter_id),
-                        chapter_title=str(chapter_title),
-                        is_valid=bool(validity['is_valid']),
-                        feedback=str(validity['feedback']),
-                        review=str(validity.get('review', '')),
-                        style_guide_adherence=bool(validity['style_guide_adherence']),
-                        style_guide_feedback=str(validity.get('style_guide_feedback', '')),
-                        continuity=bool(validity['continuity']),
-                        continuity_feedback=str(validity.get('continuity_feedback', '')),
-                        test_results=str(validity.get('test_results', '')),
-                        user_id=current_user.id
-                    )
+                        logging.debug("Generating title")
+                        chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
+                        logging.debug(f"Title generated: {chapter_title}")
 
-                    # Send final chunk with all metadata
-                    yield json.dumps({
-                        'type': 'final', 
-                        'chapterId': chapter_id, 
-                        'title': chapter_title, 
-                        'content': chapter_content,
-                        'validity': validity, 
-                        'newCharacters': new_characters
-                    })
+                        logging.debug("Checking chapter")
+                        validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
+                        logging.debug("Chapter checked")
 
-                except Exception as e:
-                    logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                    yield json.dumps({'error': str(e)})
+                        logging.debug("Extracting new characters")
+                        new_characters = agent_manager.check_and_extract_new_characters(chapter_content, characters)
+                        logging.debug(f"New characters extracted: {new_characters}")
 
-            yield json.dumps({'type': 'done'})
+                        logging.debug("Saving chapter")
+                        new_chapter = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
+                        logging.debug(f"Chapter saved with id: {new_chapter['id']}")
+
+                        logging.debug("Saving validity check")
+                        await db_instance.save_validity_check(
+                            chapter_id=str(new_chapter['id']),
+                            chapter_title=str(chapter_title),
+                            is_valid=bool(validity['is_valid']),
+                            feedback=str(validity['feedback']),
+                            review=str(validity.get('review', '')),
+                            style_guide_adherence=bool(validity['style_guide_adherence']),
+                            style_guide_feedback=str(validity.get('style_guide_feedback', '')),
+                            continuity=bool(validity['continuity']),
+                            continuity_feedback=str(validity.get('continuity_feedback', '')),
+                            test_results=str(validity.get('test_results', '')),
+                            user_id=current_user.id
+                        )
+                        logging.debug("Validity check saved")
+
+                        logging.debug("Saving new characters")
+                        for char in new_characters:
+                            await db_instance.create_character(char.name, char.description, current_user.id)
+                        logging.debug("New characters saved")
+
+                        logging.debug("Preparing final chunk")
+                        yield json.dumps({
+                            'type': 'final', 
+                            'chapterId': new_chapter['id'], 
+                            'title': chapter_title, 
+                            'content': chapter_content,
+                            'validity': validity, 
+                            'newCharacters': [char.dict() for char in new_characters]
+                        })
+                        logging.debug("Final chunk sent")
+
+                    except Exception as e:
+                        logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
+                        yield json.dumps({'error': str(e)})
+
+                logging.debug("All chapters generated, sending 'done' signal")
+                yield json.dumps({'type': 'done'})
+            except Exception as e:
+                logging.error(f"Unexpected error in generate function: {str(e)}")
+                yield json.dumps({'error': str(e)})
+            finally:
+                logging.debug("Generate function completed")
 
         return StreamingResponse(generate(), media_type="text/event-stream")
     except Exception as e:
@@ -337,17 +363,6 @@ async def delete_chapter(chapter_id: str, current_user: User = Depends(get_curre
         agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
         return {"message": "Chapter deleted successfully"}
     raise HTTPException(status_code=404, detail="Chapter not found")
-
-@chapter_router.get("/validity-checks")
-async def get_validity_checks(current_user: User = Depends(get_current_active_user)):
-    validity_checks = db_instance.get_all_validity_checks(current_user.id)
-    return {"validityChecks": validity_checks}
-
-@chapter_router.delete("/validity-checks/{check_id}")
-async def delete_validity_check(check_id: str, current_user: User = Depends(get_current_active_user)):
-    if db_instance.delete_validity_check(check_id, current_user.id):
-        return {"message": "Validity check deleted successfully"}
-    raise HTTPException(status_code=404, detail="Validity check not found")
 
 # Character routes
 @character_router.get("/")
@@ -519,6 +534,27 @@ async def health_check():
     except Exception as e:
         logging.error(f"Health check failed: {str(e)}")
         return JSONResponse({"status": "Error", "error": str(e)}, status_code=500)
+
+@app.get("/validity-checks")
+async def get_validity_checks(current_user: User = Depends(get_current_active_user)):
+    try:
+        validity_checks = db_instance.get_all_validity_checks(current_user.id)
+        return {"validityChecks": validity_checks}
+    except Exception as e:
+        logging.error(f"Error fetching validity checks: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/validity-checks/{check_id}")
+async def delete_validity_check(check_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        result = db_instance.delete_validity_check(check_id, current_user.id)
+        if result:
+            return {"message": "Validity check deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Validity check not found")
+    except Exception as e:
+        logging.error(f"Error deleting validity check: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
     import uvicorn
