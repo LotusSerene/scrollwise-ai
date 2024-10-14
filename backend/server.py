@@ -261,8 +261,8 @@ async def generate_chapters(
                     logging.debug(f"Type of new_characters: {type(new_characters)}")
 
                     # Save chapter and validity check
-                    chapter_id = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
-                    await db_instance.save_validity_check(
+                    chapter_id = db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
+                    db_instance.save_validity_check(
                         chapter_id=str(chapter_id),
                         chapter_title=str(chapter_title),
                         is_valid=bool(validity['is_valid']),
