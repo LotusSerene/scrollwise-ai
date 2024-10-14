@@ -16,7 +16,7 @@ const KnowledgeBase = () => {
   const fetchKnowledgeBaseContent = async () => {
     try {
       const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/knowledge-base`, { headers });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/knowledge-base`, { headers, timeout: 5000 });
       setKnowledgeBaseContent(response.data.content);
     } catch (error) {
       console.error('Error fetching knowledge base content:', error);

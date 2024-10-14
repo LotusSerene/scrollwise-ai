@@ -341,8 +341,10 @@ async def add_to_knowledge_base(documents: List[str], current_user: User = Depen
 
 @knowledge_base_router.get("/")
 async def get_knowledge_base_content(current_user: User = Depends(get_current_active_user)):
+    logging.debug(f"Fetching knowledge base content for user: {current_user.id}")
     agent_manager = AgentManager(current_user.id)
     content = agent_manager.get_knowledge_base_content()
+    logging.debug(f"Knowledge base content fetched for user: {current_user.id}")
     formatted_content = [
         {
             'type': item['metadata'].get('type', 'Unknown'),
@@ -351,6 +353,7 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
         }
         for item in content
     ]
+    logging.debug(f"Formatted content: {formatted_content}")
     return {"content": formatted_content}
 
 @knowledge_base_router.put("/{embedding_id}")
