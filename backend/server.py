@@ -322,6 +322,7 @@ async def generate_chapters(
             finally:
                 logging.debug("Generate function completed")
 
+        yield json.dumps({'type': 'done'})  # Ensure the final 'done' signal is sent
         return StreamingResponse(generate(), media_type="text/event-stream")
     except Exception as e:
         logging.error(f"Error in generate_chapters: {str(e)}")
