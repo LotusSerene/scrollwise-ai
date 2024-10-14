@@ -292,7 +292,7 @@ async def generate_chapters(
 
                         logging.debug("Saving new characters")
                         for char in new_characters:
-                            await db_instance.create_character(char.name, char.description, current_user.id)
+                            await db_instance.create_character(char['name'], char['description'], current_user.id)
                         logging.debug("New characters saved")
 
                         logging.debug("Preparing final chunk")
