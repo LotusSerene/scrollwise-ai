@@ -123,7 +123,7 @@ class AgentManager:
             
             prompt = await asyncio.to_thread(self._construct_prompt, instructions, context)
             self.logger.debug(f"Constructed Prompt: {prompt}")
-    
+
             chat_history = ChatMessageHistory()
             total_tokens = 0
             max_history_tokens = self.MAX_INPUT_TOKENS // 4
@@ -146,17 +146,20 @@ class AgentManager:
             chapter_content = ""
             self.logger.info("Initiating async stream from LLM")
             self.logger.debug("About to start LLM stream")
-            async for chunk in chain.astream(
+            
+            # Use asyncio.to_thread to run the synchronous chain.stream method
+            async for chunk in await asyncio.to_thread(
+                chain.stream,
                 {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
                 config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
             ):
                 self.logger.debug(f"Received chunk: {chunk}")
                 chapter_content += chunk
                 yield {"type": "chunk", "content": chunk}
-    
+
             self.logger.info("Chapter generation completed")
             yield {"type": "complete", "content": chapter_content}
-    
+
         except Exception as e:
             self.logger.error(f"Error in generate_chapter_stream: {e}", exc_info=True)
             yield {"error": str(e)}
