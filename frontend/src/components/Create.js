@@ -25,17 +25,24 @@ const CreateChapter = ({ onChapterGenerated }) => {
         'Content-Type': 'application/json',
       };
 
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/chapters/generate`, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({
-          numChapters,
-          plot,
-          writingStyle,
+      const requestBody = {
+        numChapters,
+        plot,
+        writingStyle,
+        styleGuide,
+        minWordCount,
+        additionalInstructions,
+        instructions: {
           styleGuide,
           minWordCount,
           additionalInstructions
-        }),
+        }
+      };
+
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/chapters/generate`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.body) {
@@ -51,7 +58,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
         done = doneReading;
         const chunkValue = decoder.decode(value);
 
-        // Assuming the server sends JSON per line
         const lines = chunkValue.split('\n').filter(line => line.trim() !== '');
 
         for (const line of lines) {
@@ -70,7 +76,12 @@ const CreateChapter = ({ onChapterGenerated }) => {
                 }]);
               }
               toast.success('Chapter generated successfully');
+            } else if (data.type === 'done') {
+              console.log('All chapters generated');
+              toast.success('All chapters generated successfully');
               setIsGenerating(false);
+              // Optionally, you can trigger any final actions here
+              break; // Exit the for loop as we're done
             } else if (data.error) {
               toast.error(`Error: ${data.error}`);
               setIsGenerating(false);
@@ -79,6 +90,8 @@ const CreateChapter = ({ onChapterGenerated }) => {
             console.error("Error parsing chunk:", err);
           }
         }
+        
+        if (done) break; // Exit the while loop if we're done reading
       }
     } catch (error) {
       console.error('Error generating chapters:', error);

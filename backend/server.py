@@ -20,14 +20,18 @@ from fastapi.routing import APIRouter
 import io
 from concurrent.futures import ThreadPoolExecutor
 
+
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # FastAPI app
 app = FastAPI(title="Novel AI API", version="1.0.0")
+
+
 
 # CORS middleware
 app.add_middleware(
@@ -302,7 +306,7 @@ async def generate_chapters(
                             'title': chapter_title, 
                             'content': chapter_content,
                             'validity': validity, 
-                            'newCharacters': [char.dict() for char in new_characters]
+                            'newCharacters': new_characters
                         })
                         logging.debug("Final chunk sent")
 
@@ -329,9 +333,13 @@ async def cancel_chapter_generation(current_user: User = Depends(get_current_act
     return {"message": "Generation cancelled"}
 
 @chapter_router.get("/")
-async def get_chapters(current_user: User = Depends(get_current_active_user)):
-    chapters = db_instance.get_all_chapters(current_user.id)
-    return {"chapters": chapters}
+async def get_chapters(request: Request, current_user: User = Depends(get_current_active_user)):
+    try:
+        chapters = db_instance.get_all_chapters(current_user.id)
+        return {"chapters": chapters}
+    except Exception as e:
+        logger.error(f"Error fetching chapters: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.post("/")
 async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
@@ -509,11 +517,13 @@ app.include_router(knowledge_base_router)
 app.include_router(settings_router)
 
 @app.middleware("http")
-async def timeout_middleware(request: Request, call_next):
+async def log_requests(request: Request, call_next):
     try:
-        return await asyncio.wait_for(call_next(request), timeout=60.0)  # 60 seconds timeout
-    except asyncio.TimeoutError:
-        return JSONResponse({"detail": "Request timeout"}, status_code=504)
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        logger.error(f"Unhandled exception: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 @app.get("/health")
 async def health_check():
