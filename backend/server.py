@@ -117,6 +117,8 @@ class ChapterGenerationRequest(BaseModel):
     styleGuide: str
     minWordCount: int
     additionalInstructions: str
+    instructions: Dict[str, Any]
+    instructions: Dict[str, Any]
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
