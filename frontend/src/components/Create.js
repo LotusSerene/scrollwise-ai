@@ -1,148 +1,166 @@
 // frontend/src/components/Create.js
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import './Create.css';
+import React, { useState } from 'react';
 import { getAuthHeaders } from '../utils/auth';
+import { toast } from 'react-toastify';
+import './Create.css'; // We'll create this file for styling
 
 const CreateChapter = ({ onChapterGenerated }) => {
   const [numChapters, setNumChapters] = useState(1);
   const [plot, setPlot] = useState('');
   const [writingStyle, setWritingStyle] = useState('');
-  const [instructions, setInstructions] = useState('');
   const [styleGuide, setStyleGuide] = useState('');
   const [minWordCount, setMinWordCount] = useState(1000);
-  const [chapterContent, setChapterContent] = useState('');
-  const [error, setError] = useState(null);
-  const [previousChapters, setPreviousChapters] = useState([]);
+  const [additionalInstructions, setAdditionalInstructions] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-
-  useEffect(() => {
-    const fetchPreviousChapters = async () => {
-      try {
-        const headers = getAuthHeaders();
-        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
-          headers: headers
-        });
-        setPreviousChapters(response.data.chapters);
-      } catch (error) {
-        console.error('Error fetching previous chapters:', error);
-        setError('Error fetching previous chapters. Please try again later.');
-      }
-    };
-
-    fetchPreviousChapters();
-  }, []);
+  const [streamedContent, setStreamedContent] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsGenerating(true);
+    setStreamedContent('');
+
     try {
-      const headers = getAuthHeaders();
-      setError(null);
-      
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/generate`, {
-        numChapters,
-        plot,
-        writingStyle,
-        instructions: {
+      const headers = {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      };
+
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/chapters/generate`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          numChapters,
+          plot,
+          writingStyle,
           styleGuide,
           minWordCount,
-          additionalInstructions: instructions
-        },
-        previousChapters
-      }, {
-        headers: headers
+          additionalInstructions
+        }),
       });
-      
-      if (response.data.chapters && response.data.chapters.length > 0) {
-        // Generate title for each chapter
-        const chaptersWithTitles = response.data.chapters.map((chapter) => ({
-          ...chapter,
-          title: chapter.title
-        }));
 
-        if (onChapterGenerated) {
-          onChapterGenerated(chaptersWithTitles);
+      if (!response.body) {
+        throw new Error("ReadableStream not supported in this browser.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        const chunkValue = decoder.decode(value);
+
+        // Assuming the server sends JSON per line
+        const lines = chunkValue.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.type === 'chunk') {
+              setStreamedContent(prev => prev + data.content);
+            } else if (data.type === 'final') {
+              if (onChapterGenerated) {
+                onChapterGenerated([{
+                  id: data.chapterId,
+                  title: data.title,
+                  content: data.content,
+                  validity: data.validity,
+                  newCharacters: data.newCharacters
+                }]);
+              }
+              toast.success('Chapter generated successfully');
+              setIsGenerating(false);
+            } else if (data.error) {
+              toast.error(`Error: ${data.error}`);
+              setIsGenerating(false);
+            }
+          } catch (err) {
+            console.error("Error parsing chunk:", err);
+          }
         }
-        setChapterContent(chaptersWithTitles.map(chapter => `${chapter.title}\n\n${chapter.content}`).join('\n\n'));
-      } else {
-        setError('No chapters were generated. Please try again.');
       }
     } catch (error) {
       console.error('Error generating chapters:', error);
-      setError(error.response?.data?.message || 'Error generating chapters. Please try again later.');
-    } finally {
+      toast.error('Error generating chapters');
       setIsGenerating(false);
     }
   };
 
   return (
     <div className="create-container">
-      <div className="input-section">
-        <h3>Create New Chapter</h3>
-        {error && <p className="error">{error}</p>}
-        <label>
-          Number of Chapters:
+      <h2>Generate New Chapter</h2>
+      <p className="instructions">
+        Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.
+      </p>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label htmlFor="numChapters">Number of Chapters:</label>
           <input
+            id="numChapters"
             type="number"
             value={numChapters}
-            onChange={(e) => setNumChapters(e.target.value)}
-            min={1}
+            onChange={(e) => setNumChapters(parseInt(e.target.value))}
+            min="1"
           />
-        </label>
-        <label>
-          Plot:
+        </div>
+        <div className="form-group">
+          <label htmlFor="plot">Plot:</label>
           <textarea
+            id="plot"
             value={plot}
             onChange={(e) => setPlot(e.target.value)}
-            rows={5}
-            cols={40}
+            placeholder="Describe the main events and storyline"
           />
-        </label>
-        <label>
-          Writing Style:
-          <textarea
+        </div>
+        <div className="form-group">
+          <label htmlFor="writingStyle">Writing Style:</label>
+          <input
+            id="writingStyle"
+            type="text"
             value={writingStyle}
             onChange={(e) => setWritingStyle(e.target.value)}
-            rows={3}
-            cols={40}
+            placeholder="e.g., descriptive, concise, humorous"
           />
-        </label>
-        <label>
-          Instructions:
+        </div>
+        <div className="form-group">
+          <label htmlFor="styleGuide">Style Guide:</label>
           <textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            rows={3}
-            cols={40}
-          />
-        </label>
-        <label>
-          Style Guide:
-          <textarea
+            id="styleGuide"
             value={styleGuide}
             onChange={(e) => setStyleGuide(e.target.value)}
-            rows={3}
-            cols={40}
+            placeholder="Any specific guidelines for the writing"
           />
-        </label>
-        <label>
-          Minimum Word Count:
+        </div>
+        <div className="form-group">
+          <label htmlFor="minWordCount">Minimum Word Count:</label>
           <input
+            id="minWordCount"
             type="number"
             value={minWordCount}
-            onChange={(e) => setMinWordCount(e.target.value)}
-            min={0}
+            onChange={(e) => setMinWordCount(parseInt(e.target.value))}
+            min="0"
           />
-        </label>
-        <button onClick={handleSubmit} disabled={isGenerating}>
+        </div>
+        <div className="form-group">
+          <label htmlFor="additionalInstructions">Additional Instructions:</label>
+          <textarea
+            id="additionalInstructions"
+            value={additionalInstructions}
+            onChange={(e) => setAdditionalInstructions(e.target.value)}
+            placeholder="Any other details or requirements"
+          />
+        </div>
+        <button type="submit" disabled={isGenerating} className="submit-button">
           {isGenerating ? 'Generating...' : 'Generate Chapter'}
         </button>
-      </div>
-      <div className="generated-chapter">
-        <h3>Generated Chapter</h3>
-        <pre>{chapterContent}</pre>
-      </div>
+      </form>
+      {streamedContent && (
+        <div className="generated-content">
+          <h3>Generated Content:</h3>
+          <pre>{streamedContent}</pre>
+        </div>
+      )}
     </div>
   );
 };
