@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 import os
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.routing import APIRouter
+import io
 
 # Load environment variables
 load_dotenv()
@@ -117,7 +118,6 @@ class ChapterGenerationRequest(BaseModel):
     styleGuide: str
     minWordCount: int
     additionalInstructions: str
-    instructions: Dict[str, Any]
     instructions: Dict[str, Any]
 
 # Helper functions
@@ -239,6 +239,7 @@ async def generate_chapters(
             for i in range(request.numChapters):
                 chapter_number = len(previous_chapters) + i + 1
                 try:
+                    chapter_content = ""
                     async for chunk in agent_manager.generate_chapter_stream(
                         chapter_number=chapter_number,
                         plot=request.plot,
@@ -247,17 +248,18 @@ async def generate_chapters(
                         previous_chapters=previous_chapters,
                         characters=characters
                     ):
+                        if isinstance(chunk, dict) and 'content' in chunk:
+                            chapter_content += chunk['content']
                         yield json.dumps(chunk)
 
                     # After generation is complete, perform post-processing
-                    chapter_content = chunk['content']
                     chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                    validity = await agent_manager.check_chapter(chapter_content, request.instructions, previous_chapters)
+                    validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
                     new_characters = await agent_manager.check_and_extract_new_characters(chapter_content, characters)
 
                     # Save chapter and validity check
-                    chapter_id = db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
-                    db_instance.save_validity_check(
+                    chapter_id = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
+                    await db_instance.save_validity_check(
                         chapter_id=str(chapter_id),
                         chapter_title=str(chapter_title),
                         is_valid=bool(validity['is_valid']),
@@ -272,7 +274,14 @@ async def generate_chapters(
                     )
 
                     # Send final chunk with all metadata
-                    yield json.dumps({'type': 'final', 'chapterId': chapter_id, 'title': chapter_title, 'validity': validity, 'newCharacters': new_characters})
+                    yield json.dumps({
+                        'type': 'final', 
+                        'chapterId': chapter_id, 
+                        'title': chapter_title, 
+                        'content': chapter_content,
+                        'validity': validity, 
+                        'newCharacters': new_characters
+                    })
 
                 except Exception as e:
                     logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
@@ -295,23 +304,36 @@ async def get_chapters(current_user: User = Depends(get_current_active_user)):
     chapters = db_instance.get_all_chapters(current_user.id)
     return {"chapters": chapters}
 
+@chapter_router.post("/")
+async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
+    new_chapter = db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
+    
+    # Add to knowledge base
+    agent_manager = AgentManager(current_user.id)
+    agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id']})
+    
+    return {"message": "Chapter created successfully", "id": new_chapter['id']}
+
 @chapter_router.put("/{chapter_id}")
 async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: User = Depends(get_current_active_user)):
     updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
     if not updated_chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+    
+    # Update in knowledge base
+    agent_manager = AgentManager(current_user.id)
+    agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'update', chapter.content, {"title": chapter.title, "id": chapter_id})
+    
     return updated_chapter
 
 @chapter_router.delete("/{chapter_id}")
 async def delete_chapter(chapter_id: str, current_user: User = Depends(get_current_active_user)):
     if db_instance.delete_chapter(chapter_id, current_user.id):
+        # Remove from knowledge base
+        agent_manager = AgentManager(current_user.id)
+        agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
         return {"message": "Chapter deleted successfully"}
     raise HTTPException(status_code=404, detail="Chapter not found")
-
-@chapter_router.post("/")
-async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
-    new_chapter = db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
-    return {"message": "Chapter created successfully", "id": new_chapter['id']}
 
 @chapter_router.get("/validity-checks")
 async def get_validity_checks(current_user: User = Depends(get_current_active_user)):
@@ -333,6 +355,11 @@ async def get_characters(current_user: User = Depends(get_current_active_user)):
 @character_router.post("/")
 async def create_character(character: CharacterCreate, current_user: User = Depends(get_current_active_user)):
     character_id = db_instance.create_character(character.name, character.description, current_user.id)
+    
+    # Add to knowledge base
+    agent_manager = AgentManager(current_user.id)
+    agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id})
+    
     return {"message": "Character created successfully", "id": character_id}
 
 @character_router.put("/{character_id}")
@@ -340,21 +367,44 @@ async def update_character(character_id: str, character: CharacterUpdate, curren
     updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
     if not updated_character:
         raise HTTPException(status_code=404, detail="Character not found")
+    
+    # Update in knowledge base
+    agent_manager = AgentManager(current_user.id)
+    agent_manager.update_or_remove_from_knowledge_base(character_id, 'update', character.description, {"name": character.name, "id": character_id})
+    
     return updated_character
 
 @character_router.delete("/{character_id}")
 async def delete_character(character_id: str, current_user: User = Depends(get_current_active_user)):
     if db_instance.delete_character(character_id, current_user.id):
+        # Remove from knowledge base
+        agent_manager = AgentManager(current_user.id)
+        agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
         return {"message": "Character deleted successfully"}
     raise HTTPException(status_code=404, detail="Character not found")
 
 # Knowledge base routes
 @knowledge_base_router.post("/")
-async def add_to_knowledge_base(documents: List[str], current_user: User = Depends(get_current_active_user)):
+async def add_to_knowledge_base(
+    documents: Optional[List[str]] = None,
+    file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_active_user)
+):
     agent_manager = AgentManager(current_user.id)
-    for doc in documents:
-        agent_manager.add_to_knowledge_base("doc", doc)
-    return {"message": "Documents added to the knowledge base successfully"}
+    
+    if documents:
+        for doc in documents:
+            agent_manager.add_to_knowledge_base("doc", doc)
+        return {"message": "Documents added to the knowledge base successfully"}
+    
+    elif file:
+        content = await file.read()
+        text_content = content.decode("utf-8")
+        agent_manager.add_to_knowledge_base("file", text_content, {"filename": file.filename})
+        return {"message": "File added to the knowledge base successfully"}
+    
+    else:
+        raise HTTPException(status_code=400, detail="No documents or file provided")
 
 @knowledge_base_router.get("/")
 async def get_knowledge_base_content(current_user: User = Depends(get_current_active_user)):
@@ -469,4 +519,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
