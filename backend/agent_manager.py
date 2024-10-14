@@ -116,13 +116,13 @@ class AgentManager:
         self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
         try:
             characters_dict = {char['name']: char['description'] for char in characters}
-            self.logger.debug(f"Characters Dictionary: {characters_dict}")
+            #self.logger.debug(f"Characters Dictionary: {characters_dict}")
             
             context = await asyncio.to_thread(self._construct_context, plot, writing_style, instructions, characters_dict, previous_chapters)
-            self.logger.debug(f"Constructed Context: {context[:200]}...")  # Log a snippet
+            #self.logger.debug(f"Constructed Context: {context[:200]}...")  # Log a snippet
             
             prompt = await asyncio.to_thread(self._construct_prompt, instructions, context)
-            self.logger.debug(f"Constructed Prompt: {prompt}")
+            #self.logger.debug(f"Constructed Prompt: {prompt}")
 
             chat_history = ChatMessageHistory()
             total_tokens = 0
@@ -144,25 +144,31 @@ class AgentManager:
             )
 
             chapter_content = ""
-            self.logger.info("Initiating async stream from LLM")
-            self.logger.debug("About to start LLM stream")
-            
-            # Use asyncio.to_thread to run the synchronous chain.stream method
-            async for chunk in await asyncio.to_thread(
-                chain.stream,
-                {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
-                config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
+            async for chunk in self._async_generator(chain.stream, {
+                "chapter_number": chapter_number,
+                "context": context,
+                "instructions": instructions,
+                "characters": characters_dict
+            }, config={"configurable": {"session_id": f"chapter_{chapter_number}"}},
             ):
-                self.logger.debug(f"Received chunk: {chunk}")
+                #self.logger.debug(f"Received chunk: {chunk}")
                 chapter_content += chunk
                 yield {"type": "chunk", "content": chunk}
 
             self.logger.info("Chapter generation completed")
-            yield {"type": "complete", "content": chapter_content}
+            
+            # Extract new characters after the chapter is generated
+            new_characters = self.check_and_extract_new_characters(chapter_content, characters)
+            
+            yield {"type": "complete", "content": chapter_content, "new_characters": new_characters}
 
         except Exception as e:
             self.logger.error(f"Error in generate_chapter_stream: {e}", exc_info=True)
             yield {"error": str(e)}
+
+    async def _async_generator(self, sync_generator, *args, **kwargs):
+        for item in sync_generator(*args, **kwargs):
+            yield item
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
                            characters: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
@@ -521,7 +527,7 @@ class AgentManager:
         db_instance.delete_chat_history(self.user_id)
         self.logger.info("Chat history has been reset.")
 
-    async def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> Dict[str, str]:
+    def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> Dict[str, str]:
         character_names = [char['name'] for char in characters]
         
         parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
@@ -563,9 +569,6 @@ class AgentManager:
                 return {}
 
             self.logger.debug(f"check_and_extract_new_characters returned: {result}")
-            #self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
-            #self.logger.debug(f"Result content: {result}")
-            #self.logger.debug(f"Result new_characters: {result.new_characters}")
 
             new_characters = {char.name: char.description for char in result.new_characters}
             
