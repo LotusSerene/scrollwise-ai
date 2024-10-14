@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, File, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -64,6 +64,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+    user_id: Optional[str] = None # Add user_id to TokenData
 
 class User(BaseModel):
     username: str
@@ -125,6 +126,14 @@ class ChapterGenerationRequest(BaseModel):
     additionalInstructions: str
     instructions: Dict[str, Any]
 
+class PresetCreate(BaseModel): # New model for creating presets
+    name: str
+    data: ChapterGenerationRequest
+
+class PresetUpdate(BaseModel): # New model for updating presets
+    name: str
+    data: ChapterGenerationRequest
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -169,9 +178,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None:
+        user_id: str = payload.get("user_id") # Get user_id from payload
+        if username is None or user_id is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
+        token_data = TokenData(username=username, user_id=user_id) # Include user_id in TokenData
     except JWTError:
         raise credentials_exception
     user = get_user(username=token_data.username)
@@ -190,6 +200,7 @@ chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
 character_router = APIRouter(prefix="/characters", tags=["Characters"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
+preset_router = APIRouter(prefix="/presets", tags=["Presets"]) # New router for presets
 
 # Auth routes
 @auth_router.post("/token", response_model=Token)
@@ -206,7 +217,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             )
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires # Include user_id in JWT payload
         )
         logging.debug(f"Access token created for user: {user.username}")
         return {"access_token": access_token, "token_type": "bearer"}
@@ -258,7 +269,7 @@ async def generate_chapters(
                         ):
                             if isinstance(chunk, dict) and 'content' in chunk:
                                 chapter_content += chunk['content']
-                            yield json.dumps(chunk)
+                            yield json.dumps(chunk) + '\n'
 
                         logging.debug(f"Chapter {chapter_number} content generated")
 
@@ -274,9 +285,21 @@ async def generate_chapters(
                         new_characters = agent_manager.check_and_extract_new_characters(chapter_content, characters)
                         logging.debug(f"New characters extracted: {new_characters}")
 
+                        logging.debug("Saving new characters")
+                        for char in new_characters:
+                            character_id = await db_instance.create_character(char['name'], char['description'], current_user.id)
+                            # Add new character to knowledge base
+                            agent_manager.add_to_knowledge_base("character", char['description'], {"name": char['name'], "id": character_id, "type": "character"})
+                            # Add the new character to the characters list
+                            characters.append({"id": character_id, "name": char['name'], "description": char['description']})
+                        logging.debug("New characters saved and added to knowledge base")
+
                         logging.debug("Saving chapter")
                         new_chapter = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
                         logging.debug(f"Chapter saved with id: {new_chapter['id']}")
+
+                        # Add generated chapter to knowledge base
+                        agent_manager.add_to_knowledge_base("chapter", chapter_content, {"title": chapter_title, "id": new_chapter['id'], "type": "chapter"})
 
                         logging.debug("Saving validity check")
                         await db_instance.save_validity_check(
@@ -294,11 +317,6 @@ async def generate_chapters(
                         )
                         logging.debug("Validity check saved")
 
-                        logging.debug("Saving new characters")
-                        for char in new_characters:
-                            await db_instance.create_character(char['name'], char['description'], current_user.id)
-                        logging.debug("New characters saved")
-
                         logging.debug("Preparing final chunk")
                         yield json.dumps({
                             'type': 'final', 
@@ -307,22 +325,22 @@ async def generate_chapters(
                             'content': chapter_content,
                             'validity': validity, 
                             'newCharacters': new_characters
-                        })
+                        }) + '\n'
                         logging.debug("Final chunk sent")
 
                     except Exception as e:
                         logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                        yield json.dumps({'error': str(e)})
+                        yield json.dumps({'error': str(e)}) + '\n'
 
                 logging.debug("All chapters generated, sending 'done' signal")
-                yield json.dumps({'type': 'done'})
+                yield json.dumps({'type': 'done'}) + '\n'
             except Exception as e:
                 logging.error(f"Unexpected error in generate function: {str(e)}")
-                yield json.dumps({'error': str(e)})
+                yield json.dumps({'error': str(e)}) + '\n'
             finally:
                 logging.debug("Generate function completed")
 
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        return StreamingResponse(generate(), media_type="application/json")
     except Exception as e:
         logging.error(f"Error in generate_chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -343,34 +361,50 @@ async def get_chapters(request: Request, current_user: User = Depends(get_curren
 
 @chapter_router.post("/")
 async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
-    new_chapter = db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
-    
-    # Add to knowledge base
-    agent_manager = AgentManager(current_user.id)
-    agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id']})
-    
-    return {"message": "Chapter created successfully", "id": new_chapter['id']}
+    try:
+        new_chapter = await db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
+        
+        # Add to knowledge base
+        agent_manager = AgentManager(current_user.id)
+        agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id'], "type": "chapter"})
+        
+        return {"message": "Chapter created successfully", "id": new_chapter['id']}
+    except Exception as e:
+        logger.error(f"Error creating chapter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.put("/{chapter_id}")
 async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: User = Depends(get_current_active_user)):
-    updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
-    if not updated_chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-    
-    # Update in knowledge base
-    agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'update', chapter.content, {"title": chapter.title, "id": chapter_id})
-    
-    return updated_chapter
+    try:
+        updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
+        if not updated_chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        # Update in knowledge base
+        agent_manager = AgentManager(current_user.id)
+        # First, remove the old chapter from the knowledge base
+        agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
+        # Then, add the updated chapter to the knowledge base
+        agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": chapter_id, "type": "chapter"})
+        
+        return updated_chapter
+    except Exception as e:
+        logger.error(f"Error updating chapter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.delete("/{chapter_id}")
 async def delete_chapter(chapter_id: str, current_user: User = Depends(get_current_active_user)):
-    if db_instance.delete_chapter(chapter_id, current_user.id):
-        # Remove from knowledge base
-        agent_manager = AgentManager(current_user.id)
-        agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
-        return {"message": "Chapter deleted successfully"}
-    raise HTTPException(status_code=404, detail="Chapter not found")
+    try:
+        deleted = db_instance.delete_chapter(chapter_id, current_user.id)
+        if deleted:
+            # Remove from knowledge base
+            agent_manager = AgentManager(current_user.id)
+            agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
+            return {"message": "Chapter deleted successfully"}
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    except Exception as e:
+        logger.error(f"Error deleting chapter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Character routes
 @character_router.get("/")
@@ -380,56 +414,76 @@ async def get_characters(current_user: User = Depends(get_current_active_user)):
 
 @character_router.post("/")
 async def create_character(character: CharacterCreate, current_user: User = Depends(get_current_active_user)):
-    character_id = db_instance.create_character(character.name, character.description, current_user.id)
-    
-    # Add to knowledge base
-    agent_manager = AgentManager(current_user.id)
-    agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id})
-    
-    return {"message": "Character created successfully", "id": character_id}
+    try:
+        character_id = await db_instance.create_character(character.name, character.description, current_user.id)
+        
+        # Add to knowledge base
+        agent_manager = AgentManager(current_user.id)
+        agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
+        
+        return {"message": "Character created successfully", "id": character_id}
+    except Exception as e:
+        logger.error(f"Error creating character: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @character_router.put("/{character_id}")
 async def update_character(character_id: str, character: CharacterUpdate, current_user: User = Depends(get_current_active_user)):
-    updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
-    if not updated_character:
-        raise HTTPException(status_code=404, detail="Character not found")
-    
-    # Update in knowledge base
-    agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(character_id, 'update', character.description, {"name": character.name, "id": character_id})
-    
-    return updated_character
+    try:
+        updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
+        if not updated_character:
+            raise HTTPException(status_code=404, detail="Character not found")
+        
+        # Update in knowledge base
+        agent_manager = AgentManager(current_user.id)
+        # First, remove the old character from the knowledge base
+        agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
+        # Then, add the updated character to the knowledge base
+        agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
+        
+        return updated_character
+    except Exception as e:
+        logger.error(f"Error updating character: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @character_router.delete("/{character_id}")
 async def delete_character(character_id: str, current_user: User = Depends(get_current_active_user)):
-    if db_instance.delete_character(character_id, current_user.id):
-        # Remove from knowledge base
-        agent_manager = AgentManager(current_user.id)
-        agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
-        return {"message": "Character deleted successfully"}
-    raise HTTPException(status_code=404, detail="Character not found")
+    try:
+        deleted = db_instance.delete_character(character_id, current_user.id)
+        if deleted:
+            # Remove from knowledge base
+            agent_manager = AgentManager(current_user.id)
+            agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
+            return {"message": "Character deleted successfully"}
+        raise HTTPException(status_code=404, detail="Character not found")
+    except Exception as e:
+        logger.error(f"Error deleting character: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Knowledge base routes
 @knowledge_base_router.post("/")
 async def add_to_knowledge_base(
-    documents: Optional[List[str]] = None,
+    documents: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_active_user)
 ):
+    logger.info(f"Received request to add to knowledge base. Documents: {documents}, File: {file}")
+    
     agent_manager = AgentManager(current_user.id)
     
     if documents:
-        for doc in documents:
-            agent_manager.add_to_knowledge_base("doc", doc)
-        return {"message": "Documents added to the knowledge base successfully"}
+        logger.info(f"Adding document: {documents}")
+        agent_manager.add_to_knowledge_base("doc", documents)
+        return {"message": "Document added to the knowledge base successfully"}
     
     elif file:
+        logger.info(f"Adding file: {file.filename}")
         content = await file.read()
         text_content = content.decode("utf-8")
         agent_manager.add_to_knowledge_base("file", text_content, {"filename": file.filename})
         return {"message": "File added to the knowledge base successfully"}
     
     else:
+        logger.warning("No documents or file provided")
         raise HTTPException(status_code=400, detail="No documents or file provided")
 
 @knowledge_base_router.get("/")
@@ -509,12 +563,43 @@ async def get_chat_history(current_user: User = Depends(get_current_active_user)
     logging.debug(f"Chat history fetched: {len(chat_history)} messages")
     return {"chatHistory": chat_history}
 
+# Preset routes
+@preset_router.post("/", response_model=PresetCreate)
+async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
+    try:
+        preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data.dict())
+        return {"id": preset_id, "user_id": current_user.id, "name": preset.name, "data": preset.data}
+    except Exception as e:
+        logger.error(f"Error creating preset: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@preset_router.get("/", response_model=List[PresetCreate])
+async def get_presets(current_user: User = Depends(get_current_active_user)):
+    try:
+        presets = db_instance.get_presets(current_user.id)
+        return presets
+    except Exception as e:
+        logger.error(f"Error getting presets: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@preset_router.delete("/{preset_id}")
+async def delete_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        deleted = db_instance.delete_preset(preset_id, current_user.id)
+        if deleted:
+            return {"message": "Preset deleted successfully"}
+        raise HTTPException(status_code=404, detail="Preset not found")
+    except Exception as e:
+        logger.error(f"Error deleting preset: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
 app.include_router(character_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
+app.include_router(preset_router) # Include the preset router
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
