@@ -362,7 +362,7 @@ class AgentManager:
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)
 
-    def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
+    async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         self.logger.debug(f"Generating response for query: {query}")
         qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -399,7 +399,7 @@ class AgentManager:
                 messages.append(message)
 
         # Invoke the chain
-        result = retrieval_chain.invoke({
+        result = await retrieval_chain.ainvoke({
             "input": query,
             "chat_history": messages
         })
@@ -527,7 +527,7 @@ class AgentManager:
         db_instance.delete_chat_history(self.user_id)
         self.logger.info("Chat history has been reset.")
 
-    async def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> Dict[str, str]:
+    def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> List[Dict[str, str]]:
         character_names = [char['name'] for char in characters]
         
         parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
@@ -542,7 +542,7 @@ class AgentManager:
 
         IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new character.
 
-        If you truly find no new characters after a thorough analysis, explicitly state "No new characters found."
+        If you truly find no new characters after a thorough analysis, return an empty list.
 
         Chapter:
         {chapter}
@@ -558,25 +558,28 @@ class AgentManager:
         extraction_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | fixing_parser
 
         try:
-            result = await extraction_chain.ainvoke({
+            result = extraction_chain.invoke({
                 "chapter": chapter,
                 "characters": ", ".join(character_names),
                 "format_instructions": parser.get_format_instructions()
             })
 
-            if result is None:
-                self.logger.warning("Result from extraction_chain.invoke is None. Returning an empty dictionary.")
-                return {}
+            if result is None or not isinstance(result, CharacterExtraction):
+                self.logger.warning("Invalid result from extraction_chain.invoke. Returning an empty list.")
+                return []
 
             self.logger.debug(f"check_and_extract_new_characters returned: {result}")
 
-            new_characters = {char.name: char.description for char in result.new_characters}
+            new_characters = result.new_characters
             
             if not new_characters:
                 self.logger.warning("No new characters were extracted. This might be correct, or there might be an issue with character extraction.")
             
-            return new_characters
+            # Convert NewCharacter objects to dictionaries
+            new_characters_dicts = [{"name": char.name, "description": char.description} for char in new_characters]
+            
+            return new_characters_dicts
 
         except Exception as e:
             self.logger.error(f"Error in check_and_extract_new_characters: {str(e)}")
-            return {}
+            return []
