@@ -255,9 +255,9 @@ async def generate_chapters(
                     # After generation is complete, perform post-processing
                     chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
                     validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                    self.logger.debug(f"Starting to check and extract new characters for chapter {chapter_number}")
+                    logging.debug(f"Starting to check and extract new characters for chapter {chapter_number}")
                     new_characters = await agent_manager.check_and_extract_new_characters(chapter_content, characters)
-                    self.logger.debug(f"New characters extracted: {new_characters}")
+                    logging.debug(f"New characters extracted: {new_characters}")
 
                     # Save chapter and validity check
                     chapter_id = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
