@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { getAuthHeaders } from '../utils/auth';
 import './KnowledgeBase.css';
+import { toast } from 'react-toastify';
 
 const KnowledgeBase = () => {
   const [knowledgeBaseContent, setKnowledgeBaseContent] = useState([]);
   const [textInput, setTextInput] = useState('');
   const [file, setFile] = useState(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchKnowledgeBaseContent();
@@ -16,11 +16,11 @@ const KnowledgeBase = () => {
   const fetchKnowledgeBaseContent = async () => {
     try {
       const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, { headers });
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/knowledge-base`, { headers });
       setKnowledgeBaseContent(response.data.content);
     } catch (error) {
       console.error('Error fetching knowledge base content:', error);
-      setError('Failed to fetch knowledge base content');
+      toast.error('Failed to fetch knowledge base content');
     }
   };
 
@@ -28,15 +28,16 @@ const KnowledgeBase = () => {
     e.preventDefault();
     try {
       const headers = getAuthHeaders();
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, 
+      await axios.post(`${process.env.REACT_APP_API_URL}/knowledge-base`, 
         { documents: [textInput], metadata: { type: "doc" } },
         { headers }
       );
       setTextInput('');
       fetchKnowledgeBaseContent();
+      toast.success('Text added to knowledge base');
     } catch (error) {
       console.error('Error adding text to knowledge base:', error);
-      setError('Failed to add text to knowledge base');
+      toast.error('Failed to add text to knowledge base');
     }
   };
 
@@ -50,26 +51,27 @@ const KnowledgeBase = () => {
     try {
       const headers = getAuthHeaders();
       headers['Content-Type'] = 'multipart/form-data';
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/upload-document`, formData, { headers });
+      await axios.post(`${process.env.REACT_APP_API_URL}/knowledge-base`, formData, { headers });
       setFile(null);
       fetchKnowledgeBaseContent();
+      toast.success('Document uploaded successfully');
     } catch (error) {
       console.error('Error uploading document:', error);
-      setError('Failed to upload document');
+      toast.error('Failed to upload document');
     }
   };
 
   const handleDelete = async (embeddingId) => {
     try {
       const headers = getAuthHeaders();
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/knowledge-base`, {
-        headers,
-        data: { embedding_id: embeddingId }
+      await axios.delete(`${process.env.REACT_APP_API_URL}/knowledge-base/${embeddingId}`, {
+        headers
       });
       fetchKnowledgeBaseContent();
+      toast.success('Item deleted from knowledge base');
     } catch (error) {
       console.error('Error deleting item from knowledge base:', error);
-      setError('Failed to delete item from knowledge base');
+      toast.error('Failed to delete item from knowledge base');
     }
   };
 
@@ -77,21 +79,17 @@ const KnowledgeBase = () => {
     <div className="knowledge-base-container">
       <h2>Knowledge Base</h2>
       
-      {error && <div className="error">{error}</div>}
-      
       <div className="knowledge-base-content">
         <h3>Current Knowledge Base Content</h3>
         <ul className="content-list">
           {knowledgeBaseContent.map((item, index) => (
             <li key={index}>
               <div>
-                <strong>Type:</strong> {item.type || item.metadata?.type || 'Unknown'}
+                <strong>Type:</strong> {item.type}
                 <br />
-                <strong>Content:</strong> {(item.content || item.page_content || '').substring(0, 100)}...
-                <br />
-                <strong>Embedding ID:</strong> {item.embedding_id || item.id || 'Unknown'}
+                <strong>Content:</strong> {item.content.substring(0, 100)}...
               </div>
-              <button onClick={() => handleDelete(item.embedding_id || item.id)} className="delete-button">Delete</button>
+              <button onClick={() => handleDelete(item.embedding_id)} className="delete-button">Delete</button>
             </li>
           ))}
         </ul>

@@ -16,6 +16,7 @@ import json
 from dotenv import load_dotenv
 import os
 from fastapi.responses import StreamingResponse
+from fastapi.routing import APIRouter
 
 # Load environment variables
 load_dotenv()
@@ -24,15 +25,15 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
 # FastAPI app
-app = FastAPI()
+app = FastAPI(title="Novel AI API", version="1.0.0")
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["http://localhost:3000"],  # Replace with your frontend URL
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # JWT Configuration
@@ -40,9 +41,7 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("JWT_SECRET_KEY environment variable is not set")
 
-# Ensure SECRET_KEY is a string
 SECRET_KEY = str(SECRET_KEY)
-
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -104,6 +103,13 @@ class ModelSettings(BaseModel):
     characterExtractionLLM: str
     knowledgeBaseQueryLLM: str
 
+class ApiKeyUpdate(BaseModel):
+    apiKey: str
+
+class KnowledgeBaseQuery(BaseModel):
+    query: str
+    chatHistory: List[Dict[str, str]]
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -163,8 +169,15 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-# Routes
-@app.post("/token", response_model=Token)
+# Create API routers
+auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
+chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
+character_router = APIRouter(prefix="/characters", tags=["Characters"])
+knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
+settings_router = APIRouter(prefix="/settings", tags=["Settings"])
+
+# Auth routes
+@auth_router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         logging.debug(f"Login attempt with username: {form_data.username}")
@@ -186,7 +199,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         logging.error(f"Error in login_for_access_token: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/register")
+@auth_router.post("/register", status_code=201)
 async def register(user: User):
     existing_user = get_user(user.username)
     if existing_user:
@@ -195,7 +208,8 @@ async def register(user: User):
     user_id = db_instance.create_user(user.username, hashed_password)
     return {"message": "User registered successfully", "user_id": user_id}
 
-@app.post("/generate")
+# Chapter routes
+@chapter_router.post("/generate")
 async def generate_chapters(
     num_chapters: int,
     plot: str,
@@ -254,114 +268,78 @@ async def generate_chapters(
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-@app.post("/cancel-generation")
+@chapter_router.post("/cancel")
 async def cancel_chapter_generation(current_user: User = Depends(get_current_active_user)):
     # Implement cancellation logic here
     return {"message": "Generation cancelled"}
 
-@app.get("/chapters")
+@chapter_router.get("/")
 async def get_chapters(current_user: User = Depends(get_current_active_user)):
     chapters = db_instance.get_all_chapters(current_user.id)
     return {"chapters": chapters}
 
-@app.put("/chapters/{chapter_id}")
+@chapter_router.put("/{chapter_id}")
 async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: User = Depends(get_current_active_user)):
     updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
     if not updated_chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
     return updated_chapter
 
-@app.delete("/chapters/{chapter_id}")
+@chapter_router.delete("/{chapter_id}")
 async def delete_chapter(chapter_id: str, current_user: User = Depends(get_current_active_user)):
     if db_instance.delete_chapter(chapter_id, current_user.id):
         return {"message": "Chapter deleted successfully"}
     raise HTTPException(status_code=404, detail="Chapter not found")
 
-@app.get("/validity-checks")
+@chapter_router.post("/")
+async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
+    new_chapter = db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
+    return {"message": "Chapter created successfully", "id": new_chapter['id']}
+
+@chapter_router.get("/validity-checks")
 async def get_validity_checks(current_user: User = Depends(get_current_active_user)):
     validity_checks = db_instance.get_all_validity_checks(current_user.id)
     return {"validityChecks": validity_checks}
 
-@app.delete("/validity-checks/{check_id}")
+@chapter_router.delete("/validity-checks/{check_id}")
 async def delete_validity_check(check_id: str, current_user: User = Depends(get_current_active_user)):
     if db_instance.delete_validity_check(check_id, current_user.id):
         return {"message": "Validity check deleted successfully"}
     raise HTTPException(status_code=404, detail="Validity check not found")
 
-@app.post("/chapters")
-async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
-    new_chapter = db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
-    return {"message": "Chapter created successfully", "id": new_chapter['id']}
-
-@app.get("/characters")
+# Character routes
+@character_router.get("/")
 async def get_characters(current_user: User = Depends(get_current_active_user)):
     characters = db_instance.get_all_characters(current_user.id)
     return {"characters": characters}
 
-@app.post("/characters")
+@character_router.post("/")
 async def create_character(character: CharacterCreate, current_user: User = Depends(get_current_active_user)):
     character_id = db_instance.create_character(character.name, character.description, current_user.id)
     return {"message": "Character created successfully", "id": character_id}
 
-@app.put("/characters/{character_id}")
+@character_router.put("/{character_id}")
 async def update_character(character_id: str, character: CharacterUpdate, current_user: User = Depends(get_current_active_user)):
     updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
     if not updated_character:
         raise HTTPException(status_code=404, detail="Character not found")
     return updated_character
 
-@app.delete("/characters/{character_id}")
+@character_router.delete("/{character_id}")
 async def delete_character(character_id: str, current_user: User = Depends(get_current_active_user)):
     if db_instance.delete_character(character_id, current_user.id):
         return {"message": "Character deleted successfully"}
     raise HTTPException(status_code=404, detail="Character not found")
 
-@app.post("/knowledge-base")
+# Knowledge base routes
+@knowledge_base_router.post("/")
 async def add_to_knowledge_base(documents: List[str], current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
     for doc in documents:
         agent_manager.add_to_knowledge_base("doc", doc)
     return {"message": "Documents added to the knowledge base successfully"}
 
-@app.post("/save-api-key")
-async def save_api_key(api_key: str, current_user: User = Depends(get_current_active_user)):
-    db_instance.save_api_key(current_user.id, api_key)
-    return {"message": "API key saved successfully"}
-
-@app.get("/check-api-key")
-async def check_api_key(current_user: User = Depends(get_current_active_user)):
-    api_key = db_instance.get_api_key(current_user.id)
-    is_set = bool(api_key)
-    masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
-    return {"isSet": is_set, "apiKey": masked_key}
-
-@app.get("/model-settings")
-async def get_model_settings(current_user: User = Depends(get_current_active_user)):
-    settings = db_instance.get_model_settings(current_user.id)
-    return settings
-
-@app.post("/model-settings")
-async def save_model_settings(settings: ModelSettings, current_user: User = Depends(get_current_active_user)):
-    db_instance.save_model_settings(current_user.id, settings.dict())
-    return {"message": "Model settings saved successfully"}
-
-@app.get("/chat-history")
-async def get_chat_history(current_user: User = Depends(get_current_active_user)):
-    chat_history = db_instance.get_chat_history(current_user.id)
-    return {"chatHistory": chat_history}
-
-@app.delete("/remove-api-key")
-async def remove_api_key(current_user: User = Depends(get_current_active_user)):
-    db_instance.remove_api_key(current_user.id)
-    return {"message": "API key removed successfully"}
-
-@app.post("/query-knowledge-base")
-async def query_knowledge_base(query: str, chat_history: List[Dict[str, str]], current_user: User = Depends(get_current_active_user)):
-    agent_manager = AgentManager(current_user.id)
-    result = await agent_manager.generate_with_retrieval(query, chat_history)
-    return {"result": result}
-
-@app.get("/knowledge-base")
+@knowledge_base_router.get("/")
 async def get_knowledge_base_content(current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
     content = agent_manager.get_knowledge_base_content()
@@ -375,23 +353,73 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
     ]
     return {"content": formatted_content}
 
-@app.put("/knowledge-base/{embedding_id}")
+@knowledge_base_router.put("/{embedding_id}")
 async def update_knowledge_base_item(embedding_id: str, new_content: str, new_metadata: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
     agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content, new_metadata)
     return {"message": "Knowledge base item updated successfully"}
 
-@app.delete("/knowledge-base/{embedding_id}")
+@knowledge_base_router.delete("/{embedding_id}")
 async def delete_knowledge_base_item(embedding_id: str, current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
     agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
     return {"message": "Knowledge base item deleted successfully"}
 
-@app.post("/reset-chat-history")
+@knowledge_base_router.post("/query")
+async def query_knowledge_base(query_data: KnowledgeBaseQuery, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id)
+    result = await agent_manager.generate_with_retrieval(query_data.query, query_data.chatHistory)
+    return {"result": result}
+
+@knowledge_base_router.post("/reset-chat-history")
 async def reset_chat_history(current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
     agent_manager.reset_memory()
     return {"message": "Chat history reset successfully"}
+
+# Settings routes
+@settings_router.post("/api-key")
+async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)):
+    db_instance.save_api_key(current_user.id, api_key_update.apiKey)
+    return {"message": "API key saved successfully"}
+
+@settings_router.get("/api-key")
+async def check_api_key(current_user: User = Depends(get_current_active_user)):
+    api_key = db_instance.get_api_key(current_user.id)
+    is_set = bool(api_key)
+    masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
+    return {"isSet": is_set, "apiKey": masked_key}
+
+@settings_router.delete("/api-key")
+async def remove_api_key(current_user: User = Depends(get_current_active_user)):
+    db_instance.remove_api_key(current_user.id)
+    return {"message": "API key removed successfully"}
+
+@settings_router.get("/model")
+async def get_model_settings(current_user: User = Depends(get_current_active_user)):
+    settings = db_instance.get_model_settings(current_user.id)
+    return settings
+
+@settings_router.post("/model")
+async def save_model_settings(settings: ModelSettings, current_user: User = Depends(get_current_active_user)):
+    db_instance.save_model_settings(current_user.id, settings.dict())
+    return {"message": "Model settings saved successfully"}
+
+# Add this new route for chat history
+@app.get("/chat-history")
+async def get_chat_history(current_user: User = Depends(get_current_active_user)):
+    logging.debug(f"Fetching chat history for user: {current_user.id}")
+    chat_history = db_instance.get_chat_history(current_user.id)
+    logging.debug(f"Chat history fetched: {len(chat_history)} messages")
+    return {"chatHistory": chat_history}
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(chapter_router)
+app.include_router(character_router)
+app.include_router(knowledge_base_router)
+app.include_router(settings_router)
+app.include_router(chapter_router)
 
 if __name__ == "__main__":
     import uvicorn
