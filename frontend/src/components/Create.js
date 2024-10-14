@@ -158,7 +158,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
       {streamedContent && (
         <div className="generated-content">
           <h3>Generated Content:</h3>
-          <pre>{streamedContent}</pre>
+          <pre className="generated-text">{streamedContent}</pre>
         </div>
       )}
     </div>
