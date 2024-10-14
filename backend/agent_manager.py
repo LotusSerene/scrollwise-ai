@@ -14,7 +14,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.docstore.document import Document
 import logging
 import uuid
-from database import db, db_instance
+from database import db_instance
 from pydantic import BaseModel, Field
 import json
 # Load environment variables
@@ -30,6 +30,7 @@ from langchain_core.rate_limiters import InMemoryRateLimiter
 from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain.chains.summarize import load_summarize_chain
 from langchain.docstore.document import Document
+import asyncio
 
 
 class NewCharacter(BaseModel):
@@ -41,11 +42,12 @@ class CharacterExtraction(BaseModel):
 
 class AgentManager:
     def __init__(self, user_id: str):
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.info(f"Initializing AgentManager for user: {user_id}")
         self.user_id = user_id
         self.api_key = self._get_api_key()
         self.model_settings = self._get_model_settings()
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
         self.chat_history = db_instance.get_chat_history(user_id)
@@ -88,124 +90,76 @@ class AgentManager:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        return ChatGoogleGenerativeAI(
-            model=model,
-            google_api_key=self.api_key,
-            temperature=0.7,
-            max_output_tokens=self.MAX_OUTPUT_TOKENS,
-            max_input_tokens=self.MAX_INPUT_TOKENS,
-            caching=True,
-            rate_limiter=self.rate_limiter,
-            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()])
-        )
-
-    def generate_chapter(self, chapter_number: int, plot: str, writing_style: str, 
-                         instructions: Dict[str, Any],
-                         previous_chapters: List[Dict[str, Any]],
-                         characters: List[Dict[str, Any]]):
-        characters_dict = {char['name']: char['description'] for char in characters}
-        context = self._construct_context(plot, writing_style, instructions, characters_dict, previous_chapters)
-        prompt = self._construct_prompt(instructions, context)
-
-        chat_history = ChatMessageHistory()
-        total_tokens = 0
-        max_history_tokens = self.MAX_INPUT_TOKENS // 4  # Reserve a quarter of the tokens for chat history
-        for i, chapter in enumerate(reversed(previous_chapters), 1):
-            chapter_content = f"Chapter {chapter.get('chapter_number', i)}: {chapter['content']}"
-            chapter_tokens = self.estimate_token_count(chapter_content)
-            if total_tokens + chapter_tokens > max_history_tokens:
-                break
-            chat_history.add_user_message(chapter_content)
-            chat_history.add_ai_message("Understood.")
-            total_tokens += chapter_tokens
-
-        chain = RunnableWithMessageHistory(
-            prompt | self.llm | StrOutputParser(),
-            lambda session_id: chat_history,
-            input_messages_key="context",
-            history_messages_key="chat_history",
-        )
-
-        chapter = chain.invoke(
-            {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
-            config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
-        )
-
-        title = self._generate_title(chapter, chapter_number)
-
-        min_word_count = instructions.get('min_word_count', 0)
-        if len(chapter.split()) < min_word_count:
-            chapter = self.extend_chapter(chapter, instructions, context, min_word_count)
-        
-        self.logger.debug("Getting chapter title from instructions")
-        chapter_title = instructions.get('chapter_title', f'Chapter {chapter_number}')
-        self.logger.debug(f"Chapter title: {chapter_title}")
-        self.logger.debug("Calling check_chapter method")
-        validity = self.check_chapter(chapter, instructions, previous_chapters)
-
-        new_characters = self.check_and_extract_new_characters(chapter, characters_dict)
-        for name, description in new_characters.items():
-            self.add_to_knowledge_base("character", f"{name}: {description}", {"type": "character", "user_id": self.user_id})
-            self.logger.info(f"Character {name} added to the knowledge base")
-
-        # Save the chapter to the knowledge base
-        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
-
-        return chapter, title, new_characters
-
-
-    def check_and_extract_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
-        character_names = list(characters.keys())
-        
-        parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
-        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
-        
-        prompt = ChatPromptTemplate.from_template("""
-        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify ANY new characters that are not in the provided list of existing characters.
-
-        For each new character you find:
-        1. Provide their name
-        2. Write a brief description of the character based on information in the chapter
-
-        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new character.
-
-        If you truly find no new characters after a thorough analysis, explicitly state "No new characters found."
-
-        Chapter:
-        {chapter}
-
-        Existing Characters:
-        {characters}
-
-        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem. Be thorough and precise in your analysis.
-
-        {format_instructions}
-        """)
-
-        extraction_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | fixing_parser
-
+        self.logger.debug(f"Initializing LLM with model: {model}")
         try:
-            result = extraction_chain.invoke({
-                "chapter": chapter,
-                "characters": ", ".join(character_names),
-                "format_instructions": parser.get_format_instructions()
-            })
-
-            self.logger.debug(f"check_and_extract_new_characters returned: {result}")
-            #self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
-            #self.logger.debug(f"Result content: {result}")
-            #self.logger.debug(f"Result new_characters: {result.new_characters}")
-
-            new_characters = {char.name: char.description for char in result.new_characters}
-            
-            if not new_characters:
-                self.logger.warning("No new characters were extracted. This might be correct, or there might be an issue with character extraction.")
-            
-            return new_characters
-
+            llm = ChatGoogleGenerativeAI(
+                model=model,
+                google_api_key=self.api_key,
+                temperature=0.7,
+                max_output_tokens=self.MAX_OUTPUT_TOKENS,
+                max_input_tokens=self.MAX_INPUT_TOKENS,
+                caching=True,
+                rate_limiter=self.rate_limiter,
+                streaming=True,
+                callback_manager=CallbackManager([StreamingStdOutCallbackHandler()])
+            )
+            self.logger.debug("LLM initialized successfully")
+            return llm
         except Exception as e:
-            self.logger.error(f"Error in check_and_extract_new_characters: {str(e)}")
-            return {}
+            self.logger.error(f"Error initializing LLM: {str(e)}")
+            raise
+
+    async def generate_chapter_stream(self, chapter_number: int, plot: str, writing_style: str, 
+                                      instructions: Dict[str, Any],
+                                      previous_chapters: List[Dict[str, Any]],
+                                      characters: List[Dict[str, Any]]):
+        self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
+        try:
+            characters_dict = {char['name']: char['description'] for char in characters}
+            self.logger.debug(f"Characters Dictionary: {characters_dict}")
+            
+            context = await asyncio.to_thread(self._construct_context, plot, writing_style, instructions, characters_dict, previous_chapters)
+            self.logger.debug(f"Constructed Context: {context[:200]}...")  # Log a snippet
+            
+            prompt = await asyncio.to_thread(self._construct_prompt, instructions, context)
+            self.logger.debug(f"Constructed Prompt: {prompt}")
+    
+            chat_history = ChatMessageHistory()
+            total_tokens = 0
+            max_history_tokens = self.MAX_INPUT_TOKENS // 4
+            for i, chapter in enumerate(reversed(previous_chapters), 1):
+                chapter_content = f"Chapter {chapter.get('chapter_number', i)}: {chapter['content']}"
+                chapter_tokens = await asyncio.to_thread(self.estimate_token_count, chapter_content)
+                if total_tokens + chapter_tokens > max_history_tokens:
+                    break
+                chat_history.add_user_message(chapter_content)
+                chat_history.add_ai_message("Understood.")
+                total_tokens += chapter_tokens
+
+            chain = RunnableWithMessageHistory(
+                prompt | self.llm | StrOutputParser(),
+                lambda session_id: chat_history,
+                input_messages_key="context",
+                history_messages_key="chat_history",
+            )
+
+            chapter_content = ""
+            self.logger.info("Initiating async stream from LLM")
+            self.logger.debug("About to start LLM stream")
+            async for chunk in chain.astream(
+                {"chapter_number": chapter_number, "context": context, "instructions": instructions, "characters": characters_dict},
+                config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
+            ):
+                self.logger.debug(f"Received chunk: {chunk}")
+                chapter_content += chunk
+                yield {"type": "chunk", "content": chunk}
+    
+            self.logger.info("Chapter generation completed")
+            yield {"type": "complete", "content": chapter_content}
+    
+        except Exception as e:
+            self.logger.error(f"Error in generate_chapter_stream: {e}", exc_info=True)
+            yield {"error": str(e)}
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
                            characters: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
@@ -258,7 +212,7 @@ class AgentManager:
     def get_embedding(self, text: str) -> List[float]:
         return self.embeddings.embed_query(text)
 
-    def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
+    async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
                       previous_chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
@@ -367,14 +321,14 @@ class AgentManager:
         return chapter
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = db.create_chapter(chapter_title, chapter, self.user_id)
+        chapter_id = db_instance.create_chapter(chapter_title, chapter, self.user_id)
         self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
         self.logger.info(f"Chapter {chapter_number} saved to the knowledge base with ID: {chapter_id}")
         return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_title = f'Chapter {chapter_number}'
-        db.save_validity_check(chapter_id, chapter_title, result, self.user_id)
+        db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, item_type, content, metadata=None):
@@ -534,24 +488,85 @@ class AgentManager:
             total_tokens += chapter_tokens
         return truncated
 
-    def _generate_title(self, chapter: str, chapter_number: int) -> str:
-        title_llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
-        prompt = ChatPromptTemplate.from_template("""
-        Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
-        use this format Chapter {chapter_number}: <Title>, do not respond with anything else, nothing more nothing less.
+    async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
+        self.logger.debug(f"Generating title for chapter {chapter_number}")
+        try:
+            title_llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
+            prompt = ChatPromptTemplate.from_template("""
+            Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
+            use this format Chapter {chapter_number}: <Title>, do not respond with anything else, nothing more nothing less.
 
-        Chapter Content:
-        {chapter}
+            Chapter Content:
+            {chapter}
 
-        Title:
-        """)
-        
-        chain = prompt | title_llm | StrOutputParser()
-        return chain.invoke({"chapter": chapter[:1000], "chapter_number": chapter_number})  # Use first 1000 characters to generate title
-    
+            Title:
+            """)
+            
+            chain = prompt | title_llm | StrOutputParser()
+            title = await chain.ainvoke({"chapter": chapter_content[:1000], "chapter_number": chapter_number})
+            self.logger.debug(f"Generated title: {title}")
+            return title
+        except Exception as e:
+            self.logger.error(f"Error generating title: {str(e)}")
+            return f"Chapter {chapter_number}"
+
     def get_knowledge_base_content(self):
         return self.vector_store.get_knowledge_base_content()
 
     def reset_memory(self):
         self.chat_history = []
+        db_instance.delete_chat_history(self.user_id)
         self.logger.info("Chat history has been reset.")
+
+    async def check_and_extract_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
+        character_names = list(characters.keys())
+        
+        parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
+        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
+        
+        prompt = ChatPromptTemplate.from_template("""
+        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify ANY new characters that are not in the provided list of existing characters.
+
+        For each new character you find:
+        1. Provide their name
+        2. Write a brief description of the character based on information in the chapter
+
+        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new character.
+
+        If you truly find no new characters after a thorough analysis, explicitly state "No new characters found."
+
+        Chapter:
+        {chapter}
+
+        Existing Characters:
+        {characters}
+
+        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem. Be thorough and precise in your analysis.
+
+        {format_instructions}
+        """)
+
+        extraction_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | fixing_parser
+
+        try:
+            result = extraction_chain.invoke({
+                "chapter": chapter,
+                "characters": ", ".join(character_names),
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            self.logger.debug(f"check_and_extract_new_characters returned: {result}")
+            #self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
+            #self.logger.debug(f"Result content: {result}")
+            #self.logger.debug(f"Result new_characters: {result.new_characters}")
+
+            new_characters = {char.name: char.description for char in result.new_characters}
+            
+            if not new_characters:
+                self.logger.warning("No new characters were extracted. This might be correct, or there might be an issue with character extraction.")
+            
+            return new_characters
+
+        except Exception as e:
+            self.logger.error(f"Error in check_and_extract_new_characters: {str(e)}")
+            return {}
