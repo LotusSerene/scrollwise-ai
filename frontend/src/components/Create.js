@@ -15,6 +15,26 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamedContent, setStreamedContent] = useState('');
   const [presets, setPresets] = useState([]);
+  const [isFetchingPresets, setIsFetchingPresets] = useState(true);
+
+  useEffect(() => {
+    const fetchPresets = async () => {
+      try {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/presets`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await response.json();
+        setPresets(data);
+      } catch (error) {
+        console.error('Error fetching presets:', error);
+        toast.error('Error fetching presets');
+      } finally {
+        setIsFetchingPresets(false);
+      }
+    };
+
+    fetchPresets();
+  }, []);
   const [selectedPreset, setSelectedPreset] = useState('');
   const [newPresetName, setNewPresetName] = useState('');
 
@@ -203,7 +223,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
         <label htmlFor="presets">Presets:</label>
         <select id="presets" value={selectedPreset} onChange={(e) => handleLoadPreset(e.target.value)}>
           <option value="">Select a preset</option>
-          {presets.map(preset => (
+          {Array.isArray(presets) && presets.map(preset => (
             <option key={preset.id} value={preset.id}>
               {preset.name}
               <button type="button" onClick={() => handleDeletePreset(preset.id)} className="delete-preset-button">
@@ -211,6 +231,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
               </button>
             </option>
           ))}
+          {isFetchingPresets && <option>Loading presets...</option>}
         </select>
       </div>
 
