@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -15,7 +15,7 @@ import uuid
 import json
 from dotenv import load_dotenv
 import os
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.routing import APIRouter
 
 # Load environment variables
@@ -109,6 +109,14 @@ class ApiKeyUpdate(BaseModel):
 class KnowledgeBaseQuery(BaseModel):
     query: str
     chatHistory: List[Dict[str, str]]
+
+class ChapterGenerationRequest(BaseModel):
+    numChapters: int
+    plot: str
+    writingStyle: str
+    styleGuide: str
+    minWordCount: int
+    additionalInstructions: str
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -211,62 +219,69 @@ async def register(user: User):
 # Chapter routes
 @chapter_router.post("/generate")
 async def generate_chapters(
-    num_chapters: int,
-    plot: str,
-    writing_style: str,
-    instructions: Dict[str, Any],
+    request: ChapterGenerationRequest,
     current_user: User = Depends(get_current_active_user)
 ):
-    agent_manager = AgentManager(current_user.id)
-    previous_chapters = db_instance.get_all_chapters(current_user.id)
-    characters = db_instance.get_all_characters(current_user.id)
+    try:
+        agent_manager = AgentManager(current_user.id)
+        previous_chapters = db_instance.get_all_chapters(current_user.id)
+        characters = db_instance.get_all_characters(current_user.id)
 
-    async def generate():
-        for i in range(num_chapters):
-            chapter_number = len(previous_chapters) + i + 1
-            try:
-                async for chunk in agent_manager.generate_chapter_stream(
-                    chapter_number=chapter_number,
-                    plot=plot,
-                    writing_style=writing_style,
-                    instructions=instructions,
-                    previous_chapters=previous_chapters,
-                    characters=characters
-                ):
-                    yield json.dumps(chunk)
+        instructions = {
+            "styleGuide": request.styleGuide,
+            "minWordCount": request.minWordCount,
+            "additionalInstructions": request.additionalInstructions
+        }
 
-                # After generation is complete, perform post-processing
-                chapter_content = chunk['content']
-                chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                new_characters = await agent_manager.check_and_extract_new_characters(chapter_content, characters)
+        async def generate():
+            for i in range(request.numChapters):
+                chapter_number = len(previous_chapters) + i + 1
+                try:
+                    async for chunk in agent_manager.generate_chapter_stream(
+                        chapter_number=chapter_number,
+                        plot=request.plot,
+                        writing_style=request.writingStyle,
+                        instructions=instructions,
+                        previous_chapters=previous_chapters,
+                        characters=characters
+                    ):
+                        yield json.dumps(chunk)
 
-                # Save chapter and validity check
-                chapter_id = db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
-                db_instance.save_validity_check(
-                    chapter_id=str(chapter_id),
-                    chapter_title=str(chapter_title),
-                    is_valid=bool(validity['is_valid']),
-                    feedback=str(validity['feedback']),
-                    review=str(validity.get('review', '')),
-                    style_guide_adherence=bool(validity['style_guide_adherence']),
-                    style_guide_feedback=str(validity.get('style_guide_feedback', '')),
-                    continuity=bool(validity['continuity']),
-                    continuity_feedback=str(validity.get('continuity_feedback', '')),
-                    test_results=str(validity.get('test_results', '')),
-                    user_id=current_user.id
-                )
+                    # After generation is complete, perform post-processing
+                    chapter_content = chunk['content']
+                    chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
+                    validity = await agent_manager.check_chapter(chapter_content, request.instructions, previous_chapters)
+                    new_characters = await agent_manager.check_and_extract_new_characters(chapter_content, characters)
 
-                # Send final chunk with all metadata
-                yield json.dumps({'type': 'final', 'chapterId': chapter_id, 'title': chapter_title, 'validity': validity, 'newCharacters': new_characters})
+                    # Save chapter and validity check
+                    chapter_id = db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
+                    db_instance.save_validity_check(
+                        chapter_id=str(chapter_id),
+                        chapter_title=str(chapter_title),
+                        is_valid=bool(validity['is_valid']),
+                        feedback=str(validity['feedback']),
+                        review=str(validity.get('review', '')),
+                        style_guide_adherence=bool(validity['style_guide_adherence']),
+                        style_guide_feedback=str(validity.get('style_guide_feedback', '')),
+                        continuity=bool(validity['continuity']),
+                        continuity_feedback=str(validity.get('continuity_feedback', '')),
+                        test_results=str(validity.get('test_results', '')),
+                        user_id=current_user.id
+                    )
 
-            except Exception as e:
-                logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                yield json.dumps({'error': str(e)})
+                    # Send final chunk with all metadata
+                    yield json.dumps({'type': 'final', 'chapterId': chapter_id, 'title': chapter_title, 'validity': validity, 'newCharacters': new_characters})
 
-        yield json.dumps({'type': 'done'})
+                except Exception as e:
+                    logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
+                    yield json.dumps({'error': str(e)})
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+            yield json.dumps({'type': 'done'})
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        logging.error(f"Error in generate_chapters: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.post("/cancel")
 async def cancel_chapter_generation(current_user: User = Depends(get_current_active_user)):
@@ -422,7 +437,33 @@ app.include_router(chapter_router)
 app.include_router(character_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
-app.include_router(chapter_router)
+
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=60.0)  # 60 seconds timeout
+    except asyncio.TimeoutError:
+        return JSONResponse({"detail": "Request timeout"}, status_code=504)
+
+@app.get("/health")
+async def health_check():
+    try:
+        db_instance.get_session()
+        
+        # Vector Store Check
+        try:
+            vector_store = VectorStore("test_user", "test_api_key", "models/embedding-001")
+            vector_store.add_to_knowledge_base("Test content")
+            test_result = vector_store.similarity_search("test", k=1)
+            
+            return JSONResponse({"status": "OK", "database": "Connected", "vector_store": "Connected"})
+        except Exception as e:
+            logging.error(f"Vector Store check failed: {str(e)}")
+            return JSONResponse({"status": "Error", "database": "Connected", "vector_store": str(e)}, status_code=500)
+        
+    except Exception as e:
+        logging.error(f"Health check failed: {str(e)}")
+        return JSONResponse({"status": "Error", "error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     import uvicorn
