@@ -518,8 +518,8 @@ class AgentManager:
         db_instance.delete_chat_history(self.user_id)
         self.logger.info("Chat history has been reset.")
 
-    async def check_and_extract_new_characters(self, chapter: str, characters: Dict[str, str]) -> Dict[str, str]:
-        character_names = list(characters.keys())
+    async def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> Dict[str, str]:
+        character_names = [char['name'] for char in characters]
         
         parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
         fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
