@@ -555,6 +555,10 @@ class AgentManager:
                 "format_instructions": parser.get_format_instructions()
             })
 
+            if result is None:
+                self.logger.warning("Result from extraction_chain.invoke is None. Returning an empty dictionary.")
+                return {}
+
             self.logger.debug(f"check_and_extract_new_characters returned: {result}")
             #self.logger.debug(f"Characters sent to check_and_extract_new_characters: {character_names}")
             #self.logger.debug(f"Result content: {result}")
