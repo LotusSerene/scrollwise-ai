@@ -567,7 +567,7 @@ async def get_chat_history(current_user: User = Depends(get_current_active_user)
 @preset_router.post("/", response_model=PresetCreate)
 async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
     try:
-        preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data.dict())
+        preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data)
         return {"id": preset_id, "user_id": current_user.id, "name": preset.name, "data": preset.data}
     except Exception as e:
         logger.error(f"Error creating preset: {str(e)}")
