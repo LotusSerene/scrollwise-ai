@@ -175,8 +175,12 @@ const CreateChapter = ({ onChapterGenerated }) => {
 
   const handleLoadPreset = (presetId) => {
     console.log("Loading preset with ID:", presetId);
-    setSelectedPreset(presetId);
     const presetIdNum = parseInt(presetId, 10);
+    if (isNaN(presetIdNum)) {
+      console.error("Invalid preset ID:", presetId);
+      return;
+    }
+    setSelectedPreset(presetIdNum);
     const preset = presets.find(p => p.id === presetIdNum);
     if (preset && preset.data) {
       setNumChapters(preset.data.numChapters || 1);
