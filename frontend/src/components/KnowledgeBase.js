@@ -28,8 +28,14 @@ const KnowledgeBase = () => {
     e.preventDefault();
     try {
       const headers = getAuthHeaders();
-      await axios.post(`${process.env.REACT_APP_API_URL}/knowledge-base`, 
-        { documents: [textInput], metadata: { type: "doc" } },
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      
+      const formData = new URLSearchParams();
+      formData.append('documents', textInput);
+      
+      await axios.post(
+        `${process.env.REACT_APP_API_URL}/knowledge-base/`, 
+        formData,
         { headers }
       );
       setTextInput('');
@@ -37,6 +43,11 @@ const KnowledgeBase = () => {
       toast.success('Text added to knowledge base');
     } catch (error) {
       console.error('Error adding text to knowledge base:', error);
+      if (error.response) {
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
+        console.error('Response headers:', error.response.headers);
+      }
       toast.error('Failed to add text to knowledge base');
     }
   };
