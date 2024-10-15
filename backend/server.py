@@ -465,6 +465,7 @@ async def delete_character(character_id: str, current_user: User = Depends(get_c
 async def add_to_knowledge_base(
     documents: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
+    metadata_str: Optional[str] = Form(None), # Add metadata parameter
     current_user: User = Depends(get_current_active_user)
 ):
     logger.info(f"Received request to add to knowledge base. Documents: {documents}, File: {file}")
@@ -473,14 +474,16 @@ async def add_to_knowledge_base(
     
     if documents:
         logger.info(f"Adding document: {documents}")
-        agent_manager.add_to_knowledge_base("doc", documents)
+        metadata = json.loads(metadata_str) if metadata_str else {}
+        agent_manager.add_to_knowledge_base("doc", documents, metadata)
         return {"message": "Document added to the knowledge base successfully"}
     
     elif file:
         logger.info(f"Adding file: {file.filename}")
         content = await file.read()
-        text_content = content.decode("utf-8")
-        agent_manager.add_to_knowledge_base("file", text_content, {"filename": file.filename})
+        metadata = json.loads(metadata_str) if metadata_str else {}
+        metadata['filename'] = file.filename
+        agent_manager.add_to_knowledge_base("file", text_content, metadata)
         return {"message": "File added to the knowledge base successfully"}
     
     else:

@@ -32,6 +32,7 @@ const KnowledgeBase = () => {
       
       const formData = new URLSearchParams();
       formData.append('documents', textInput);
+      formData.append('metadata', JSON.stringify({ type: 'text' })); // Add metadata for text input
       
       await axios.post(
         `${process.env.REACT_APP_API_URL}/knowledge-base/`, 
@@ -62,6 +63,7 @@ const KnowledgeBase = () => {
     try {
       const headers = getAuthHeaders();
       headers['Content-Type'] = 'multipart/form-data';
+      formData.append('metadata', JSON.stringify({ type: 'file', filename: file.name })); // Add metadata for file upload
       await axios.post(`${process.env.REACT_APP_API_URL}/knowledge-base`, formData, { headers });
       setFile(null);
       fetchKnowledgeBaseContent();
@@ -94,7 +96,8 @@ const KnowledgeBase = () => {
         <h3>Current Knowledge Base Content</h3>
         <ul className="content-list">
           {knowledgeBaseContent.map((item, index) => {
-            const titleOrName = item.type === 'chapter' ? item.metadata.title : item.type === 'character' ? item.metadata.name : '';
+            const metadata = item.metadata || {}; // Handle missing metadata
+            const titleOrName = item.type === 'chapter' ? metadata.title : item.type === 'character' ? metadata.name : '';
             return (
               <li key={index}>
                 <div>
