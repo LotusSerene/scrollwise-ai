@@ -228,7 +228,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
           >
             <option value="">Select a preset</option>
             {Array.isArray(presets) && presets.map(preset => {
-              console.log("Rendering preset option:", preset);
               return (
                 <option key={preset.id} value={preset.id}>
                   {preset.name}
