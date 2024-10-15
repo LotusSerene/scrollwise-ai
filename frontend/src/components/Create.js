@@ -173,41 +173,45 @@ const CreateChapter = ({ onChapterGenerated }) => {
     }
   };
 
-  const handleLoadPreset = (presetId) => {
-    console.log("Loading preset with ID:", presetId);
-    const presetIdNum = parseInt(presetId, 10);
-    if (isNaN(presetIdNum)) {
-      console.error("Invalid preset ID:", presetId);
+  const handlePresetChange = async (presetId) => {
+    if (!presetId) {
+      setSelectedPreset('');
       return;
     }
-    setSelectedPreset(presetIdNum);
-    const preset = presets.find(p => p.id === presetIdNum);
-    if (preset && preset.data) {
-      setNumChapters(preset.data.numChapters || 1);
-      setPlot(preset.data.plot || '');
-      setWritingStyle(preset.data.writingStyle || '');
-      setStyleGuide(preset.data.styleGuide || '');
-      setMinWordCount(preset.data.minWordCount || 1000);
-      setAdditionalInstructions(preset.data.additionalInstructions || '');
-    } else {
-      console.error("Preset or preset data not found");
-    }
-  };
 
-  const handlePresetChange = async (presetId) => {
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/${presetId}`, {
         headers: getAuthHeaders(),
       });
-      if (response.ok) {
-        const preset = await response.json();
-        handleLoadPreset(preset.id);
-      } else {
-        console.error("Error fetching preset");
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
+      const preset = await response.json();
+      handleLoadPreset(preset);
     } catch (error) {
-      console.error("Error fetching preset:", error);
+      console.error("Error fetching preset:", error.message);
+      toast.error(`Error fetching preset: ${error.message}`);
+      setSelectedPreset('');
     }
+  };
+
+  const handleLoadPreset = (preset) => {
+    console.log("Loading preset:", preset);
+    if (!preset || !preset.data) {
+      console.error("Invalid preset:", preset);
+      toast.error("Invalid preset data");
+      return;
+    }
+    setSelectedPreset(preset.id);
+    setNumChapters(preset.data.numChapters || 1);
+    setPlot(preset.data.plot || '');
+    setWritingStyle(preset.data.writingStyle || '');
+    setStyleGuide(preset.data.styleGuide || '');
+    setMinWordCount(preset.data.minWordCount || 1000);
+    setAdditionalInstructions(preset.data.additionalInstructions || '');
+    toast.success(`Preset "${preset.name}" loaded successfully`);
   };
 
   const handleDeletePreset = async (e, presetId) => {
@@ -243,17 +247,15 @@ const CreateChapter = ({ onChapterGenerated }) => {
           <select 
             id="presets" 
             value={selectedPreset} 
-            onChange={(e) => handleLoadPreset(e.target.value)}
+            onChange={(e) => handlePresetChange(e.target.value)}
             disabled={isFetchingPresets}
           >
             <option value="">Select a preset</option>
-            {Array.isArray(presets) && presets.map(preset => {
-              return (
-                <option key={preset.id} value={preset.id}>
-                  {preset.name}
-                </option>
-              );
-            })}
+            {Array.isArray(presets) && presets.map(preset => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+              </option>
+            ))}
           </select>
           {isFetchingPresets && <p key="loading">Loading presets...</p>}
           {selectedPreset && (
