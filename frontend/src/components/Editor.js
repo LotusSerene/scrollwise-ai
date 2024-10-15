@@ -17,7 +17,7 @@ function Editor({ chapters, setChapters }) {
   const fetchChapters = useCallback(async () => {
     try {
       const headers = getAuthHeaders();
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/chapters`, {
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/chapters`, {
         headers: headers
       });
       setChapters(response.data.chapters);
@@ -49,7 +49,7 @@ function Editor({ chapters, setChapters }) {
       const headers = getAuthHeaders();
 
       // Delete the chapter from the normal database using chapterId
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, { headers: headers });
+      await axios.delete(`${process.env.REACT_APP_API_URL}/chapters/${chapterId}`, { headers: headers });
 
       fetchChapters();
     } catch (error) {
@@ -72,7 +72,7 @@ function Editor({ chapters, setChapters }) {
 
       if (selectedChapter) {
         // Update existing chapter
-        response = await axios.put(`${process.env.REACT_APP_API_URL}/api/chapters/${chapterId}`, {
+        response = await axios.put(`${process.env.REACT_APP_API_URL}/chapters/${chapterId}`, {
           title: chapterTitle,  
           content: chapterContent
         }, {
@@ -80,7 +80,7 @@ function Editor({ chapters, setChapters }) {
         });
       } else {
         // Create new chapter
-        response = await axios.post(`${process.env.REACT_APP_API_URL}/api/chapters`, {
+        response = await axios.post(`${process.env.REACT_APP_API_URL}/chapters`, {
           title: chapterTitle,
           content: chapterContent
         }, {
