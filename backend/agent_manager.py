@@ -355,15 +355,28 @@ class AgentManager:
         
         return embedding_id
 
-    def update_or_remove_from_knowledge_base(self, embedding_id, action, new_content=None, new_metadata=None):
-        if action == 'delete':
-            self.vector_store.delete_from_knowledge_base(embedding_id)
-        elif action == 'update':
-            if new_content is None and new_metadata is None:
-                raise ValueError("Either new_content or new_metadata must be provided for update action")
-            self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+    def update_or_remove_from_knowledge_base(self, item_id, item_type, action, new_content=None, new_metadata=None):
+        embedding_id = self._get_embedding_id(item_id, item_type)
+        if embedding_id:
+            if action == 'delete':
+                self.vector_store.delete_from_knowledge_base(embedding_id)
+            elif action == 'update':
+                if new_content is None and new_metadata is None:
+                    raise ValueError("Either new_content or new_metadata must be provided for update action")
+                self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+            else:
+                raise ValueError("Invalid action. Must be 'delete' or 'update'")
         else:
-            raise ValueError("Invalid action. Must be 'delete' or 'update'")
+            self.logger.warning(f"No embedding ID found for {item_type} with ID {item_id}")
+    def _get_embedding_id(self, item_id, item_type):
+        if item_type == 'chapter':
+            item = db_instance.get_chapter(item_id, self.user_id)
+        elif item_type == 'character':
+            item = db_instance.get_character_by_id(item_id, self.user_id)
+        else:
+            return None
+
+        return item.get('embedding_id') if item else None
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)

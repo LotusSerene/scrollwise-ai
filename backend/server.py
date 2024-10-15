@@ -384,7 +384,7 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: 
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
         # First, remove the old chapter from the knowledge base
-        agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
+        agent_manager.update_or_remove_from_knowledge_base(chapter_id, "chapter", 'delete')
         # Then, add the updated chapter to the knowledge base
         agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": chapter_id, "type": "chapter"})
         
@@ -400,7 +400,7 @@ async def delete_chapter(chapter_id: str, current_user: User = Depends(get_curre
         if deleted:
             # Remove from knowledge base
             agent_manager = AgentManager(current_user.id)
-            agent_manager.update_or_remove_from_knowledge_base(chapter_id, 'delete')
+            agent_manager.update_or_remove_from_knowledge_base(chapter_id, "chapter", 'delete')
             return {"message": "Chapter deleted successfully"}
         raise HTTPException(status_code=404, detail="Chapter not found")
     except Exception as e:
@@ -437,7 +437,7 @@ async def update_character(character_id: str, character: CharacterUpdate, curren
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
         # First, remove the old character from the knowledge base
-        agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
+        agent_manager.update_or_remove_from_knowledge_base(character_id, "character", 'delete')
         # Then, add the updated character to the knowledge base
         agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
         
@@ -453,7 +453,7 @@ async def delete_character(character_id: str, current_user: User = Depends(get_c
         if deleted:
             # Remove from knowledge base
             agent_manager = AgentManager(current_user.id)
-            agent_manager.update_or_remove_from_knowledge_base(character_id, 'delete')
+            agent_manager.update_or_remove_from_knowledge_base(character_id, "character", 'delete')
             return {"message": "Character deleted successfully"}
         raise HTTPException(status_code=404, detail="Character not found")
     except Exception as e:
@@ -511,13 +511,13 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
 @knowledge_base_router.put("/{embedding_id}")
 async def update_knowledge_base_item(embedding_id: str, new_content: str, new_metadata: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content, new_metadata)
+    agent_manager.update_or_remove_from_knowledge_base(embedding_id, "knowledge_base_item", 'update', new_content, new_metadata)
     return {"message": "Knowledge base item updated successfully"}
 
 @knowledge_base_router.delete("/{embedding_id}")
 async def delete_knowledge_base_item(embedding_id: str, current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
+    agent_manager.update_or_remove_from_knowledge_base(embedding_id, "knowledge_base_item", 'delete')
     return {"message": "Knowledge base item deleted successfully"}
 
 @knowledge_base_router.post("/query")
