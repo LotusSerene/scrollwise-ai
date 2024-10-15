@@ -194,6 +194,22 @@ const CreateChapter = ({ onChapterGenerated }) => {
     }
   };
 
+  const handlePresetChange = async (presetId) => {
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/${presetId}`, {
+        headers: getAuthHeaders(),
+      });
+      if (response.ok) {
+        const preset = await response.json();
+        handleLoadPreset(preset.id);
+      } else {
+        console.error("Error fetching preset");
+      }
+    } catch (error) {
+      console.error("Error fetching preset:", error);
+    }
+  };
+
   const handleDeletePreset = async (e, presetId) => {
     e.stopPropagation();
     console.log("Deleting preset with ID:", presetId);

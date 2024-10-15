@@ -610,6 +610,20 @@ async def get_presets(current_user: User = Depends(get_current_active_user)):
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@preset_router.get("/{preset_id}", response_model=PresetCreate)
+async def get_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        preset_id = int(preset_id)
+        preset = db_instance.get_preset(preset_id, current_user.id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        return preset
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid preset ID")
+    except Exception as e:
+        logger.error(f"Error getting preset: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @preset_router.delete("/{preset_id}")
 async def delete_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
     try:
