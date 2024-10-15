@@ -181,7 +181,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const handleLoadPreset = (presetId) => {
     console.log("Loading preset with ID:", presetId);
     setSelectedPreset(presetId);
-    const presetIdNum = parseInt(presetId);
+    const presetIdNum = parseInt(presetId, 10); // Ensure base 10 parsing
     console.log("Parsed preset ID:", presetIdNum);
     console.log("All presets:", presets);
     const preset = presets.find(p => p.id === presetIdNum);
