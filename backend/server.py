@@ -482,6 +482,7 @@ async def add_to_knowledge_base(
         logger.info(f"Adding file: {file.filename}")
         content = await file.read()
         metadata = json.loads(metadata_str) if metadata_str else {}
+        text_content = content.decode("utf-8") # Decode content
         metadata['filename'] = file.filename
         agent_manager.add_to_knowledge_base("file", text_content, metadata)
         return {"message": "File added to the knowledge base successfully"}
