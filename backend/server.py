@@ -601,6 +601,7 @@ async def create_preset(preset: PresetCreate, current_user: User = Depends(get_c
     except Exception as e:
         logger.error(f"Error creating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @preset_router.get("/", response_model=List[PresetCreate])
 async def get_presets(current_user: User = Depends(get_current_active_user)):
     try:
@@ -610,35 +611,24 @@ async def get_presets(current_user: User = Depends(get_current_active_user)):
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@preset_router.get("/{preset_id}", response_model=PresetCreate)
-async def get_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
+@preset_router.get("/{preset_name}", response_model=PresetCreate)
+async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
     try:
-        preset_id = int(preset_id)
-        preset = db_instance.get_preset(preset_id, current_user.id)
+        preset = db_instance.get_preset_by_name(preset_name, current_user.id)
         if not preset:
             raise HTTPException(status_code=404, detail="Preset not found")
         return preset
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid preset ID")
     except Exception as e:
         logger.error(f"Error getting preset: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@preset_router.delete("/{preset_id}")
-async def delete_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
+@preset_router.delete("/{preset_name}")
+async def delete_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
     try:
-        # Convert preset_id to int if it's a valid integer string
-        try:
-            preset_id = int(preset_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid preset ID")
-
-        deleted = db_instance.delete_preset(preset_id, current_user.id)
+        deleted = db_instance.delete_preset(preset_name, current_user.id)
         if deleted:
             return {"message": "Preset deleted successfully"}
         raise HTTPException(status_code=404, detail="Preset not found")
-    except HTTPException as he:
-        raise he
     except Exception as e:
         logger.error(f"Error deleting preset: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
