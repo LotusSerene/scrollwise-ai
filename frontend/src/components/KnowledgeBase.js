@@ -93,16 +93,20 @@ const KnowledgeBase = () => {
       <div className="knowledge-base-content">
         <h3>Current Knowledge Base Content</h3>
         <ul className="content-list">
-          {knowledgeBaseContent.map((item, index) => (
-            <li key={index}>
-              <div>
-                <strong>Type:</strong> {item.type}
-                <br />
-                <strong>Content:</strong> {item.content.substring(0, 100)}...
-              </div>
-              <button onClick={() => handleDelete(item.embedding_id)} className="delete-button">Delete</button>
-            </li>
-          ))}
+          {knowledgeBaseContent.map((item, index) => {
+            const titleOrName = item.type === 'chapter' ? item.metadata.title : item.type === 'character' ? item.metadata.name : '';
+            return (
+              <li key={index}>
+                <div>
+                  <strong>Type:</strong> {item.type}
+                  {titleOrName && <><br /><strong>{item.type === 'chapter' ? 'Title' : 'Name'}:</strong> {titleOrName}</>}
+                  <br />
+                  <strong>Content:</strong> {item.content.substring(0, 100)}...
+                </div>
+                <button onClick={() => handleDelete(item.embedding_id)} className="delete-button">Delete</button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
