@@ -346,12 +346,18 @@ class AgentManager:
         metadata['type'] = item_type
         metadata['user_id'] = self.user_id
         embedding_id = self.vector_store.add_to_knowledge_base(content, metadata)
+        
+        # Update the database with the embedding_id
+        if item_type == 'chapter':
+            db_instance.update_chapter_embedding_id(metadata.get('id'), embedding_id)
+        elif item_type == 'character':
+            db_instance.update_character_embedding_id(metadata.get('id'), embedding_id)
+        
         return embedding_id
 
     def update_or_remove_from_knowledge_base(self, embedding_id, action, new_content=None, new_metadata=None):
         if action == 'delete':
             self.vector_store.delete_from_knowledge_base(embedding_id)
-
         elif action == 'update':
             if new_content is None and new_metadata is None:
                 raise ValueError("Either new_content or new_metadata must be provided for update action")
