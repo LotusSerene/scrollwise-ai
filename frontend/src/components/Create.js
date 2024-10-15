@@ -26,6 +26,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
           headers: getAuthHeaders(),
         });
         const data = await response.json();
+        console.log("Fetched presets:", data);
         setPresets(data);
       } catch (error) {
         console.error('Error fetching presets:', error);
@@ -178,20 +179,29 @@ const CreateChapter = ({ onChapterGenerated }) => {
   };
 
   const handleLoadPreset = (presetId) => {
-    const preset = presets.find(p => p.id === presetId);
-    if (preset) {
-      setNumChapters(preset.data.numChapters);
-      setPlot(preset.data.plot);
-      setWritingStyle(preset.data.writingStyle);
-      setStyleGuide(preset.data.styleGuide);
-      setMinWordCount(preset.data.minWordCount);
-      setAdditionalInstructions(preset.data.additionalInstructions);
-      setSelectedPreset(presetId);
+    console.log("Loading preset with ID:", presetId);
+    setSelectedPreset(presetId);
+    const presetIdNum = parseInt(presetId);
+    console.log("Parsed preset ID:", presetIdNum);
+    console.log("All presets:", presets);
+    const preset = presets.find(p => p.id === presetIdNum);
+    console.log("Found preset:", preset);
+    if (preset && preset.data) {
+      console.log("Setting form data from preset:", preset.data);
+      setNumChapters(preset.data.numChapters || 1);
+      setPlot(preset.data.plot || '');
+      setWritingStyle(preset.data.writingStyle || '');
+      setStyleGuide(preset.data.styleGuide || '');
+      setMinWordCount(preset.data.minWordCount || 1000);
+      setAdditionalInstructions(preset.data.additionalInstructions || '');
+    } else {
+      console.log("Preset or preset data not found");
     }
   };
 
   const handleDeletePreset = async (e, presetId) => {
-    e.stopPropagation(); // Prevent the select from changing when clicking delete
+    e.stopPropagation();
+    console.log("Deleting preset with ID:", presetId);
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/${presetId}`, {
         method: 'DELETE',
@@ -199,11 +209,13 @@ const CreateChapter = ({ onChapterGenerated }) => {
       });
 
       if (response.ok) {
-        setPresets(presets.filter(p => p.id !== presetId));
+        setPresets(presets.filter(p => p.id !== parseInt(presetId)));
         setSelectedPreset('');
         toast.success('Preset deleted successfully');
       } else {
-        toast.error('Error deleting preset');
+        const errorData = await response.json();
+        console.error('Error response:', errorData);
+        toast.error(`Error deleting preset: ${errorData.detail || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error deleting preset:', error);
@@ -223,12 +235,15 @@ const CreateChapter = ({ onChapterGenerated }) => {
             onChange={(e) => handleLoadPreset(e.target.value)}
             disabled={isFetchingPresets}
           >
-            <option key="default" value="">Select a preset</option>
-            {Array.isArray(presets) && presets.map(preset => (
-              <option key={preset.id} value={preset.id}>
-                {preset.name}
-              </option>
-            ))}
+            <option value="">Select a preset</option>
+            {Array.isArray(presets) && presets.map(preset => {
+              console.log("Rendering preset option:", preset);
+              return (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              );
+            })}
           </select>
           {isFetchingPresets && <p key="loading">Loading presets...</p>}
           {selectedPreset && (
