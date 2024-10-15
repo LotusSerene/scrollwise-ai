@@ -183,11 +183,11 @@ const CreateChapter = ({ onChapterGenerated }) => {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/${presetId}`, {
         headers: getAuthHeaders(),
       });
-      
+          
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+          
       const preset = await response.json();
       handleLoadPreset(preset);
     } catch (error) {
@@ -195,6 +195,11 @@ const CreateChapter = ({ onChapterGenerated }) => {
       toast.error(`Error fetching preset: ${error.message}`);
       setSelectedPreset('');
     }
+  };
+
+  const handlePresetSelect = (event) => {
+    const selectedPresetId = event.target.value;
+    handlePresetChange(selectedPresetId);
   };
 
   const handleLoadPreset = (preset) => {
@@ -247,7 +252,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
           <select 
             id="presets" 
             value={selectedPreset} 
-            onChange={(e) => handlePresetChange(e.target.value)}
+            onChange={handlePresetSelect}
             disabled={isFetchingPresets}
           >
             <option value="">Select a preset</option>
