@@ -4,6 +4,7 @@ import axios from 'axios';
 import './Editor.css';
 import { getAuthHeaders } from '../utils/auth';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'react-toastify';
 
 function Editor({ chapters, setChapters }) {
   const [selectedChapter, setSelectedChapter] = useState(null);
@@ -78,6 +79,7 @@ function Editor({ chapters, setChapters }) {
         }, {
           headers: headers
         });
+        toast.success('Chapter updated successfully');
       } else {
         // Create new chapter
         response = await axios.post(`${process.env.REACT_APP_API_URL}/chapters`, {
@@ -86,6 +88,7 @@ function Editor({ chapters, setChapters }) {
         }, {
           headers: headers
         });
+        toast.success('Chapter created successfully');
       }
 
       fetchChapters();
