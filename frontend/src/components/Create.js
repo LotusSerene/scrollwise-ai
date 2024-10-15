@@ -16,11 +16,13 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const [streamedContent, setStreamedContent] = useState('');
   const [presets, setPresets] = useState([]);
   const [isFetchingPresets, setIsFetchingPresets] = useState(true);
+  const [selectedPreset, setSelectedPreset] = useState('');
+  const [newPresetName, setNewPresetName] = useState('');
 
   useEffect(() => {
     const fetchPresets = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/presets`, {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/`, {
           headers: getAuthHeaders(),
         });
         const data = await response.json();
@@ -30,25 +32,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
         toast.error('Error fetching presets');
       } finally {
         setIsFetchingPresets(false);
-      }
-    };
-
-    fetchPresets();
-  }, []);
-  const [selectedPreset, setSelectedPreset] = useState('');
-  const [newPresetName, setNewPresetName] = useState('');
-
-  useEffect(() => {
-    const fetchPresets = async () => {
-      try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/presets`, {
-          headers: getAuthHeaders(),
-        });
-        const data = await response.json();
-        setPresets(data);
-      } catch (error) {
-        console.error('Error fetching presets:', error);
-        toast.error('Error fetching presets');
       }
     };
 
@@ -151,11 +134,19 @@ const CreateChapter = ({ onChapterGenerated }) => {
           writingStyle,
           styleGuide,
           minWordCount,
-          additionalInstructions
+          additionalInstructions,
+          instructions: {
+            styleGuide,
+            minWordCount,
+            additionalInstructions
+          }
         }
       };
 
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/presets`, {
+      // Log the request body for debugging
+      console.log('Preset request body:', requestBody);
+
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/`, {
         method: 'POST',
         headers: {
           ...getAuthHeaders(),
@@ -170,11 +161,19 @@ const CreateChapter = ({ onChapterGenerated }) => {
         setNewPresetName('');
         toast.success('Preset saved successfully');
       } else {
-        toast.error('Error saving preset');
+        const errorData = await response.json();
+        let errorMessage = 'Unknown error occurred';
+        if (errorData.detail) {
+          errorMessage = typeof errorData.detail === 'string' 
+            ? errorData.detail 
+            : JSON.stringify(errorData.detail);
+        }
+        console.error('Error response:', errorData);
+        toast.error(`Error saving preset: ${errorMessage}`);
       }
     } catch (error) {
       console.error('Error saving preset:', error);
-      toast.error('Error saving preset');
+      toast.error(`Error saving preset: ${error.message || 'Unknown error occurred'}`);
     }
   };
 
@@ -191,7 +190,8 @@ const CreateChapter = ({ onChapterGenerated }) => {
     }
   };
 
-  const handleDeletePreset = async (presetId) => {
+  const handleDeletePreset = async (e, presetId) => {
+    e.stopPropagation(); // Prevent the select from changing when clicking delete
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/${presetId}`, {
         method: 'DELETE',
@@ -214,26 +214,53 @@ const CreateChapter = ({ onChapterGenerated }) => {
   return (
     <div className="create-container">
       <Header isGenerating={isGenerating} />
+      <div className="presets-container">
+        <div className="form-group">
+          <label htmlFor="presets">Presets:</label>
+          <select 
+            id="presets" 
+            value={selectedPreset} 
+            onChange={(e) => handleLoadPreset(e.target.value)}
+            disabled={isFetchingPresets}
+          >
+            <option key="default" value="">Select a preset</option>
+            {Array.isArray(presets) && presets.map(preset => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          {isFetchingPresets && <p key="loading">Loading presets...</p>}
+          {selectedPreset && (
+            <button 
+              type="button" 
+              onClick={(e) => handleDeletePreset(e, selectedPreset)} 
+              className="delete-preset-button"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="newPresetName">Save Preset:</label>
+          <input
+            type="text"
+            id="newPresetName"
+            value={newPresetName}
+            onChange={(e) => setNewPresetName(e.target.value)}
+            placeholder="Preset name"
+          />
+          <button type="button" onClick={handleSavePreset} disabled={!newPresetName}>
+            Save
+          </button>
+        </div>
+      </div> {/* End of presets-container */}
+
       <h2>Generate New Chapter</h2>
       <p className="instructions">
         Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.
       </p>
-
-      <div className="form-group">
-        <label htmlFor="presets">Presets:</label>
-        <select id="presets" value={selectedPreset} onChange={(e) => handleLoadPreset(e.target.value)}>
-          <option value="">Select a preset</option>
-          {Array.isArray(presets) && presets.map(preset => (
-            <option key={preset.id} value={preset.id}>
-              {preset.name}
-              <button type="button" onClick={() => handleDeletePreset(preset.id)} className="delete-preset-button">
-                Delete
-              </button>
-            </option>
-          ))}
-          {isFetchingPresets && <option>Loading presets...</option>}
-        </select>
-      </div>
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
@@ -297,20 +324,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
           {isGenerating ? 'Generating...' : 'Generate Chapter'}
         </button>
       </form>
-
-      <div className="form-group">
-        <label htmlFor="newPresetName">Save Preset:</label>
-        <input
-          type="text"
-          id="newPresetName"
-          value={newPresetName}
-          onChange={(e) => setNewPresetName(e.target.value)}
-          placeholder="Preset name"
-        />
-        <button type="button" onClick={handleSavePreset} disabled={!newPresetName}>
-          Save
-        </button>
-      </div>
 
       {streamedContent && (
         <div className="generated-content">
