@@ -26,7 +26,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
           headers: getAuthHeaders(),
         });
         const data = await response.json();
-        console.log("Fetched presets:", data);
         setPresets(data);
       } catch (error) {
         console.error('Error fetching presets:', error);
@@ -88,7 +87,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
         for (const line of lines) {
           try {
             const data = JSON.parse(line);
-            console.log("Received data:", data);
             if (data.type === 'chunk') {
               setStreamedContent(prev => prev + data.content);
             } else if (data.type === 'final') {
@@ -103,7 +101,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
               }
               toast.success('Chapter generated successfully');
             } else if (data.type === 'done') {
-              console.log('All chapters generated');
               toast.success('All chapters generated successfully');
               setIsGenerating(false);
               break;
@@ -144,8 +141,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
         }
       };
 
-      // Log the request body for debugging
-      console.log('Preset request body:', requestBody);
 
       const response = await fetch(`${process.env.REACT_APP_API_URL}/presets/`, {
         method: 'POST',
@@ -181,13 +176,9 @@ const CreateChapter = ({ onChapterGenerated }) => {
   const handleLoadPreset = (presetId) => {
     console.log("Loading preset with ID:", presetId);
     setSelectedPreset(presetId);
-    const presetIdNum = parseInt(presetId, 10); // Ensure base 10 parsing
-    console.log("Parsed preset ID:", presetIdNum);
-    console.log("All presets:", presets);
+    const presetIdNum = parseInt(presetId, 10);
     const preset = presets.find(p => p.id === presetIdNum);
-    console.log("Found preset:", preset);
     if (preset && preset.data) {
-      console.log("Setting form data from preset:", preset.data);
       setNumChapters(preset.data.numChapters || 1);
       setPlot(preset.data.plot || '');
       setWritingStyle(preset.data.writingStyle || '');
@@ -195,7 +186,6 @@ const CreateChapter = ({ onChapterGenerated }) => {
       setMinWordCount(preset.data.minWordCount || 1000);
       setAdditionalInstructions(preset.data.additionalInstructions || '');
     } else {
-      console.log("Preset or preset data not found");
     }
   };
 
