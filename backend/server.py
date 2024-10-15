@@ -19,7 +19,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.routing import APIRouter
 import io
 from concurrent.futures import ThreadPoolExecutor
-
+from fastapi import HTTPException
+from pydantic import ValidationError
 
 # Load environment variables
 load_dotenv()
@@ -126,9 +127,9 @@ class ChapterGenerationRequest(BaseModel):
     additionalInstructions: str
     instructions: Dict[str, Any]
 
-class PresetCreate(BaseModel): # New model for creating presets
+class PresetCreate(BaseModel):
     name: str
-    data: ChapterGenerationRequest
+    data: Dict[str, Any]
 
 class PresetUpdate(BaseModel): # New model for updating presets
     name: str
@@ -564,15 +565,42 @@ async def get_chat_history(current_user: User = Depends(get_current_active_user)
     return {"chatHistory": chat_history}
 
 # Preset routes
+
+
 @preset_router.post("/", response_model=PresetCreate)
 async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
     try:
+        # Validate the preset data
+        if not preset.name or not preset.data:
+            raise ValueError("Preset name and data are required")
+
+        # Ensure all required fields are present in the data
+        required_fields = ['numChapters', 'plot', 'writingStyle', 'styleGuide', 'minWordCount', 'additionalInstructions', 'instructions']
+        missing_fields = [field for field in required_fields if field not in preset.data]
+        
+        # Log the missing fields
+        logger.debug(f"Missing fields: {missing_fields}")
+
+        if missing_fields:
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
+        # Create the preset
         preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data)
+        
+        # Log the created preset
+        #logger.info(f"Created preset with ID: {preset_id}")
+
+        # Return the created preset
         return {"id": preset_id, "user_id": current_user.id, "name": preset.name, "data": preset.data}
+    except ValueError as ve:
+        logger.error(f"Validation error: {str(ve)}")
+        raise HTTPException(status_code=422, detail=str(ve))
+    except ValidationError as ve:
+        logger.error(f"Pydantic validation error: {str(ve)}")
+        raise HTTPException(status_code=422, detail=ve.errors())
     except Exception as e:
         logger.error(f"Error creating preset: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+        raise HTTPException(status_code=500, detail=str(e))
 @preset_router.get("/", response_model=List[PresetCreate])
 async def get_presets(current_user: User = Depends(get_current_active_user)):
     try:
@@ -585,10 +613,18 @@ async def get_presets(current_user: User = Depends(get_current_active_user)):
 @preset_router.delete("/{preset_id}")
 async def delete_preset(preset_id: str, current_user: User = Depends(get_current_active_user)):
     try:
+        # Convert preset_id to int if it's a valid integer string
+        try:
+            preset_id = int(preset_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid preset ID")
+
         deleted = db_instance.delete_preset(preset_id, current_user.id)
         if deleted:
             return {"message": "Preset deleted successfully"}
         raise HTTPException(status_code=404, detail="Preset not found")
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Error deleting preset: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
