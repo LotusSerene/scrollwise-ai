@@ -186,6 +186,7 @@ const CreateChapter = ({ onChapterGenerated }) => {
       setMinWordCount(preset.data.minWordCount || 1000);
       setAdditionalInstructions(preset.data.additionalInstructions || '');
     } else {
+      console.error("Preset or preset data not found");
     }
   };
 
