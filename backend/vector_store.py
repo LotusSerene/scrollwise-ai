@@ -4,6 +4,8 @@ from langchain.docstore.document import Document
 from typing import List, Dict, Any
 import os
 import logging
+from chromadb.config import Settings
+import chromadb
 
 def flatten_metadata(metadata):
     flattened = {}
@@ -18,93 +20,111 @@ def flatten_metadata(metadata):
 
 class VectorStore:
     def __init__(self, user_id, api_key, embeddings_model):
+        self.chroma_url = os.getenv("CHROMA_SERVER_URL", "http://localhost:8000")
+        self.chroma_port = int(os.getenv("CHROMA_SERVER_PORT", "8000"))
         self.user_id = user_id
         self.api_key = api_key
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model=embeddings_model, google_api_key=self.api_key
-        )
-        self.vector_store = Chroma(
-            persist_directory=f"./chroma_db/{user_id}",
-            embedding_function=self.embeddings,
-        )
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
+        
+        self.logger.debug(f"Initializing VectorStore for user: {user_id}")
+        
+        try:
+            self.logger.debug("Initializing GoogleGenerativeAIEmbeddings")
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model=embeddings_model, google_api_key=self.api_key
+            )
+            self.logger.debug("GoogleGenerativeAIEmbeddings initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Error initializing GoogleGenerativeAIEmbeddings: {str(e)}")
+            raise
+
+        try:
+            self.logger.debug("Initializing Chroma client")
+            chroma_client = chromadb.HttpClient(host=self.chroma_url, port=self.chroma_port)
+            self.logger.debug("Chroma client initialized successfully")
+            
+            self.logger.debug("Initializing Chroma vector store")
+            self.vector_store = Chroma(
+                client=chroma_client,
+                collection_name=f"user_{user_id}",
+                embedding_function=self.embeddings,
+            )
+            self.logger.debug("Chroma vector store initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Error initializing Chroma vector store: {str(e)}")
+            raise
+
         self.logger.info(
             f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
         )
 
-
-    def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None):
+    def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None) -> str:
         self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
         if metadata is None:
             metadata = {}
         metadata["user_id"] = self.user_id
         flattened_metadata = flatten_metadata(metadata)
         try:
-            self.vector_store.add_texts([text], metadatas=[flattened_metadata])
-            self.logger.info(f"Added content to knowledge base for user {self.user_id}")
+            # Add the text and get the IDs
+            ids = self.vector_store.add_texts([text], metadatas=[flattened_metadata])
+            
+            # The add_texts method returns a list of IDs, but we're only adding one document,
+            # so we can safely take the first (and only) ID
+            embedding_id = ids[0]
+            
+            self.logger.info(f"Added content to knowledge base for user {self.user_id}. Embedding ID: {embedding_id}")
+            return embedding_id
         except Exception as e:
             self.logger.error(
                 f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
             )
-    
+            raise
+
     def delete_from_knowledge_base(self, embedding_id: str):
-        self.logger.debug(
-            f"Attempting to delete from knowledge base for user {self.user_id}, embedding ID: {embedding_id}"
-        )
+        self.logger.debug(f"Deleting from knowledge base..., embedding ID: {embedding_id}")
         try:
-            self.vector_store.delete([embedding_id])
-            self.logger.info(
-                f"Deleted content from knowledge base for user {self.user_id}. Embedding ID: {embedding_id}"
-            )
+            self.vector_store._collection.delete(ids=[embedding_id])
+            self.logger.info(f"Deleted content... Embedding ID: {embedding_id}")
         except Exception as e:
-            self.logger.error(
-                f"Error deleting embedding ID: {embedding_id} for user {self.user_id}. Error: {str(e)}"
-            )
+            self.logger.error(f"Error deleting embedding ID: {embedding_id}. Error: {str(e)}")
+            raise
 
-    def update_in_knowledge_base(
-        self,
-        embedding_id: str,
-        new_content: str = None,
-        new_metadata: Dict[str, Any] = None,
-    ):
-        self.logger.debug(
-            f"Updating in knowledge base for user {self.user_id}, embedding ID: {embedding_id}"
-        )
+    def update_in_knowledge_base(self, embedding_id: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
+        self.logger.debug(f"Updating in knowledge base..., embedding ID: {embedding_id}")
         try:
-            # Delete the old embedding
-            self.delete_from_knowledge_base(embedding_id)
-
-            # Add the new content with the same ID
-            if new_content:
+            if new_content or new_metadata:
                 if new_metadata is None:
                     new_metadata = {}
                 new_metadata["user_id"] = self.user_id
-                self.vector_store.add_texts(
-                    [new_content], metadatas=[new_metadata], ids=[embedding_id]
+
+                # If new content is provided, we need to compute new embeddings
+                if new_content:
+                    new_embeddings = self.embeddings.embed_documents([new_content])
+                else:
+                    new_embeddings = None
+
+                # Update the existing embedding in Chroma:
+                self.vector_store._collection.update(
+                    ids=[embedding_id],
+                    embeddings=new_embeddings[0] if new_embeddings else None,
+                    documents=[new_content] if new_content else None,
+                    metadatas=[new_metadata] if new_metadata else None
                 )
-                self.logger.info(
-                    f"Updated content in knowledge base for user {self.user_id}. Embedding ID: {embedding_id}"
-                )
-            elif new_metadata:
-                self.logger.warning(
-                    f"Attempted to update only metadata for embedding ID: {embedding_id}. This operation is not supported."
-                )
+
+                self.logger.info(f"Updated content... Embedding ID: {embedding_id}")
+            else:
+                self.logger.warning(f"No new content or metadata provided for update. Embedding ID: {embedding_id}")
         except Exception as e:
-            self.logger.error(
-                f"Error updating embedding ID: {embedding_id} for user {self.user_id}. Error: {str(e)}"
-            )
+            self.logger.error(f"Error updating embedding ID: {embedding_id}. Error: {str(e)}")
+            raise
 
     def similarity_search(self, query: str, k: int = 5) -> List[Document]:
-        self.logger.debug(
-            f"Performing similarity search for user {self.user_id} and query: {query}"
-        )
+        self.logger.info(f"Starting similarity search for query: {query}")
         results = self.vector_store.similarity_search(
             query, k=k, filter={"user_id": self.user_id}
         )
-        self.logger.info(
-            f"Similarity search returned {len(results)} results for user {self.user_id}"
-        )
+        self.logger.info(f"Similarity search completed, found {len(results)} results")
         return results
 
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
@@ -175,7 +195,8 @@ class VectorStore:
     def clear(self):
         self.vector_store.delete_collection()
         self.vector_store = Chroma(
-            persist_directory=f"./chroma_db/{self.user_id}",
+            client=self.vector_store._client,
+            collection_name=f"user_{self.user_id}",
             embedding_function=self.embeddings,
         )
 

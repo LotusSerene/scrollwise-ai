@@ -340,24 +340,32 @@ class AgentManager:
         db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
-    def add_to_knowledge_base(self, item_type, content, metadata=None):
-        if metadata is None:
-            metadata = {}
-        metadata['type'] = item_type
-        metadata['user_id'] = self.user_id
-        embedding_id = self.vector_store.add_to_knowledge_base(content, metadata)
-        
-        # Update the database with the embedding_id
-        if item_type == 'chapter':
-            db_instance.update_chapter_embedding_id(metadata.get('id'), embedding_id)
-        elif item_type == 'character':
-            db_instance.update_character_embedding_id(metadata.get('id'), embedding_id)
-        
-        return embedding_id
+    def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
+        #self.logger.info(f"Adding {content_type} to knowledge base")
+        try:
+            # Ensure metadata includes the content type
+            metadata['type'] = content_type
 
-    def update_or_remove_from_knowledge_base(self, item_id, item_type, action, new_content=None, new_metadata=None):
-        embedding_id = self._get_embedding_id(item_id, item_type)
-        if embedding_id:
+            # Add the content to the vector store and get the embedding ID
+            embedding_id = self.vector_store.add_to_knowledge_base(content, metadata=metadata)
+
+            #self.logger.info(f"Successfully added {content_type} to knowledge base. Embedding ID: {embedding_id}")
+            return embedding_id
+        except Exception as e:
+            #self.logger.error(f"Error adding {content_type} to knowledge base: {str(e)}")
+            raise
+    
+
+    def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
+        self.logger.info(f"Performing {action} operation on knowledge base")
+        try:
+            if isinstance(identifier, str):
+                embedding_id = identifier
+            elif isinstance(identifier, dict) and 'item_id' in identifier and 'item_type' in identifier:
+                embedding_id = self.vector_store.get_embedding_id(identifier['item_id'], identifier['item_type'])
+            else:
+                raise ValueError("Invalid identifier. Must be embedding_id or dict with item_id and item_type")
+
             if action == 'delete':
                 self.vector_store.delete_from_knowledge_base(embedding_id)
             elif action == 'update':
@@ -366,17 +374,11 @@ class AgentManager:
                 self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
             else:
                 raise ValueError("Invalid action. Must be 'delete' or 'update'")
-        else:
-            self.logger.warning(f"No embedding ID found for {item_type} with ID {item_id}")
-    def _get_embedding_id(self, item_id, item_type):
-        if item_type == 'chapter':
-            item = db_instance.get_chapter(item_id, self.user_id)
-        elif item_type == 'character':
-            item = db_instance.get_character_by_id(item_id, self.user_id)
-        else:
-            return None
-
-        return item.get('embedding_id') if item else None
+            
+            self.logger.info(f"Successfully performed {action} operation on embedding ID {embedding_id}")
+        except Exception as e:
+            self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}", exc_info=True)
+            raise
 
     def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
         return self.vector_store.similarity_search(query, k=k)

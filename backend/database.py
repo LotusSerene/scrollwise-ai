@@ -1,14 +1,14 @@
 # backend/database.py
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker, scoped_session, joinedload
 from sqlalchemy.pool import QueuePool
 import json
 import os
 from dotenv import load_dotenv
 import uuid
-
+import asyncio
 load_dotenv()
 
 Base = declarative_base()
@@ -28,13 +28,15 @@ class Chapter(Base):
     content = Column(Text, nullable=False)
     chapter_number = Column(Integer, nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    embedding_id = Column(String)  # New column
 
     def to_dict(self):
         return {
             'id': self.id,
             'title': self.title,
             'content': self.content,
-            'chapter_number': self.chapter_number
+            'chapter_number': self.chapter_number,
+            'embedding_id': self.embedding_id  # Include embedding_id
         }
 
 class ValidityCheck(Base):
@@ -73,12 +75,14 @@ class Character(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    embedding_id = Column(String)  # New column
 
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
-            'description': self.description
+            'description': self.description,
+            'embedding_id': self.embedding_id  # Include embedding_id
         }
 
 class ChatHistory(Base):
@@ -86,6 +90,14 @@ class ChatHistory(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     messages = Column(Text, nullable=False)
+
+class Preset(Base): # New table for presets
+    __tablename__ = 'presets'
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    name = Column(String, nullable=False)
+    data = Column(JSON, nullable=False)
+    __table_args__ = (UniqueConstraint('user_id', 'name', name='_user_preset_uc'),)
 
 class Database:
     def __init__(self):
@@ -143,11 +155,14 @@ class Database:
         finally:
             session.close()
 
-    def create_chapter(self, title, content, user_id):
+    async def create_chapter(self, title, content, user_id):
+        return await asyncio.to_thread(self._create_chapter, title, content, user_id)
+
+    def _create_chapter(self, title, content, user_id, embedding_id=None):
         session = self.get_session()
         try:
             chapter_number = session.query(Chapter).filter_by(user_id=user_id).count() + 1
-            chapter = Chapter(id=str(uuid.uuid4()), title=title, content=content, chapter_number=chapter_number, user_id=user_id)
+            chapter = Chapter(id=str(uuid.uuid4()), title=title, content=content, chapter_number=chapter_number, user_id=user_id, embedding_id=embedding_id)
             session.add(chapter)
             session.commit()
             return chapter.to_dict()
@@ -178,6 +193,10 @@ class Database:
     def delete_chapter(self, chapter_id, user_id):
         session = self.get_session()
         try:
+            # First, delete related validity checks
+            session.query(ValidityCheck).filter_by(chapter_id=chapter_id, user_id=user_id).delete()
+
+            # Then, delete the chapter
             chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
             if chapter:
                 session.delete(chapter)
@@ -195,7 +214,15 @@ class Database:
         session = self.get_session()
         try:
             chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
-            return chapter.to_dict() if chapter else None
+            if chapter:
+                return {
+                    'id': chapter.id,
+                    'title': chapter.title,
+                    'content': chapter.content,
+                    'chapter_number': chapter.chapter_number,
+                    'embedding_id': chapter.embedding_id  # Include embedding_id
+                }
+            return None
         finally:
             session.close()
 
@@ -210,9 +237,9 @@ class Database:
     def delete_validity_check(self, check_id, user_id):
         session = self.get_session()
         try:
-            check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id).first()
-            if check:
-                session.delete(check)
+            validity_check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id).first()
+            if validity_check:
+                session.delete(validity_check)
                 session.commit()
                 return True
             return False
@@ -223,10 +250,13 @@ class Database:
         finally:
             session.close()
 
-    def create_character(self, name, description, user_id):
+    async def create_character(self, name, description, user_id):
+        return await asyncio.to_thread(self._create_character, name, description, user_id)
+
+    def _create_character(self, name, description, user_id, embedding_id=None):
         session = self.get_session()
         try:
-            character = Character(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
+            character = Character(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, embedding_id=embedding_id)
             session.add(character)
             session.commit()
             return character.id
@@ -282,7 +312,14 @@ class Database:
         session = self.get_session()
         try:
             character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
-            return character.to_dict() if character else None
+            if character:
+                return {
+                    'id': character.id,
+                    'name': character.name,
+                    'description': character.description,
+                    'embedding_id': character.embedding_id  # Include embedding_id
+                }
+            return None
         finally:
             session.close()
 
@@ -353,7 +390,10 @@ class Database:
         finally:
             session.close()
 
-    def save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
+    async def save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
+        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
+
+    def _save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
         session = self.get_session()
         try:
             validity_check = ValidityCheck(
@@ -417,6 +457,97 @@ class Database:
             raise
         finally:
             session.close()
+    def create_preset(self, user_id, name, data):
+        session = self.get_session()
+        try:
+            # Check if a preset with the same name and user_id already exists
+            existing_preset = session.query(Preset).filter_by(user_id=user_id, name=name).first()
+            if existing_preset:
+                raise ValueError(f"A preset with name '{name}' already exists for this user.")
+            
+            preset = Preset(id=str(uuid.uuid4()), user_id=user_id, name=name, data=data)
+            session.add(preset)
+            session.commit()
+            return preset.id
+        except ValueError as ve:
+            session.rollback()
+            self.logger.error(f"Error creating preset: {str(ve)}")
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating preset: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_presets(self, user_id):
+        session = self.get_session()
+        try:
+            presets = session.query(Preset).filter_by(user_id=user_id).all()
+            return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
+        finally:
+            session.close()
+
+    def delete_preset(self, preset_name, user_id):
+        session = self.get_session()
+        try:
+            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id).first()
+            if preset:
+                session.delete(preset)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting preset: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_preset_by_name(self, preset_name, user_id):
+        session = self.get_session()
+        try:
+            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id).first()
+            if preset:
+                return {"id": preset.id, "name": preset.name, "data": preset.data}
+            return None
+        finally:
+            session.close()
+
+    # Add methods to update embedding_id for existing chapters and characters 
+
+    def update_chapter_embedding_id(self, chapter_id, embedding_id):
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(id=chapter_id).first()
+            if chapter:
+                chapter.embedding_id = embedding_id
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def update_character_embedding_id(self, character_id, embedding_id):
+        session = self.get_session()
+        try:
+            character = session.query(Character).filter_by(id=character_id).first()
+            if character:
+                character.embedding_id = embedding_id
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating character embedding_id: {str(e)}")
+            raise
+        finally:
+            session.close()
+
 
 db_instance = Database()
 

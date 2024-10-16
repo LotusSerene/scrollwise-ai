@@ -37,7 +37,7 @@ app = FastAPI(title="Novel AI API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Replace with your frontend URL
+    allow_origins=["localhost:3000"],  # Replace with your frontend URL/ Ignore this config for now we'll change it later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -290,9 +290,11 @@ async def generate_chapters(
                         for char in new_characters:
                             character_id = await db_instance.create_character(char['name'], char['description'], current_user.id)
                             # Add new character to knowledge base
-                            agent_manager.add_to_knowledge_base("character", char['description'], {"name": char['name'], "id": character_id, "type": "character"})
+                            embedding_id = agent_manager.add_to_knowledge_base("character", char['description'], {"name": char['name'], "id": character_id, "type": "character"})
+                            # Update the character with the embedding_id
+                            db_instance.update_character_embedding_id(character_id, embedding_id)
                             # Add the new character to the characters list
-                            characters.append({"id": character_id, "name": char['name'], "description": char['description']})
+                            characters.append({"id": character_id, "name": char['name'], "description": char['description'], "embedding_id": embedding_id})
                         logging.debug("New characters saved and added to knowledge base")
 
                         logging.debug("Saving chapter")
@@ -300,7 +302,10 @@ async def generate_chapters(
                         logging.debug(f"Chapter saved with id: {new_chapter['id']}")
 
                         # Add generated chapter to knowledge base
-                        agent_manager.add_to_knowledge_base("chapter", chapter_content, {"title": chapter_title, "id": new_chapter['id'], "type": "chapter"})
+                        embedding_id = agent_manager.add_to_knowledge_base("chapter", chapter_content, {"title": chapter_title, "id": new_chapter['id'], "type": "chapter"})
+                        
+                        # Update the chapter with the embedding_id
+                        db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
                         logging.debug("Saving validity check")
                         await db_instance.save_validity_check(
@@ -367,9 +372,12 @@ async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(ge
         
         # Add to knowledge base
         agent_manager = AgentManager(current_user.id)
-        agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id'], "type": "chapter"})
+        embedding_id = agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id'], "type": "chapter"})
         
-        return {"message": "Chapter created successfully", "id": new_chapter['id']}
+        # Update the chapter with the embedding_id
+        db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+
+        return {"message": "Chapter created successfully", "chapter": new_chapter, "embedding_id": embedding_id}
     except Exception as e:
         logger.error(f"Error creating chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -377,17 +385,21 @@ async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(ge
 @chapter_router.put("/{chapter_id}")
 async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: User = Depends(get_current_active_user)):
     try:
-        updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
-        if not updated_chapter:
+        existing_chapter = db_instance.get_chapter(chapter_id, current_user.id)
+        if not existing_chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
         
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
-        # First, remove the old chapter from the knowledge base
-        agent_manager.update_or_remove_from_knowledge_base(chapter_id, "chapter", 'delete')
-        # Then, add the updated chapter to the knowledge base
-        agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": chapter_id, "type": "chapter"})
-        
+        agent_manager.update_or_remove_from_knowledge_base(
+            existing_chapter['embedding_id'], 
+            'update', 
+            new_content=chapter.content, 
+            new_metadata={"title": chapter.title, "id": chapter_id, "type": "chapter"}
+        )
+
         return updated_chapter
     except Exception as e:
         logger.error(f"Error updating chapter: {str(e)}")
@@ -396,13 +408,21 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: 
 @chapter_router.delete("/{chapter_id}")
 async def delete_chapter(chapter_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        deleted = db_instance.delete_chapter(chapter_id, current_user.id)
-        if deleted:
-            # Remove from knowledge base
+        chapter = db_instance.get_chapter(chapter_id, current_user.id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        # Delete from knowledge base if embedding_id exists
+        if chapter.get('embedding_id'):
             agent_manager = AgentManager(current_user.id)
-            agent_manager.update_or_remove_from_knowledge_base(chapter_id, "chapter", 'delete')
-            return {"message": "Chapter deleted successfully"}
-        raise HTTPException(status_code=404, detail="Chapter not found")
+            agent_manager.update_or_remove_from_knowledge_base(chapter['embedding_id'], 'delete')
+        else:
+            logging.warning(f"No embedding_id found for chapter {chapter_id}. Skipping knowledge base deletion.")
+        
+        # Delete from database
+        db_instance.delete_chapter(chapter_id, current_user.id)
+        
+        return {"message": "Chapter deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -420,9 +440,12 @@ async def create_character(character: CharacterCreate, current_user: User = Depe
         
         # Add to knowledge base
         agent_manager = AgentManager(current_user.id)
-        agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
+        embedding_id = agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
         
-        return {"message": "Character created successfully", "id": character_id}
+        # Update the character with the embedding_id
+        db_instance.update_character_embedding_id(character_id, embedding_id)
+        
+        return {"message": "Character created successfully", "id": character_id, "embedding_id": embedding_id}
     except Exception as e:
         logger.error(f"Error creating character: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -430,17 +453,26 @@ async def create_character(character: CharacterCreate, current_user: User = Depe
 @character_router.put("/{character_id}")
 async def update_character(character_id: str, character: CharacterUpdate, current_user: User = Depends(get_current_active_user)):
     try:
-        updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
-        if not updated_character:
+        existing_character = db_instance.get_character_by_id(character_id, current_user.id)
+        if not existing_character:
             raise HTTPException(status_code=404, detail="Character not found")
+        
+        updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
         
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
-        # First, remove the old character from the knowledge base
-        agent_manager.update_or_remove_from_knowledge_base(character_id, "character", 'delete')
-        # Then, add the updated character to the knowledge base
-        agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
-        
+        if existing_character.get('embedding_id'):
+            agent_manager.update_or_remove_from_knowledge_base(
+                existing_character['embedding_id'], 
+                'update', 
+                new_content=character.description, 
+                new_metadata={"name": character.name, "id": character_id, "type": "character"}
+            )
+        else:
+            # If no embedding_id exists, create a new one
+            embedding_id = agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
+            db_instance.update_character_embedding_id(character_id, embedding_id)
+
         return updated_character
     except Exception as e:
         logger.error(f"Error updating character: {str(e)}")
@@ -449,13 +481,23 @@ async def update_character(character_id: str, character: CharacterUpdate, curren
 @character_router.delete("/{character_id}")
 async def delete_character(character_id: str, current_user: User = Depends(get_current_active_user)):
     try:
+        character = db_instance.get_character_by_id(character_id, current_user.id)
+        if not character:
+            raise HTTPException(status_code=404, detail="Character not found")
+        
+        # Delete from knowledge base if embedding_id exists
+        if character.get('embedding_id'):
+            agent_manager = AgentManager(current_user.id)
+            agent_manager.update_or_remove_from_knowledge_base(character['embedding_id'], 'delete')
+        else:
+            logging.warning(f"No embedding_id found for character {character_id}. Skipping knowledge base deletion.")
+        
+        # Delete from database
         deleted = db_instance.delete_character(character_id, current_user.id)
         if deleted:
-            # Remove from knowledge base
-            agent_manager = AgentManager(current_user.id)
-            agent_manager.update_or_remove_from_knowledge_base(character_id, "character", 'delete')
             return {"message": "Character deleted successfully"}
-        raise HTTPException(status_code=404, detail="Character not found")
+        else:
+            raise HTTPException(status_code=404, detail="Character not found")
     except Exception as e:
         logger.error(f"Error deleting character: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -513,13 +555,13 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
 @knowledge_base_router.put("/{embedding_id}")
 async def update_knowledge_base_item(embedding_id: str, new_content: str, new_metadata: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(embedding_id, "knowledge_base_item", 'update', new_content, new_metadata)
+    agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content, new_metadata)
     return {"message": "Knowledge base item updated successfully"}
 
 @knowledge_base_router.delete("/{embedding_id}")
 async def delete_knowledge_base_item(embedding_id: str, current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id)
-    agent_manager.update_or_remove_from_knowledge_base(embedding_id, "knowledge_base_item", 'delete')
+    agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
     return {"message": "Knowledge base item deleted successfully"}
 
 @knowledge_base_router.post("/query")

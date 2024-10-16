@@ -1,8 +1,8 @@
-gunicorn
-streamlit
-google-generativeai
+fastapi
+uvicorn
+psycopg2-binary
+chromadb
 python-dotenv
 flask
 flask-cors
 docx
-python-docx
