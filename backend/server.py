@@ -501,7 +501,9 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
         {
             'type': item['metadata'].get('type', 'Unknown'),
             'content': item['page_content'],
-            'embedding_id': item['id']
+            'embedding_id': item['id'],
+            'title': item['metadata'].get('title'),  # For chapters
+            'name': item['metadata'].get('name'),    # For characters
         }
         for item in content
     ]
