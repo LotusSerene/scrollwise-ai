@@ -31,6 +31,7 @@ class Header extends StatelessWidget implements PreferredSizeWidget {
                   _buildNavLink(context, 'Validity', '/validity'),
                   _buildNavLink(context, 'Knowledge Base', '/knowledge-base'),
                   _buildNavLink(context, 'Settings', '/settings'),
+                  _buildNavLink(context, 'Query', '/query'), // Added Query link
                 ],
               ),
             ),

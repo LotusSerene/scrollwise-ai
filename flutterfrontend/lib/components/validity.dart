@@ -81,79 +81,59 @@ class _ValidityState extends State<Validity> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 1,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Validity Checks',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _validityChecks.length,
-                    itemBuilder: (context, index) {
-                      final check = _validityChecks[index];
-                      return ListTile(
-                        title: Text(
-                          '${check['chapterTitle']}: ${check['isValid'] ? 'Valid' : 'Invalid'}',
-                        ),
-                        selected: _selectedCheck == check,
-                        onTap: () => _handleCheckClick(check),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _handleDeleteCheck(check['id']),
-                        ),
-                      );
-                    },
+    return ListView.builder(
+      itemCount: _validityChecks.length,
+      padding: const EdgeInsets.all(16),
+      itemBuilder: (context, index) {
+        final check = _validityChecks[index];
+        return Card(
+          elevation: 3,
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          child: ListTile(
+            title: Text(
+              '${check['chapterTitle']}: ${check['isValid'] ? 'Valid' : 'Invalid'}',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            onTap: () => showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  title: Text(check['chapterTitle']),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Validity: ${check['isValid'] ? 'Valid' : 'Invalid'}'),
+                        Text('Chapter ID: ${check['chapterId']}'),
+                        Text('Feedback: ${_formatString(check['feedback'])}'),
+                        Text('Review: ${_formatString(check['review'])}'),
+                        Text('Style Guide Adherence: ${_formatBool(check['style_guide_adherence'])}'),
+                        Text('Style Guide Feedback: ${_formatString(check['style_guide_feedback'])}'),
+                        Text('Continuity: ${_formatBool(check['continuity'])}'),
+                        Text('Continuity Feedback: ${_formatString(check['continuity_feedback'])}'),
+                        Text('Test Results: ${_formatString(check['test_results'])}'),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                );
+              },
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: () => _handleDeleteCheck(check['id']),
             ),
           ),
-          const SizedBox(width: 20),
-          Expanded(
-            flex: 2,
-            child: _selectedCheck != null
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _selectedCheck['chapterTitle'],
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                          'Validity: ${_selectedCheck['isValid'] ? 'Valid' : 'Invalid'}'),
-                      Text('Chapter ID: ${_selectedCheck['chapterId']}'),
-                      Text(
-                          'Feedback: ${_formatString(_selectedCheck['feedback'])}'),
-                      Text(
-                          'Review: ${_formatString(_selectedCheck['review'])}'),
-                      Text(
-                          'Style Guide Adherence: ${_formatBool(_selectedCheck['style_guide_adherence'])}'),
-                      Text(
-                          'Style Guide Feedback: ${_formatString(_selectedCheck['style_guide_feedback'])}'),
-                      Text(
-                          'Continuity: ${_formatBool(_selectedCheck['continuity'])}'),
-                      Text(
-                          'Continuity Feedback: ${_formatString(_selectedCheck['continuity_feedback'])}'),
-                      Text(
-                          'Test Results: ${_formatString(_selectedCheck['test_results'])}'),
-                    ],
-                  )
-                : const SizedBox(),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

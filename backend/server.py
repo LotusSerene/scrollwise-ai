@@ -21,6 +21,7 @@ import io
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import HTTPException
 from pydantic import ValidationError
+from fastapi.encoders import jsonable_encoder
 
 # Load environment variables
 load_dotenv()
@@ -37,7 +38,7 @@ app = FastAPI(title="Novel AI API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["localhost:3000"],  # Replace with your frontend URL/ Ignore this config for now we'll change it later
+    allow_origins=["*"],  # Replace with your frontend URL/ Ignore this config for now we'll change it later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,20 +96,24 @@ class ChapterUpdate(BaseModel):
     title: str
     content: str
 
-class CharacterCreate(BaseModel):
+class CodexItemCreate(BaseModel):
     name: str
     description: str
+    type: str
+    subtype: Optional[str] = None
 
-class CharacterUpdate(BaseModel):
+class CodexItemUpdate(BaseModel):
     name: str
     description: str
+    type: str
+    subtype: Optional[str] = None
 
 class ModelSettings(BaseModel):
     mainLLM: str
     checkLLM: str
     embeddingsModel: str
     titleGenerationLLM: str
-    characterExtractionLLM: str
+    CodexExtractionLLM: str
     knowledgeBaseQueryLLM: str
 
 class ApiKeyUpdate(BaseModel):
@@ -198,7 +203,7 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 # Create API routers
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
-character_router = APIRouter(prefix="/characters", tags=["Characters"])
+codex_item_router = APIRouter(prefix="/codex-items", tags=["Codex Items"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
 preset_router = APIRouter(prefix="/presets", tags=["Presets"]) # New router for presets
@@ -245,7 +250,7 @@ async def generate_chapters(
     try:
         agent_manager = AgentManager(current_user.id)
         previous_chapters = db_instance.get_all_chapters(current_user.id)
-        characters = db_instance.get_all_characters(current_user.id)
+        codex_items = db_instance.get_all_codex_items(current_user.id)
 
         instructions = {
             "styleGuide": request.styleGuide,
@@ -266,7 +271,7 @@ async def generate_chapters(
                             writing_style=request.writingStyle,
                             instructions=instructions,
                             previous_chapters=previous_chapters,
-                            characters=characters
+                            codex_items=codex_items
                         ):
                             if isinstance(chunk, dict) and 'content' in chunk:
                                 chapter_content += chunk['content']
@@ -282,20 +287,20 @@ async def generate_chapters(
                         validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
                         logging.debug("Chapter checked")
 
-                        logging.debug("Extracting new characters")
-                        new_characters = agent_manager.check_and_extract_new_characters(chapter_content, characters)
-                        logging.debug(f"New characters extracted: {new_characters}")
+                        logging.debug("Extracting new codex items")
+                        new_codex_items = agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
+                        logging.debug(f"New codex items extracted: {new_codex_items}")
 
-                        logging.debug("Saving new characters")
-                        for char in new_characters:
-                            character_id = await db_instance.create_character(char['name'], char['description'], current_user.id)
-                            # Add new character to knowledge base
-                            embedding_id = agent_manager.add_to_knowledge_base("character", char['description'], {"name": char['name'], "id": character_id, "type": "character"})
-                            # Update the character with the embedding_id
-                            db_instance.update_character_embedding_id(character_id, embedding_id)
-                            # Add the new character to the characters list
-                            characters.append({"id": character_id, "name": char['name'], "description": char['description'], "embedding_id": embedding_id})
-                        logging.debug("New characters saved and added to knowledge base")
+                        logging.debug("Saving new codex items")
+                        for item in new_codex_items:
+                            item_id = await db_instance.create_codex_item(item['name'], item['description'], item['type'], item['subtype'], current_user.id)
+                            # Add new codex item to knowledge base
+                            embedding_id = agent_manager.add_to_knowledge_base("codex_item", item['description'], {"name": item['name'], "id": item_id, "type": item['type'], "subtype": item['subtype']})
+                            # Update the codex item with the embedding_id
+                            db_instance.update_codex_item_embedding_id(item_id, embedding_id)
+                            # Add the new codex item to the codex_items list
+                            codex_items.append({"id": item_id, "name": item['name'], "description": item['description'], "type": item['type'], "subtype": item['subtype'], "embedding_id": embedding_id})
+                        logging.debug("New codex items saved and added to knowledge base")
 
                         logging.debug("Saving chapter")
                         new_chapter = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
@@ -330,7 +335,7 @@ async def generate_chapters(
                             'title': chapter_title, 
                             'content': chapter_content,
                             'validity': validity, 
-                            'newCharacters': new_characters
+                            'newCodexItems': new_codex_items
                         }) + '\n'
                         logging.debug("Final chunk sent")
 
@@ -368,7 +373,11 @@ async def get_chapters(request: Request, current_user: User = Depends(get_curren
 @chapter_router.post("/")
 async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
     try:
-        new_chapter = await db_instance.create_chapter(chapter.title, chapter.content, current_user.id)
+        new_chapter = await db_instance.create_chapter(
+            chapter.title.encode('utf-8').decode('utf-8'),
+            chapter.content.encode('utf-8').decode('utf-8'),
+            current_user.id
+        )
         
         # Add to knowledge base
         agent_manager = AgentManager(current_user.id)
@@ -389,7 +398,12 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: 
         if not existing_chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         
-        updated_chapter = db_instance.update_chapter(chapter_id, chapter.title, chapter.content, current_user.id)
+        updated_chapter = db_instance.update_chapter(
+            chapter_id,
+            chapter.title.encode('utf-8').decode('utf-8'),
+            chapter.content.encode('utf-8').decode('utf-8'),
+            current_user.id
+        )
         
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
@@ -427,79 +441,94 @@ async def delete_chapter(chapter_id: str, current_user: User = Depends(get_curre
         logger.error(f"Error deleting chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Character routes
-@character_router.get("/")
-async def get_characters(current_user: User = Depends(get_current_active_user)):
-    characters = db_instance.get_all_characters(current_user.id)
-    return {"characters": characters}
+# Codex Item routes
+@codex_item_router.get("/")
+async def get_codex_items(current_user: User = Depends(get_current_active_user)):
+    codex_items = db_instance.get_all_codex_items(current_user.id)
+    return {"codex_items": codex_items}
 
-@character_router.post("/")
-async def create_character(character: CharacterCreate, current_user: User = Depends(get_current_active_user)):
+@codex_item_router.post("/")
+async def create_codex_item(codex_item: CodexItemCreate, current_user: User = Depends(get_current_active_user)):
     try:
-        character_id = await db_instance.create_character(character.name, character.description, current_user.id)
+        item_id = await db_instance.create_codex_item(
+            codex_item.name, 
+            codex_item.description, 
+            codex_item.type,  # Pass the correct type
+            codex_item.subtype, 
+            current_user.id
+        )
         
         # Add to knowledge base
         agent_manager = AgentManager(current_user.id)
-        embedding_id = agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
+        embedding_id = agent_manager.add_to_knowledge_base(
+            "codex_item", 
+            codex_item.description, 
+            {
+                "name": codex_item.name, 
+                "id": item_id, 
+                "type": codex_item.type,  # Use the correct type
+                "subtype": codex_item.subtype
+            }
+        )
         
-        # Update the character with the embedding_id
-        db_instance.update_character_embedding_id(character_id, embedding_id)
+        # Update the codex_item with the embedding_id
+        db_instance.update_codex_item_embedding_id(item_id, embedding_id)
         
-        return {"message": "Character created successfully", "id": character_id, "embedding_id": embedding_id}
+        return {"message": "Codex item created successfully", "id": item_id, "embedding_id": embedding_id}
     except Exception as e:
-        logger.error(f"Error creating character: {str(e)}")
+        logger.error(f"Error creating codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@character_router.put("/{character_id}")
-async def update_character(character_id: str, character: CharacterUpdate, current_user: User = Depends(get_current_active_user)):
+@codex_item_router.put("/{item_id}")
+async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, current_user: User = Depends(get_current_active_user)):
     try:
-        existing_character = db_instance.get_character_by_id(character_id, current_user.id)
-        if not existing_character:
-            raise HTTPException(status_code=404, detail="Character not found")
+        existing_item = db_instance.get_codex_item_by_id(item_id, current_user.id)
+        if not existing_item:
+            raise HTTPException(status_code=404, detail="Codex item not found")
         
-        updated_character = db_instance.update_character(character_id, character.name, character.description, current_user.id)
+        updated_item = db_instance.update_codex_item(item_id, codex_item.name, codex_item.description, codex_item.type, codex_item.subtype, current_user.id)
         
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id)
-        if existing_character.get('embedding_id'):
+        if existing_item.get('embedding_id'):
             agent_manager.update_or_remove_from_knowledge_base(
-                existing_character['embedding_id'], 
+                existing_item['embedding_id'], 
                 'update', 
-                new_content=character.description, 
-                new_metadata={"name": character.name, "id": character_id, "type": "character"}
+                new_content=codex_item.description, 
+                new_metadata={"name": codex_item.name, "id": item_id, "type": codex_item.type, "subtype": codex_item.subtype}
             )
         else:
             # If no embedding_id exists, create a new one
-            embedding_id = agent_manager.add_to_knowledge_base("character", character.description, {"name": character.name, "id": character_id, "type": "character"})
-            db_instance.update_character_embedding_id(character_id, embedding_id)
+            embedding_id = agent_manager.add_to_knowledge_base("codex_item", codex_item.description, {"name": codex_item.name, "id": item_id, "type": codex_item.type, "subtype": codex_item.subtype})
+            db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
-        return updated_character
+        return updated_item
     except Exception as e:
-        logger.error(f"Error updating character: {str(e)}")
+        logger.error(f"Error updating codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@character_router.delete("/{character_id}")
-async def delete_character(character_id: str, current_user: User = Depends(get_current_active_user)):
+@codex_item_router.delete("/{item_id}")
+async def delete_codex_item(item_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        character = db_instance.get_character_by_id(character_id, current_user.id)
-        if not character:
-            raise HTTPException(status_code=404, detail="Character not found")
+        codex_item = db_instance.get_codex_item_by_id(item_id, current_user.id)
+        if not codex_item:
+            raise HTTPException(status_code=404, detail="Codex item not found")
         
         # Delete from knowledge base if embedding_id exists
-        if character.get('embedding_id'):
+        if codex_item.get('embedding_id'):
             agent_manager = AgentManager(current_user.id)
-            agent_manager.update_or_remove_from_knowledge_base(character['embedding_id'], 'delete')
+            agent_manager.update_or_remove_from_knowledge_base(codex_item['embedding_id'], 'delete')
         else:
-            logging.warning(f"No embedding_id found for character {character_id}. Skipping knowledge base deletion.")
+            logging.warning(f"No embedding_id found for codex item {item_id}. Skipping knowledge base deletion.")
         
         # Delete from database
-        deleted = db_instance.delete_character(character_id, current_user.id)
+        deleted = db_instance.delete_codex_item(item_id, current_user.id)
         if deleted:
-            return {"message": "Character deleted successfully"}
+            return {"message": "Codex item deleted successfully"}
         else:
-            raise HTTPException(status_code=404, detail="Character not found")
+            raise HTTPException(status_code=404, detail="Codex item not found")
     except Exception as e:
-        logger.error(f"Error deleting character: {str(e)}")
+        logger.error(f"Error deleting codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # Knowledge base routes
@@ -545,7 +574,8 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
             'content': item['page_content'],
             'embedding_id': item['id'],
             'title': item['metadata'].get('title'),  # For chapters
-            'name': item['metadata'].get('name'),    # For characters
+            'name': item['metadata'].get('name'),    # For codex items
+            'subtype': item['metadata'].get('subtype') # For codex items
         }
         for item in content
     ]
@@ -566,9 +596,12 @@ async def delete_knowledge_base_item(embedding_id: str, current_user: User = Dep
 
 @knowledge_base_router.post("/query")
 async def query_knowledge_base(query_data: KnowledgeBaseQuery, current_user: User = Depends(get_current_active_user)):
-    agent_manager = AgentManager(current_user.id)
-    result = await agent_manager.generate_with_retrieval(query_data.query, query_data.chatHistory)
-    return {"result": result}
+    try:
+        result = await AgentManager(current_user.id).generate_with_retrieval(query_data.query, query_data.chatHistory)
+        return {"response": result}
+    except Exception as e:
+        logger.error(f"Error in query_knowledge_base: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @knowledge_base_router.post("/reset-chat-history")
 async def reset_chat_history(current_user: User = Depends(get_current_active_user)):
@@ -620,32 +653,22 @@ async def create_preset(preset: PresetCreate, current_user: User = Depends(get_c
     try:
         # Validate the preset data
         if not preset.name or not preset.data:
-            raise ValueError("Preset name and data are required")
+            raise HTTPException(status_code=400, detail="Preset name and data are required")
 
         # Ensure all required fields are present in the data
-        required_fields = ['numChapters', 'plot', 'writingStyle', 'styleGuide', 'minWordCount', 'additionalInstructions', 'instructions']
+        required_fields = ['numChapters', 'plot', 'writingStyle', 'styleGuide', 'minWordCount', 'additionalInstructions']
         missing_fields = [field for field in required_fields if field not in preset.data]
         
-        # Log the missing fields
-        logger.debug(f"Missing fields: {missing_fields}")
-
         if missing_fields:
-            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+            raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing_fields)}")
 
         # Create the preset
         preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data)
         
-        # Log the created preset
-        #logger.info(f"Created preset with ID: {preset_id}")
-
         # Return the created preset
-        return {"id": preset_id, "user_id": current_user.id, "name": preset.name, "data": preset.data}
+        return {"id": preset_id, "name": preset.name, "data": preset.data}
     except ValueError as ve:
-        logger.error(f"Validation error: {str(ve)}")
-        raise HTTPException(status_code=422, detail=str(ve))
-    except ValidationError as ve:
-        logger.error(f"Pydantic validation error: {str(ve)}")
-        raise HTTPException(status_code=422, detail=ve.errors())
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"Error creating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -679,12 +702,12 @@ async def delete_preset(preset_name: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Preset not found")
     except Exception as e:
         logger.error(f"Error deleting preset: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
-app.include_router(character_router)
+app.include_router(codex_item_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
 app.include_router(preset_router) # Include the preset router

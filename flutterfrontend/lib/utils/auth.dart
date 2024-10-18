@@ -53,3 +53,9 @@ class LocalStorage {
 }
 
 final localStorage = LocalStorage();
+
+Future<bool> isLoggedIn() async {
+  final token = await getAuthToken();
+  if (token == null) return false;
+  return !JwtDecoder.isExpired(token);
+}

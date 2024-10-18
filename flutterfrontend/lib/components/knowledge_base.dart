@@ -68,7 +68,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         _fetchKnowledgeBaseContent();
         Fluttertoast.showToast(msg: 'Text added to knowledge base');
       } else {
-        final errorMessage = jsonResponse['error'] ?? 'Error adding text to knowledge base';
+        final errorMessage =
+            jsonResponse['error'] ?? 'Error adding text to knowledge base';
         Fluttertoast.showToast(msg: errorMessage);
       }
     } catch (error) {
@@ -127,7 +128,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         });
         Fluttertoast.showToast(msg: 'Item deleted from knowledge base');
       } else {
-        final errorMessage = jsonResponse['error'] ?? 'Error deleting item from knowledge base';
+        final errorMessage =
+            jsonResponse['error'] ?? 'Error deleting item from knowledge base';
         Fluttertoast.showToast(msg: errorMessage);
       }
     } catch (error) {
@@ -152,7 +154,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
@@ -164,23 +165,34 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
             ),
           ),
           const SizedBox(height: 20),
-          Flexible(
-            fit: FlexFit.loose,
+          Expanded(
             child: ListView.builder(
               itemCount: _knowledgeBaseContent.length,
               itemBuilder: (context, index) {
                 final item = _knowledgeBaseContent[index];
                 final content = item['content'];
+                final title = item['title'] ?? item['name'] ?? 'Untitled';
                 return Card(
-                  color: const Color(0xFF343a40),
+                  elevation: 3,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
                   child: ListTile(
                     title: Text(
-                      'Type: ${item['type']}',
-                      style: const TextStyle(color: Colors.white),
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
                     ),
-                    subtitle: Text(
-                      'Content: ${content.length > 100 ? content.substring(0, 100) + '...' : content}',
-                      style: const TextStyle(color: Colors.white70),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Type: ${item['type']}'),
+                        Text(
+                          'Content: ${content.length > 100 ? content.substring(0, 100) + '...' : content}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                     trailing: IconButton(
                       onPressed: () => _handleDelete(item['embedding_id']),
@@ -194,26 +206,18 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           const SizedBox(height: 20),
           TextField(
             controller: _textController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Add text to knowledge base',
-              hintStyle: TextStyle(color: Colors.white),
-              enabledBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFFced4da)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFF007bff)),
+              prefixIcon: const Icon(Icons.text_fields),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
-            style: const TextStyle(color: Colors.white),
             maxLines: null,
           ),
+          const SizedBox(height: 10),
           ElevatedButton(
             onPressed: _handleTextSubmit,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF007bff),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              textStyle: const TextStyle(fontSize: 16),
-            ),
             child: const Text('Add Text'),
           ),
           const SizedBox(height: 10),
@@ -229,11 +233,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
                 // User canceled the picker
               }
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF007bff),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              textStyle: const TextStyle(fontSize: 16),
-            ),
             child: const Text('Upload Document'),
           ),
         ],

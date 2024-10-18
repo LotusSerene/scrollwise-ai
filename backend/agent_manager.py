@@ -33,12 +33,14 @@ from langchain.docstore.document import Document
 import asyncio
 
 
-class NewCharacter(BaseModel):
-    name: str = Field(default="", description="Name of the new character")
-    description: str = Field(default="", description="Brief description of the new character")
+class CodexItem(BaseModel):
+    name: str = Field(default="", description="Name of the codex item")
+    description: str = Field(default="", description="Description of the codex item")
+    type: str = Field(default="lore", description="Type of the codex item (e.g., lore, worldbuilding, item, character)")
+    subtype: Optional[str] = Field(default=None, description="Subtype of the codex item (e.g., history, culture, geography)")
 
-class CharacterExtraction(BaseModel):
-    new_characters: List[NewCharacter] = Field(default_factory=list, description="List of new characters found in the chapter")
+class CodexExtraction(BaseModel):
+    new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
 
 class AgentManager:
     def __init__(self, user_id: str):
@@ -112,17 +114,14 @@ class AgentManager:
     async def generate_chapter_stream(self, chapter_number: int, plot: str, writing_style: str, 
                                       instructions: Dict[str, Any],
                                       previous_chapters: List[Dict[str, Any]],
-                                      characters: List[Dict[str, Any]]):
+                                      codex_items: List[Dict[str, Any]]):
         self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
         try:
-            characters_dict = {char['name']: char['description'] for char in characters}
-            #self.logger.debug(f"Characters Dictionary: {characters_dict}")
+            codex_items_dict = {item['name']: item['description'] for item in codex_items}
             
-            context = await asyncio.to_thread(self._construct_context, plot, writing_style, instructions, characters_dict, previous_chapters)
-            #self.logger.debug(f"Constructed Context: {context[:200]}...")  # Log a snippet
+            context = await asyncio.to_thread(self._construct_context, plot, writing_style, instructions, codex_items_dict, previous_chapters)
             
             prompt = await asyncio.to_thread(self._construct_prompt, instructions, context)
-            #self.logger.debug(f"Constructed Prompt: {prompt}")
 
             chat_history = ChatMessageHistory()
             total_tokens = 0
@@ -148,19 +147,32 @@ class AgentManager:
                 "chapter_number": chapter_number,
                 "context": context,
                 "instructions": instructions,
-                "characters": characters_dict
+                "codex_items": codex_items_dict
             }, config={"configurable": {"session_id": f"chapter_{chapter_number}"}},
             ):
-                #self.logger.debug(f"Received chunk: {chunk}")
                 chapter_content += chunk
                 yield {"type": "chunk", "content": chunk}
 
             self.logger.info("Chapter generation completed")
             
-            # Extract new characters after the chapter is generated
-            new_characters = self.check_and_extract_new_characters(chapter_content, characters)
+            # Extract new codex items after the chapter is generated
+            new_codex_items = self.check_and_extract_new_codex_items(chapter_content, codex_items)
             
-            yield {"type": "complete", "content": chapter_content, "new_characters": new_characters}
+            # Add new codex items to the knowledge base
+            added_codex_items = []
+            for item in new_codex_items:
+                try:
+                    embedding_id = self.add_to_knowledge_base("codex_item", item['description'], {
+                        "name": item['name'],
+                        "type": item['type'],
+                        "subtype": item['subtype'] or "None"  # Use "None" as a string if subtype is None
+                    })
+                    self.logger.info(f"Added new codex item to knowledge base: {item['name']}")
+                    added_codex_items.append(item)
+                except Exception as e:
+                    self.logger.error(f"Error adding codex item to knowledge base: {str(e)}")
+            
+            yield {"type": "complete", "content": chapter_content, "new_codex_items": added_codex_items}
 
         except Exception as e:
             self.logger.error(f"Error in generate_chapter_stream: {e}", exc_info=True)
@@ -171,7 +183,7 @@ class AgentManager:
             yield item
 
     def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
-                           characters: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
+                           codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
         context = f"Plot: {plot}\n\n"
         context += f"Writing Style: {writing_style}\n\n"
         context += "Instructions:\n"
@@ -179,8 +191,8 @@ class AgentManager:
             context += f"{key}: {value}\n"
         context += "\n"
         
-        context += "Characters:\n"
-        for name, description in characters.items():
+        context += "Codex Items:\n"
+        for name, description in codex_items.items():
             context += f"{name}: {description}\n"
         context += "\n"
         
@@ -440,12 +452,12 @@ class AgentManager:
     def _construct_query_context(self, relevant_docs: List[Document]) -> str:
         context = "\n".join([doc.page_content for doc in relevant_docs])
         
-        # Add characters information
-        characters = db_instance.get_all_characters(self.user_id)
-        if characters:
-            context += "\n\nCharacters:\n"
-            for character in characters:
-                context += f"{character['name']}: {character['description']}\n"
+        # Add codex items information
+        codex_items = db_instance.get_all_codex_items(self.user_id)
+        if codex_items:
+            context += "\n\nCodex Items:\n"
+            for codex_item in codex_items:
+                context += f"{codex_item['name']}: {codex_item['description']}\n"
         
         # Add chapters information (you might want to limit this to avoid token limits)
         chapters = db_instance.get_all_chapters(self.user_id)
@@ -489,7 +501,7 @@ class AgentManager:
         {instructions}
 
         Write Chapter {chapter_number} of the novel. Be creative, engaging, and consistent with the provided context and previous chapters.
-        Ensure that the chapter follows the plot points, incorporates the characters and settings, 
+        Ensure that the chapter follows the plot points, incorporates the codex items and settings, 
         adheres to the specified writing style, and maintains continuity with previous chapters.
         Avoid starting with phrases like: "Continuing from where we left off", "Picking up where we left off", "Resuming the story", etc.
         Start the chapter seamlessly as if it were part of the original generation. Do not add the chapter title at all
@@ -548,59 +560,61 @@ class AgentManager:
         db_instance.delete_chat_history(self.user_id)
         self.logger.info("Chat history has been reset.")
 
-    def check_and_extract_new_characters(self, chapter: str, characters: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        character_names = [char['name'] for char in characters]
+    def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        codex_item_names = [item['name'] for item in codex_items]
         
-        parser = PydanticOutputParser(pydantic_object=CharacterExtraction)
-        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['characterExtractionLLM']))
+        parser = PydanticOutputParser(pydantic_object=CodexExtraction)
+        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['CodexExtractionLLM']))
         
         prompt = ChatPromptTemplate.from_template("""
-        You are an expert at identifying new characters in a story. Your task is to analyze the following chapter and identify ANY new characters that are not in the provided list of existing characters.
+        You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
 
-        For each new character you find:
-        1. Provide their name
-        2. Write a brief description of the character based on information in the chapter
+        For each new codex item you find:
+        1. Provide its name
+        2. Write a brief description of the codex item based on information in the chapter
+        3. Determine the type of codex item (lore, worldbuilding, item, character)
+        4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
 
-        IMPORTANT: Even if a character is only mentioned briefly or seems minor, include them in your list if they're not in the existing characters. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new character.
+        IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
 
-        If you truly find no new characters after a thorough analysis, return an empty list.
+        If you truly find no new codex items after a thorough analysis, return an empty list.
 
         Chapter:
         {chapter}
 
-        Existing Characters:
-        {characters}
+        Existing Codex Items:
+        {codex_items}
 
-        Remember, include ANY character that is not in the list of existing characters, no matter how minor they might seem. Be thorough and precise in your analysis.
+        Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
 
         {format_instructions}
         """)
 
-        extraction_chain = prompt | self._initialize_llm(self.model_settings['characterExtractionLLM']) | fixing_parser
+        extraction_chain = prompt | self._initialize_llm(self.model_settings['CodexExtractionLLM']) | fixing_parser
 
         try:
             result = extraction_chain.invoke({
                 "chapter": chapter,
-                "characters": ", ".join(character_names),
+                "codex_items": ", ".join(codex_item_names),
                 "format_instructions": parser.get_format_instructions()
             })
 
-            if result is None or not isinstance(result, CharacterExtraction):
+            if result is None or not isinstance(result, CodexExtraction):
                 self.logger.warning("Invalid result from extraction_chain.invoke. Returning an empty list.")
                 return []
 
-            self.logger.debug(f"check_and_extract_new_characters returned: {result}")
+            self.logger.debug(f"check_and_extract_new_codex_items returned: {result}")
 
-            new_characters = result.new_characters
+            new_codex_items = result.new_items
             
-            if not new_characters:
-                self.logger.warning("No new characters were extracted. This might be correct, or there might be an issue with character extraction.")
+            if not new_codex_items:
+                self.logger.warning("No new codex items were extracted. This might be correct, or there might be an issue with codex item extraction.")
             
-            # Convert NewCharacter objects to dictionaries
-            new_characters_dicts = [{"name": char.name, "description": char.description} for char in new_characters]
+            # Convert CodexItem objects to dictionaries
+            new_codex_items_dicts = [{"name": item.name, "description": item.description, "type": item.type, "subtype": item.subtype} for item in new_codex_items]
             
-            return new_characters_dicts
+            return new_codex_items_dicts
 
         except Exception as e:
-            self.logger.error(f"Error in check_and_extract_new_characters: {str(e)}")
+            self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
             return []

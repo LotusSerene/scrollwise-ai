@@ -26,6 +26,7 @@ class _CreateChapterState extends State<CreateChapter> {
   bool _isLoadingPresets = true;
   String? _selectedPreset;
   String _newPresetName = '';
+  bool _isExpanded = false;
 
   @override
   void initState() {
@@ -71,11 +72,6 @@ class _CreateChapterState extends State<CreateChapter> {
           'minWordCount': _minWordCount,
           'additionalInstructions': _additionalInstructions,
         },
-        'instructions': { // Added "instructions" field
-          'styleGuide': _styleGuide,
-          'minWordCount': _minWordCount,
-          'additionalInstructions': _additionalInstructions,
-        },
       };
 
       final response = await http.post(
@@ -88,19 +84,19 @@ class _CreateChapterState extends State<CreateChapter> {
       );
 
       if (response.statusCode == 201) {
+        final newPreset = json.decode(response.body);
         setState(() {
-          _presets.add(json.decode(response.body));
+          _presets.add(newPreset);
           _newPresetName = '';
         });
         Fluttertoast.showToast(msg: 'Preset saved successfully');
       } else {
         final errorData = json.decode(response.body);
-        Fluttertoast.showToast(
-            msg: 'Error saving preset: ${errorData['detail']}');
+        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
       }
     } catch (error) {
       print('Error saving preset: $error');
-      Fluttertoast.showToast(msg: 'Error saving preset');
+      Fluttertoast.showToast(msg: 'Error saving preset: ${error.toString()}');
     }
   }
 
@@ -154,20 +150,19 @@ class _CreateChapterState extends State<CreateChapter> {
         headers: await getAuthHeaders(),
       );
 
-      if (response.statusCode == 204) {
+      if (response.statusCode == 200) {
         setState(() {
           _presets.removeWhere((p) => p['name'] == presetName);
-          _selectedPreset = null; // Reset selected preset
+          _selectedPreset = null;
         });
         Fluttertoast.showToast(msg: 'Preset deleted successfully');
       } else {
         final errorData = json.decode(response.body);
-        Fluttertoast.showToast(
-            msg: 'Error deleting preset: ${errorData['detail']}');
+        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
       }
     } catch (error) {
       print('Error deleting preset: $error');
-      Fluttertoast.showToast(msg: 'Error deleting preset');
+      Fluttertoast.showToast(msg: 'Error deleting preset: ${error.toString()}');
     }
   }
 
@@ -252,65 +247,107 @@ class _CreateChapterState extends State<CreateChapter> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF212529), // Dark background color
+        color: const Color(0xFF212529),
         borderRadius: BorderRadius.circular(8),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x1A000000), // Shadow color with opacity
+            color: Color(0x1A000000),
             blurRadius: 4,
             offset: Offset(0, 2),
           ),
         ],
       ),
-      child: SingleChildScrollView( // Wrap content in SingleChildScrollView
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Generate New Chapter',
-              style: TextStyle(
-                color: Color(0xFF007bff), // Primary color for headings
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.',
-              style: TextStyle(
-                color: Color(0xFFf8f9fa), // Light text color
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Generate New Chapter',
+                    style: TextStyle(
+                      color: Color(0xFF007bff), // Primary color for headings
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.',
+                    style: TextStyle(
+                      color: Color(0xFFf8f9fa), // Light text color
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Presets:',
-                        style: TextStyle(
-                          color: Color(0xFFf8f9fa),
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Presets:',
+                              style: TextStyle(
+                                color: Color(0xFFf8f9fa),
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _isLoadingPresets
+                                ? const CircularProgressIndicator()
+                                : DropdownButtonFormField<String>(
+                                    value: _selectedPreset,
+                                    onChanged: _handlePresetChange,
+                                    items: _presets.map((preset) {
+                                      return DropdownMenuItem<String>(
+                                        value: preset['name'],
+                                        child: Text(preset['name']),
+                                      );
+                                    }).toList(),
+                                    decoration: const InputDecoration(
+                                      enabledBorder: OutlineInputBorder(
+                                        borderSide: BorderSide(
+                                            color: Color(0xFFced4da)),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderSide: BorderSide(
+                                            color: Color(0xFF007bff)),
+                                      ),
+                                    ),
+                                  ),
+                            if (_selectedPreset != null)
+                              IconButton(
+                                onPressed: () =>
+                                    _handleDeletePreset(_selectedPreset!),
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                              ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      _isLoadingPresets
-                          ? const CircularProgressIndicator()
-                          : DropdownButtonFormField<String>(
-                              value: _selectedPreset,
-                              onChanged: _handlePresetChange,
-                              items: _presets.map((preset) {
-                                return DropdownMenuItem<String>(
-                                  value: preset['name'],
-                                  child: Text(preset['name']),
-                                );
-                              }).toList(),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Save Preset:',
+                              style: TextStyle(
+                                color: Color(0xFFf8f9fa),
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextFormField(
                               decoration: const InputDecoration(
+                                hintText: 'Preset name',
+                                hintStyle: TextStyle(color: Color(0xFFf8f9fa)),
                                 enabledBorder: OutlineInputBorder(
                                   borderSide:
                                       BorderSide(color: Color(0xFFced4da)),
@@ -320,221 +357,225 @@ class _CreateChapterState extends State<CreateChapter> {
                                       BorderSide(color: Color(0xFF007bff)),
                                 ),
                               ),
+                              style: const TextStyle(color: Color(0xFFf8f9fa)),
+                              onChanged: (value) {
+                                setState(() {
+                                  _newPresetName = value;
+                                });
+                              },
                             ),
-                      if (_selectedPreset != null)
-                        IconButton(
-                          onPressed: () => _handleDeletePreset(_selectedPreset!),
-                          icon: const Icon(Icons.delete, color: Colors.red),
+                            const SizedBox(height: 10),
+                            ElevatedButton(
+                              onPressed: _newPresetName.isNotEmpty
+                                  ? _handleSavePreset
+                                  : null,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF007bff),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 10),
+                                textStyle: const TextStyle(fontSize: 16),
+                              ),
+                              child: const Text('Save'),
+                            ),
+                          ],
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Save Preset:',
-                        style: TextStyle(
-                          color: Color(0xFFf8f9fa),
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextFormField(
-                        decoration: const InputDecoration(
-                          hintText: 'Preset name',
-                          hintStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFFced4da)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFF007bff)),
-                          ),
-                        ),
-                        style: const TextStyle(color: Color(0xFFf8f9fa)),
-                        onChanged: (value) {
-                          setState(() {
-                            _newPresetName = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      ElevatedButton(
-                        onPressed:
-                            _newPresetName.isNotEmpty ? _handleSavePreset : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF007bff),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
-                          textStyle: const TextStyle(fontSize: 16),
-                        ),
-                        child: const Text('Save'),
                       ),
                     ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Number of Chapters',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          keyboardType: TextInputType.number,
+                          initialValue: _numChapters.toString(),
+                          onChanged: (value) {
+                            setState(() {
+                              _numChapters = int.tryParse(value) ?? 1;
+                            });
+                          },
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter a number';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Plot',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          maxLines: null,
+                          initialValue: _plot,
+                          onChanged: (value) {
+                            setState(() {
+                              _plot = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Writing Style',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          initialValue: _writingStyle,
+                          onChanged: (value) {
+                            setState(() {
+                              _writingStyle = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Style Guide',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          maxLines: null,
+                          initialValue: _styleGuide,
+                          onChanged: (value) {
+                            setState(() {
+                              _styleGuide = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Minimum Word Count',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          keyboardType: TextInputType.number,
+                          initialValue: _minWordCount.toString(),
+                          onChanged: (value) {
+                            setState(() {
+                              _minWordCount = int.tryParse(value) ?? 0;
+                            });
+                          },
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter a number';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          decoration: const InputDecoration(
+                            labelText: 'Additional Instructions',
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          maxLines: null,
+                          initialValue: _additionalInstructions,
+                          onChanged: (value) {
+                            setState(() {
+                              _additionalInstructions = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: () => _handleSubmit(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(
+                                0xFF007bff), // Primary color for button
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 10),
+                            textStyle: const TextStyle(fontSize: 18),
+                          ),
+                          child: _isGenerating
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white)
+                              : const Text('Generate Chapter'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
-            Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Number of Chapters',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
-                      ),
-                    ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    keyboardType: TextInputType.number,
-                    initialValue: _numChapters.toString(),
-                    onChanged: (value) {
-                      setState(() {
-                        _numChapters = int.tryParse(value) ?? 1;
-                      });
-                    },
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter a number';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Plot',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
+          ),
+          const SizedBox(height: 20),
+          // Add an expandable container for streamed content
+          if (_streamedContent.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _isExpanded = !_isExpanded;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                height: _isExpanded
+                    ? MediaQuery.of(context).size.height * 0.6
+                    : 100,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2C3136),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Generated Chapter',
+                      style: TextStyle(
+                        color: Color(0xFFf8f9fa),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
                       ),
                     ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    maxLines: null,
-                    initialValue: _plot,
-                    onChanged: (value) {
-                      setState(() {
-                        _plot = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Writing Style',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
-                      ),
-                    ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    initialValue: _writingStyle,
-                    onChanged: (value) {
-                      setState(() {
-                        _writingStyle = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Style Guide',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
-                      ),
-                    ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    maxLines: null,
-                    initialValue: _styleGuide,
-                    onChanged: (value) {
-                      setState(() {
-                        _styleGuide = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Minimum Word Count',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
-                      ),
-                    ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    keyboardType: TextInputType.number,
-                    initialValue: _minWordCount.toString(),
-                    onChanged: (value) {
-                      setState(() {
-                        _minWordCount = int.tryParse(value) ?? 0;
-                      });
-                    },
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter a number';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Additional Instructions',
-                      labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFFced4da)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF007bff)),
-                      ),
-                    ),
-                    style: const TextStyle(color: Color(0xFFf8f9fa)),
-                    maxLines: null,
-                    initialValue: _additionalInstructions,
-                    onChanged: (value) {
-                      setState(() {
-                        _additionalInstructions = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () => _handleSubmit(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          const Color(0xFF007bff), // Primary color for button
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 10),
-                      textStyle: const TextStyle(fontSize: 18),
-                    ),
-                    child: _isGenerating
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('Generate Chapter'),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_streamedContent.isNotEmpty)
+                    SizedBox(height: 10),
                     Expanded(
                       child: SingleChildScrollView(
                         child: Text(
@@ -543,11 +584,26 @@ class _CreateChapterState extends State<CreateChapter> {
                         ),
                       ),
                     ),
-                ],
+                    if (_isExpanded)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _isExpanded = false;
+                            });
+                          },
+                          child: Text(
+                            'Close',
+                            style: TextStyle(color: Color(0xFF007bff)),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

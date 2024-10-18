@@ -65,9 +65,13 @@ class VectorStore:
             metadata = {}
         metadata["user_id"] = self.user_id
         flattened_metadata = flatten_metadata(metadata)
+        
+        # Filter out None values from metadata
+        filtered_metadata = {k: v for k, v in flattened_metadata.items() if v is not None}
+        
         try:
             # Add the text and get the IDs
-            ids = self.vector_store.add_texts([text], metadatas=[flattened_metadata])
+            ids = self.vector_store.add_texts([text], metadatas=[filtered_metadata])
             
             # The add_texts method returns a list of IDs, but we're only adding one document,
             # so we can safely take the first (and only) ID

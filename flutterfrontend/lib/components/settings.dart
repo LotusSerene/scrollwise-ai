@@ -22,7 +22,7 @@ class _SettingsState extends State<Settings> {
     'checkLLM': 'gemini-1.5-pro-002',
     'embeddingsModel': 'models/text-embedding-004',
     'titleGenerationLLM': 'gemini-1.5-pro-002',
-    'characterExtractionLLM': 'gemini-1.5-pro-002',
+    'CodexExtractionLLM': 'gemini-1.5-pro-002',
     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002',
   };
   final List<String> _modelOptions = [
@@ -50,10 +50,12 @@ class _SettingsState extends State<Settings> {
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          _isKeySet = data['isSet'];
-          _apiKey = data['apiKey'] ?? '';
-        });
+        if (mounted) { // Check if the widget is still mounted
+          setState(() {
+            _isKeySet = data['isSet'];
+            _apiKey = data['apiKey'] ?? '';
+          });
+        }
       } else {
         Fluttertoast.showToast(msg: 'Error checking API key');
       }
@@ -70,9 +72,11 @@ class _SettingsState extends State<Settings> {
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
-        setState(() {
-          _modelSettings = Map<String, String>.from(json.decode(response.body));
-        });
+        if (mounted) { // Check if the widget is still mounted
+          setState(() {
+            _modelSettings = Map<String, String>.from(json.decode(response.body));
+          });
+        }
       } else {
         Fluttertoast.showToast(msg: 'Error fetching model settings');
       }
@@ -90,10 +94,12 @@ class _SettingsState extends State<Settings> {
         body: json.encode({'apiKey': _apiKey}),
       );
       if (response.statusCode == 200) {
-        setState(() {
-          _isKeySet = true;
-          _isEditingApiKey = false;
-        });
+        if (mounted) { // Check if the widget is still mounted
+          setState(() {
+            _isKeySet = true;
+            _isEditingApiKey = false;
+          });
+        }
         Fluttertoast.showToast(msg: 'API key saved successfully');
       } else {
         Fluttertoast.showToast(msg: 'Error saving API key');
@@ -111,10 +117,12 @@ class _SettingsState extends State<Settings> {
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 204) {
-        setState(() {
-          _isKeySet = false;
-          _apiKey = '';
-        });
+        if (mounted) { // Check if the widget is still mounted
+          setState(() {
+            _isKeySet = false;
+            _apiKey = '';
+          });
+        }
         Fluttertoast.showToast(msg: 'API key removed successfully');
       } else {
         Fluttertoast.showToast(msg: 'Error removing API key');

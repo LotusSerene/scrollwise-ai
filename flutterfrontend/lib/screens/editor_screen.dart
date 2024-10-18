@@ -6,9 +6,12 @@ class EditorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final String? chapterId =
+        ModalRoute.of(context)?.settings.arguments as String?;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Editor')),
-      body: const Editor(),
+      body: Editor(chapterId: chapterId),
     );
   }
 }

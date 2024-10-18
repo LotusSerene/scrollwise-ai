@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import uuid
 import asyncio
+from typing import Optional
 load_dotenv()
 
 Base = declarative_base()
@@ -69,11 +70,13 @@ class ValidityCheck(Base):
             'test_results': self.test_results
         }
 
-class Character(Base):
-    __tablename__ = 'characters'
+class CodexItem(Base):
+    __tablename__ = 'codex_items'
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
+    type = Column(String, nullable=False)
+    subtype = Column(String)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)  # New column
 
@@ -82,6 +85,8 @@ class Character(Base):
             'id': self.id,
             'name': self.name,
             'description': self.description,
+            'type': self.type,
+            'subtype': self.subtype,
             'embedding_id': self.embedding_id  # Include embedding_id
         }
 
@@ -250,74 +255,83 @@ class Database:
         finally:
             session.close()
 
-    async def create_character(self, name, description, user_id):
-        return await asyncio.to_thread(self._create_character, name, description, user_id)
-
-    def _create_character(self, name, description, user_id, embedding_id=None):
+    async def create_codex_item(self, name: str, description: str, item_type: str, subtype: Optional[str], user_id: str) -> str:
         session = self.get_session()
         try:
-            character = Character(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, embedding_id=embedding_id)
-            session.add(character)
+            item_id = str(uuid.uuid4())
+            new_item = CodexItem(
+                id=item_id,
+                name=name,
+                description=description,
+                type=item_type,  # Use the correct type here
+                subtype=subtype,
+                user_id=user_id
+            )
+            session.add(new_item)
             session.commit()
-            return character.id
+            return item_id
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error creating character: {str(e)}")
+            self.logger.error(f"Error creating codex item: {str(e)}")
             raise
         finally:
             session.close()
 
-    def get_all_characters(self, user_id):
+    def get_all_codex_items(self, user_id):
         session = self.get_session()
         try:
-            characters = session.query(Character).filter_by(user_id=user_id).all()
-            return [character.to_dict() for character in characters]
+            codex_items = session.query(CodexItem).filter_by(user_id=user_id).all()
+            return [item.to_dict() for item in codex_items]
         finally:
             session.close()
 
-    def update_character(self, character_id, name, description, user_id):
+    def update_codex_item(self, item_id, name, description, type, subtype, user_id):
         session = self.get_session()
         try:
-            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
-            if character:
-                character.name = name
-                character.description = description
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            if codex_item:
+                codex_item.name = name
+                codex_item.description = description
+                codex_item.type = type
+                codex_item.subtype = subtype
                 session.commit()
-                return character.to_dict()
+                return codex_item.to_dict()
             return None
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error updating character: {str(e)}")
+            self.logger.error(f"Error updating codex item: {str(e)}")
             raise
         finally:
             session.close()
 
-    def delete_character(self, character_id, user_id):
+    def delete_codex_item(self, item_id, user_id):
         session = self.get_session()
         try:
-            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
-            if character:
-                session.delete(character)
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            if codex_item:
+                session.delete(codex_item)
                 session.commit()
                 return True
             return False
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error deleting character: {str(e)}")
+            self.logger.error(f"Error deleting codex item: {str(e)}")
             raise
         finally:
             session.close()
 
-    def get_character_by_id(self, character_id, user_id):
+    def get_codex_item_by_id(self, item_id, user_id):
         session = self.get_session()
         try:
-            character = session.query(Character).filter_by(id=character_id, user_id=user_id).first()
-            if character:
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            if codex_item:
                 return {
-                    'id': character.id,
-                    'name': character.name,
-                    'description': character.description,
-                    'embedding_id': character.embedding_id  # Include embedding_id
+                    'id': codex_item.id,
+                    'name': codex_item.name,
+                    'description': codex_item.description,
+                    'type': codex_item.type,
+                    'subtype': codex_item.subtype,
+                    'embedding_id': codex_item.embedding_id  # Include embedding_id
                 }
             return None
         finally:
@@ -384,7 +398,7 @@ class Database:
                 'checkLLM': 'gemini-1.5-pro-002',
                 'embeddingsModel': 'models/text-embedding-004',
                 'titleGenerationLLM': 'gemini-1.5-pro-002',
-                'characterExtractionLLM': 'gemini-1.5-pro-002',
+                'CodexExtractionLLM': 'gemini-1.5-pro-002',
                 'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
             }
         finally:
@@ -514,7 +528,7 @@ class Database:
         finally:
             session.close()
 
-    # Add methods to update embedding_id for existing chapters and characters 
+    # Add methods to update embedding_id for existing chapters and codex_items 
 
     def update_chapter_embedding_id(self, chapter_id, embedding_id):
         session = self.get_session()
@@ -532,18 +546,18 @@ class Database:
         finally:
             session.close()
 
-    def update_character_embedding_id(self, character_id, embedding_id):
+    def update_codex_item_embedding_id(self, item_id, embedding_id):
         session = self.get_session()
         try:
-            character = session.query(Character).filter_by(id=character_id).first()
-            if character:
-                character.embedding_id = embedding_id
+            codex_item = session.query(CodexItem).filter_by(id=item_id).first()
+            if codex_item:
+                codex_item.embedding_id = embedding_id
                 session.commit()
                 return True
             return False
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error updating character embedding_id: {str(e)}")
+            self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
             raise
         finally:
             session.close()
