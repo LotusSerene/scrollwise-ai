@@ -93,7 +93,7 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
-      await http.post(
+      await http.put(
         Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
         headers: headers,
         body: utf8.encode(json.encode({'chatHistory': _chatHistory})),
