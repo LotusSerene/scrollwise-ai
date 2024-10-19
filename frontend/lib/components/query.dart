@@ -29,7 +29,7 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/knowledge-base/chat-history?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
