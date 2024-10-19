@@ -78,8 +78,8 @@ class _CreateChapterState extends State<CreateChapter> {
           'minWordCount': _minWordCount,
           'additionalInstructions': _additionalInstructions,
         },
-        'project_id': widget.projectId,
       };
+      requestBody['project_id'] = widget.projectId;
 
       final response = await http.post(
         Uri.parse('$apiUrl/presets/'),
