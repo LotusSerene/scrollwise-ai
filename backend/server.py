@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import HTTPException
 from pydantic import ValidationError
 from fastapi.encoders import jsonable_encoder
+from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -143,7 +144,7 @@ class PresetUpdate(BaseModel): # New model for updating presets
 class ProjectCreate(BaseModel):
     name: str
     description: str
-    universe_id: str
+    universe_id: Optional[str] = None  # Make universe_id optional
 
 class ProjectUpdate(BaseModel):
     name: str
@@ -322,20 +323,20 @@ async def register(user: User):
 
 # Chapter routes
 
-generation_tasks = {} # Dictionary to store generation tasks by user ID
+generation_tasks = defaultdict(dict)
 
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: ChapterGenerationRequest,
     project_id: str,
     current_user: User = Depends(get_current_active_user),
-    background_tasks: BackgroundTasks = BackgroundTasks() # Add background_tasks parameter
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     try:
-        user_id = current_user.id # Get the user ID
+        user_id = current_user.id
 
-        if user_id in generation_tasks and not generation_tasks[user_id].done(): # Check if a task is already running for this user
-            raise HTTPException(status_code=400, detail="Chapter generation already in progress.")
+        if project_id in generation_tasks[user_id] and not generation_tasks[user_id][project_id].done():
+            raise HTTPException(status_code=400, detail="Chapter generation already in progress for this project.")
 
         agent_manager = AgentManager(current_user.id, project_id)
         previous_chapters = db_instance.get_all_chapters(current_user.id, project_id)
@@ -466,41 +467,55 @@ async def generate_chapters(
                             'validity': validity, 
                             'newCodexItems': new_codex_items
                         }) + '\n'
-                        logging.debug("Final chunk sent")
 
+                    except asyncio.CancelledError:
+                        logging.info(f"Generation cancelled for user {user_id}, project {project_id}")
+                        yield json.dumps({'type': 'cancelled'}) + '\n'
+                        return
                     except Exception as e:
                         logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
                         yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
-
                 yield json.dumps({'type': 'done'}) + '\n'
-
             except Exception as e:
                 logging.error(f"Error in generate function: {str(e)}")
                 yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
             finally:
-                logging.debug("Generate function completed")
-                del generation_tasks[user_id] # Remove the task from the dictionary after completion or error
+                logging.debug(f"Generate function completed for user {user_id}, project {project_id}")
+                if project_id in generation_tasks[user_id]:
+                    del generation_tasks[user_id][project_id]
 
-        generation_tasks[user_id] = asyncio.create_task(generate()) # Store the task in the dictionary
-        background_tasks.add_task(generation_tasks[user_id]) # Add the task to background tasks
+        generation_task = asyncio.create_task(generate())
+        generation_tasks[user_id][project_id] = generation_task
+        background_tasks.add_task(await_and_log_exceptions, generation_task, user_id, project_id)
+
         return StreamingResponse(generate(), media_type="application/json")
 
-    except HTTPException as e: # Re-raise HTTPExceptions
+    except HTTPException as e:
         raise e
     except Exception as e:
         logging.error(f"Error in generate_chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+async def await_and_log_exceptions(task, user_id, project_id):
+    try:
+        await task
+    except asyncio.CancelledError:
+        logging.info(f"Task cancelled for user {user_id}, project {project_id}")
+    except Exception as e:
+        logging.error(f"Error in background task for user {user_id}, project {project_id}: {str(e)}")
+    finally:
+        if project_id in generation_tasks[user_id]:
+            del generation_tasks[user_id][project_id]
 
 @chapter_router.post("/cancel")
 async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
-    user_id = current_user.id # Get the user ID
-    if user_id in generation_tasks:
-        generation_tasks[user_id].cancel()
-        del generation_tasks[user_id] # Remove the task from the dictionary after cancellation
+    user_id = current_user.id
+    if project_id in generation_tasks[user_id]:
+        generation_tasks[user_id][project_id].cancel()
+        del generation_tasks[user_id][project_id]
         return {"message": "Generation cancelled"}
     else:
-        return {"message": "No generation in progress"}
+        return {"message": "No generation in progress for this project"}
 
 
 @chapter_router.get("/{chapter_id}")
@@ -874,8 +889,12 @@ async def delete_preset(preset_name: str, current_user: User = Depends(get_curre
 # Add these routes
 @project_router.post("/")
 async def create_project(project: ProjectCreate, current_user: User = Depends(get_current_active_user)):
-    project_id = db_instance.create_project(project.name, project.description, current_user.id)
-    return {"message": "Project created successfully", "project_id": project_id}
+    try:
+        project_id = db_instance.create_project(project.name, project.description, current_user.id, project.universe_id)
+        return {"message": "Project created successfully", "project_id": project_id}
+    except Exception as e:
+        logger.error(f"Error creating project: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating project: {str(e)}")
 
 @project_router.get("/")
 async def get_projects(current_user: User = Depends(get_current_active_user)):
@@ -903,9 +922,13 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
 
-@project_router.put("/{project_id}/universe", response_model=Dict[str, Any])
-async def update_project_universe(project_id: str, universe_id: str, current_user: User = Depends(get_current_active_user)):
+@project_router.put("/{project_id}/universe")
+async def update_project_universe(project_id: str, universe: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
     try:
+        universe_id = universe.get('universe_id')
+        if universe_id is None:
+            raise HTTPException(status_code=400, detail="universe_id is required")
+        
         updated_project = db_instance.update_project_universe(project_id, universe_id, current_user.id)
         if not updated_project:
             raise HTTPException(status_code=404, detail="Project not found")
