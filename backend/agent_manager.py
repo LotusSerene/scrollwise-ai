@@ -38,7 +38,7 @@ class CodexItem(BaseModel):
     name: str = Field(default="", description="Name of the codex item")
     description: str = Field(default="", description="Description of the codex item")
     type: str = Field(default="lore", description="Type of the codex item (e.g., lore, worldbuilding, item, character)")
-    subtype: Optional[str] = Field(default=None, description="Subtype of the codex item (e.g., history, culture, geography)")
+    subtype: Optional[str] = Field(default=None, description="Subtype of the codex item (e.g., history, culture, geography, lore)")
 
 class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")

@@ -23,7 +23,7 @@ class _CodexGenerationState extends State<CodexGeneration> {
   bool _isGenerating = false;
   Map<String, dynamic>? _generatedItem;
 
-  final List<String> _types = ['worldbuilding', 'character', 'item'];
+  final List<String> _types = ['worldbuilding', 'character', 'item', 'lore'];
   final Map<String, List<String>> _subtypes = {
     'worldbuilding': ['history', 'culture', 'geography'],
   };
