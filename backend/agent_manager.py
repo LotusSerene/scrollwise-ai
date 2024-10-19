@@ -451,7 +451,7 @@ class AgentManager:
         self.logger.info(f"Generated response. Number of source documents: {len(source_documents)}")
 
         # Format the response with source information
-        response = f"{answer}\n\nSources:\n"
+        response = f"{answer}\n\n\n"
         for i, doc in enumerate(source_documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
 

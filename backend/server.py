@@ -302,6 +302,9 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
             content=jsonable_encoder({"detail": str(e)}),
             status_code=500
         )
+    
+
+
 
 # Auth routes
 @auth_router.post("/token", response_model=Token)
@@ -873,6 +876,19 @@ async def reset_chat_history(project_id: str, current_user: User = Depends(get_c
     agent_manager.reset_memory()
     return {"message": "Chat history reset successfully"}
 
+# Settings routes
+@settings_router.post("/api-key")
+async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)):
+    db_instance.save_api_key(current_user.id, api_key_update.apiKey)
+    return {"message": "API key saved successfully"}
+
+@settings_router.get("/api-key")
+async def check_api_key(current_user: User = Depends(get_current_active_user)):
+    api_key = db_instance.get_api_key(current_user.id)
+    is_set = bool(api_key)
+    masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
+    return {"isSet": is_set, "apiKey": masked_key}
+
 @settings_router.delete("/api-key")
 async def remove_api_key(current_user: User = Depends(get_current_active_user)):
     db_instance.remove_api_key(current_user.id)
@@ -949,6 +965,23 @@ async def delete_preset(preset_name: str, project_id: str, current_user: User = 
     except Exception as e:
         logger.error(f"Error deleting preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Project Routes
+
+@project_router.put("/{project_id}/universe")
+async def update_project_universe(project_id: str, universe: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
+    try:
+        universe_id = universe.get('universe_id')
+        if universe_id is None:
+            raise HTTPException(status_code=400, detail="universe_id is required")
+        
+        updated_project = db_instance.update_project_universe(project_id, universe_id, current_user.id)
+        if not updated_project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return updated_project
+    except Exception as e:
+        logger.error(f"Error updating project universe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @project_router.post("/")
 async def create_project(project: ProjectCreate, current_user: User = Depends(get_current_active_user)):
