@@ -776,10 +776,44 @@ class Database:
         finally:
             session.close()
 
-    def get_universe_knowledge_base(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        # Implement this method based on how you store knowledge base items
-        # This is a placeholder implementation
-        return []
+    def get_universe_knowledge_base(self, universe_id: str, user_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        session = self.get_session()
+        try:
+            # Fetch all projects for the given universe
+            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
+            project_ids = [project.id for project in projects]
+
+            # Initialize the result dictionary
+            knowledge_base = {project.id: [] for project in projects}
+
+            # Fetch all chapters for these projects
+            chapters = session.query(Chapter).filter(Chapter.project_id.in_(project_ids)).all()
+            for chapter in chapters:
+                knowledge_base[chapter.project_id].append({
+                    'id': chapter.id,
+                    'type': 'chapter',
+                    'title': chapter.title,
+                    'content': chapter.content,
+                    'embedding_id': chapter.embedding_id
+                })
+
+            # Fetch all codex items for these projects
+            codex_items = session.query(CodexItem).filter(CodexItem.project_id.in_(project_ids)).all()
+            for item in codex_items:
+                knowledge_base[item.project_id].append({
+                    'id': item.id,
+                    'type': 'codex_item',
+                    'name': item.name,
+                    'description': item.description,
+                    'embedding_id': item.embedding_id
+                })
+
+            # Remove any empty projects
+            knowledge_base = {k: v for k, v in knowledge_base.items() if v}
+
+            return knowledge_base
+        finally:
+            session.close()
 
     def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         session = self.get_session()

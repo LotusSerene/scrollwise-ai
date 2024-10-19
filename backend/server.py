@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import logging
 import asyncio
@@ -34,8 +34,6 @@ logger = logging.getLogger(__name__)
 # FastAPI app
 app = FastAPI(title="Novel AI API", version="1.0.0")
 
-
-
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -67,7 +65,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
-    user_id: Optional[str] = None # Add user_id to TokenData
+    user_id: Optional[str] = None  # Add user_id to TokenData
 
 class User(BaseModel):
     username: str
@@ -137,7 +135,7 @@ class PresetCreate(BaseModel):
     name: str
     data: Dict[str, Any]
 
-class PresetUpdate(BaseModel): # New model for updating presets
+class PresetUpdate(BaseModel):  # New model for updating presets
     name: str
     data: ChapterGenerationRequest
 
@@ -158,18 +156,27 @@ class UniverseCreate(BaseModel):
 class UniverseUpdate(BaseModel):
     name: str
 
+class CodexItemGenerateRequest(BaseModel):
+    codex_type: str = Field(..., description="Type of codex item (all, worldbuilding, character, item)")
+    subtype: Optional[str] = Field(None, description="Subtype of codex item (only for worldbuilding)")
+    description: str = Field(..., description="Description of the codex item")
+
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 def get_user(username: str):
     user_dict = db_instance.get_user_by_email(username)
     if user_dict:
         return UserInDB(**user_dict)
     return None
+
 
 def authenticate_user(username: str, password: str):
     user = get_user(username)
@@ -178,6 +185,7 @@ def authenticate_user(username: str, password: str):
     if not verify_password(password, user.hashed_password):
         return False
     return user
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -193,6 +201,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         logging.error(f"Error encoding JWT: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=401,
@@ -202,10 +211,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        user_id: str = payload.get("user_id") # Get user_id from payload
+        user_id: str = payload.get("user_id")  # Get user_id from payload
         if username is None or user_id is None:
             raise credentials_exception
-        token_data = TokenData(username=username, user_id=user_id) # Include user_id in TokenData
+        token_data = TokenData(username=username, user_id=user_id)  # Include user_id in TokenData
     except JWTError:
         raise credentials_exception
     user = get_user(username=token_data.username)
@@ -213,10 +222,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return user
 
+
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
 
 # Create API routers
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -224,9 +235,12 @@ chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
 codex_item_router = APIRouter(prefix="/codex-items", tags=["Codex Items"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
-preset_router = APIRouter(prefix="/presets", tags=["Presets"]) # New router for presets
+preset_router = APIRouter(prefix="/presets", tags=["Presets"])  # New router for presets
 project_router = APIRouter(prefix="/projects", tags=["Projects"])
 universe_router = APIRouter(prefix="/universes", tags=["Universes"])
+codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for codex
+
+
 
 # Universe routes
 @universe_router.post("/", response_model=str)
@@ -304,13 +318,14 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             )
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires # Include user_id in JWT payload
+            data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires  # Include user_id in JWT payload
         )
         logging.debug(f"Access token created for user: {user.username}")
         return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
         logging.error(f"Error in login_for_access_token: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @auth_router.post("/register", status_code=201)
 async def register(user: User):
@@ -321,9 +336,11 @@ async def register(user: User):
     user_id = db_instance.create_user(user.username, hashed_password)
     return {"message": "User registered successfully", "user_id": user_id}
 
+
 # Chapter routes
 
 generation_tasks = defaultdict(dict)
+
 
 @chapter_router.post("/generate")
 async def generate_chapters(
@@ -349,152 +366,152 @@ async def generate_chapters(
         }
 
         async def generate():
+            chunks = []
             try:
                 for i in range(request.numChapters):
                     chapter_number = len(previous_chapters) + i + 1
-                    try:
-                        # Send a starting message
-                        yield json.dumps({'type': 'start', 'chapterNumber': chapter_number}) + '\n'
+                    chunks.append(json.dumps({'type': 'start', 'chapterNumber': chapter_number}))
 
-                        chapter_content = ""
-                        async for chunk in agent_manager.generate_chapter_stream(
-                            chapter_number=chapter_number,
-                            plot=request.plot,
-                            writing_style=request.writingStyle,
-                            instructions=instructions,
-                            previous_chapters=previous_chapters,
-                            codex_items=codex_items
-                        ):
-                            if isinstance(chunk, dict) and 'content' in chunk:
-                                chapter_content += chunk['content']
-                            yield json.dumps(chunk) + '\n'
+                    chapter_content = ""
+                    async for chunk in agent_manager.generate_chapter_stream(
+                        chapter_number=chapter_number,
+                        plot=request.plot,
+                        writing_style=request.writingStyle,
+                        instructions=instructions,
+                        previous_chapters=previous_chapters,
+                        codex_items=codex_items
+                    ):
+                        if isinstance(chunk, dict) and 'content' in chunk:
+                            chapter_content += chunk['content']
+                        chunks.append(json.dumps(chunk))
 
-                        logging.debug(f"Chapter {chapter_number} content generated")
+                    logging.debug(f"Chapter {chapter_number} content generated")
 
-                        logging.debug("Generating title")
-                        chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                        logging.debug(f"Title generated: {chapter_title}")
+                    logging.debug("Generating title")
+                    chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
+                    logging.debug(f"Title generated: {chapter_title}")
 
-                        logging.debug("Checking chapter")
-                        validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                        logging.debug("Chapter checked")
+                    logging.debug("Checking chapter")
+                    validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
+                    logging.debug("Chapter checked")
 
-                        logging.debug("Extracting new codex items")
-                        new_codex_items = agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
-                        logging.debug(f"New codex items extracted: {new_codex_items}")
+                    logging.debug("Extracting new codex items")
+                    new_codex_items = agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
+                    logging.debug(f"New codex items extracted: {new_codex_items}")
 
-                        logging.debug("Saving new codex items")
-                        for item in new_codex_items:
-                            item_id = await db_instance.create_codex_item(
-                                item['name'],
-                                item['description'],
-                                item['type'],
-                                item['subtype'],
-                                current_user.id,
-                                project_id
-                            )
-                            # Add new codex item to knowledge base
-                            embedding_id = agent_manager.add_to_knowledge_base(
-                                "codex_item",
-                                item['description'],
-                                {
-                                    "name": item['name'],
-                                    "id": item_id,
-                                    "type": item['type'],
-                                    "subtype": item['subtype']
-                                }
-                            )
-                            # Update the codex item with the embedding_id
-                            db_instance.update_codex_item_embedding_id(item_id, embedding_id)
-                            # Add the new codex item to the codex_items list
-                            codex_items.append({
-                                "id": item_id,
-                                "name": item['name'],
-                                "description": item['description'],
-                                "type": item['type'],
-                                "subtype": item['subtype'],
-                                "embedding_id": embedding_id
-                            })
-
-                        logging.debug("New codex items saved and added to knowledge base")
-
-                        logging.debug("Saving chapter")
-                        new_chapter = await db_instance.create_chapter(
-                            chapter_title,  # No encoding/decoding
-                            chapter_content,  # No encoding/decoding
+                    logging.debug("Saving new codex items")
+                    for item in new_codex_items:
+                        item_id = await db_instance.create_codex_item(
+                            item['name'],
+                            item['description'],
+                            item['type'],
+                            item['subtype'],
                             current_user.id,
                             project_id
                         )
-                        logging.debug(f"Chapter saved with id: {new_chapter['id']}")
-
-                        # Add generated chapter to knowledge base
+                        # Add new codex item to knowledge base
                         embedding_id = agent_manager.add_to_knowledge_base(
-                            "chapter",
-                            chapter_content,
+                            "codex_item",
+                            item['description'],
                             {
-                                "title": chapter_title,
-                                "id": new_chapter['id'],
-                                "type": "chapter"
+                                "name": item['name'],
+                                "id": item_id,
+                                "type": item['type'],
+                                "subtype": item['subtype']
                             }
                         )
+                        # Update the codex item with the embedding_id
+                        db_instance.update_codex_item_embedding_id(item_id, embedding_id)
+                        # Add the new codex item to the codex_items list
+                        codex_items.append({
+                            "id": item_id,
+                            "name": item['name'],
+                            "description": item['description'],
+                            "type": item['type'],
+                            "subtype": item['subtype'],
+                            "embedding_id": embedding_id
+                        })
 
-                        # Update the chapter with the embedding_id
-                        db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+                    logging.debug("New codex items saved and added to knowledge base")
 
-                        logging.debug("Saving validity check")
-                        await db_instance.save_validity_check(
-                            chapter_id=str(new_chapter['id']),
-                            chapter_title=str(chapter_title),
-                            is_valid=bool(validity['is_valid']),
-                            feedback=str(validity['feedback']),
-                            review=str(validity.get('review', '')),
-                            style_guide_adherence=bool(validity['style_guide_adherence']),
-                            style_guide_feedback=str(validity.get('style_guide_feedback', '')),
-                            continuity=bool(validity['continuity']),
-                            continuity_feedback=str(validity.get('continuity_feedback', '')),
-                            test_results=str(validity.get('test_results', '')),
-                            user_id=current_user.id,
-                            project_id=project_id
-                        )
-                        logging.debug("Validity check saved")
+                    logging.debug("Saving chapter")
+                    new_chapter = await db_instance.create_chapter(
+                        chapter_title,  # No encoding/decoding
+                        chapter_content,  # No encoding/decoding
+                        current_user.id,
+                        project_id
+                    )
+                    logging.debug(f"Chapter saved with id: {new_chapter['id']}")
 
-                        logging.debug("Preparing final chunk")
-                        yield json.dumps({
-                            'type': 'final', 
-                            'chapterId': new_chapter['id'], 
-                            'title': chapter_title, 
-                            'content': chapter_content,
-                            'validity': validity, 
-                            'newCodexItems': new_codex_items
-                        }) + '\n'
+                    # Add generated chapter to knowledge base
+                    embedding_id = agent_manager.add_to_knowledge_base(
+                        "chapter",
+                        chapter_content,
+                        {
+                            "title": chapter_title,
+                            "id": new_chapter['id'],
+                            "type": "chapter"
+                        }
+                    )
 
-                    except asyncio.CancelledError:
-                        logging.info(f"Generation cancelled for user {user_id}, project {project_id}")
-                        yield json.dumps({'type': 'cancelled'}) + '\n'
-                        return
-                    except Exception as e:
-                        logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                        yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
-                yield json.dumps({'type': 'done'}) + '\n'
+                    # Update the chapter with the embedding_id
+                    db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+
+                    logging.debug("Saving validity check")
+                    await db_instance.save_validity_check(
+                        chapter_id=str(new_chapter['id']),
+                        chapter_title=str(chapter_title),
+                        is_valid=bool(validity['is_valid']),
+                        feedback=str(validity['feedback']),
+                        review=str(validity.get('review', '')),
+                        style_guide_adherence=bool(validity['style_guide_adherence']),
+                        style_guide_feedback=str(validity.get('style_guide_feedback', '')),
+                        continuity=bool(validity['continuity']),
+                        continuity_feedback=str(validity.get('continuity_feedback', '')),
+                        test_results=str(validity.get('test_results', '')),
+                        user_id=current_user.id,
+                        project_id=project_id
+                    )
+                    logging.debug("Validity check saved")
+
+                    logging.debug("Preparing final chunk")
+                    chunks.append(json.dumps({
+                        'type': 'final', 
+                        'chapterId': new_chapter['id'], 
+                        'title': chapter_title, 
+                        'content': chapter_content,
+                        'validity': validity, 
+                        'newCodexItems': new_codex_items
+                    }))
+
+                chunks.append(json.dumps({'type': 'done'}))
             except Exception as e:
                 logging.error(f"Error in generate function: {str(e)}")
-                yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
+                chunks.append(json.dumps({'type': 'error', 'message': str(e)}))
             finally:
                 logging.debug(f"Generate function completed for user {user_id}, project {project_id}")
                 if project_id in generation_tasks[user_id]:
                     del generation_tasks[user_id][project_id]
+            
+            return chunks
 
         generation_task = asyncio.create_task(generate())
         generation_tasks[user_id][project_id] = generation_task
         background_tasks.add_task(await_and_log_exceptions, generation_task, user_id, project_id)
 
-        return StreamingResponse(await generate(), media_type="application/json")
+        async def stream_response():
+            chunks = await generation_task
+            for chunk in chunks:
+                yield chunk + '\n'
+
+        return StreamingResponse(stream_response(), media_type="application/json")
 
     except HTTPException as e:
         raise e
     except Exception as e:
         logging.error(f"Error in generate_chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 async def await_and_log_exceptions(task, user_id, project_id):
     try:
@@ -506,6 +523,7 @@ async def await_and_log_exceptions(task, user_id, project_id):
     finally:
         if project_id in generation_tasks[user_id]:
             del generation_tasks[user_id][project_id]
+
 
 @chapter_router.post("/cancel")
 async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -524,12 +542,13 @@ async def get_chapter(chapter_id: str, project_id: str, current_user: User = Dep
         chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
-        
-        
+
+
         return chapter
     except Exception as e:
         logging.error(f"Error fetching chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @chapter_router.get("/")
 async def get_chapters(project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -540,6 +559,7 @@ async def get_chapters(project_id: str, current_user: User = Depends(get_current
         logger.error(f"Error fetching chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @chapter_router.post("/")
 async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
@@ -549,7 +569,7 @@ async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: 
             current_user.id,
             project_id
         )
-        
+
         # Add to knowledge base
         agent_manager = AgentManager(current_user.id, project_id)
         embedding_id = agent_manager.add_to_knowledge_base(
@@ -561,7 +581,7 @@ async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: 
                 "type": "chapter"
             }
         )
-        
+
         # Update the chapter with the embedding_id
         db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
@@ -569,14 +589,15 @@ async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: 
     except Exception as e:
         logger.error(f"Error creating chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-    
+
+
 @chapter_router.put("/{chapter_id}")
 async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         existing_chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not existing_chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
-        
+
         updated_chapter = db_instance.update_chapter(
             chapter_id,
             chapter.title,  # Removed encoding/decoding
@@ -584,13 +605,13 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: st
             current_user.id,
             project_id
         )
-        
+
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id, project_id)
         agent_manager.update_or_remove_from_knowledge_base(
-            existing_chapter['embedding_id'], 
-            'update', 
-            new_content=chapter.content, 
+            existing_chapter['embedding_id'],
+            'update',
+            new_content=chapter.content,
             new_metadata={"title": chapter.title, "id": chapter_id, "type": "chapter"}
         )
 
@@ -599,66 +620,112 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: st
         logger.error(f"Error updating chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @chapter_router.delete("/{chapter_id}")
 async def delete_chapter(chapter_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
-        
+
         # Delete from knowledge base if embedding_id exists
         if chapter.get('embedding_id'):
             agent_manager = AgentManager(current_user.id, project_id)
             agent_manager.update_or_remove_from_knowledge_base(chapter['embedding_id'], 'delete')
         else:
             logging.warning(f"No embedding_id found for chapter {chapter_id}. Skipping knowledge base deletion.")
-        
+
         # Delete from database
         db_instance.delete_chapter(chapter_id, current_user.id, project_id)
-        
+
         return {"message": "Chapter deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Codex Item routes
-@codex_item_router.get("/")
-async def get_codex_items(project_id: str, current_user: User = Depends(get_current_active_user)):
-    codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
-    return {"codex_items": codex_items}
 
-@codex_item_router.post("/")
-async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
+# Codex routes
+
+@codex_router.post("/generate", response_model=Dict[str, Any])
+async def generate_codex_item(
+    request: CodexItemGenerateRequest,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
     try:
+        agent_manager = AgentManager(current_user.id, project_id)
+        generated_item = await agent_manager.generate_codex_item(
+            request.codex_type, request.subtype, request.description
+        )
+        
+        # Save to database
         item_id = await db_instance.create_codex_item(
-            codex_item.name, 
-            codex_item.description, 
-            codex_item.type,
-            codex_item.subtype, 
+            generated_item["name"],
+            generated_item["description"],
+            request.codex_type,
+            request.subtype,
             current_user.id,
             project_id
         )
         
         # Add to knowledge base
+        embedding_id = agent_manager.add_to_knowledge_base(
+            "codex_item",
+            generated_item["description"],
+            {
+                "name": generated_item["name"],
+                "id": item_id,
+                "type": request.codex_type,
+                "subtype": request.subtype
+            }
+        )
+        
+        db_instance.update_codex_item_embedding_id(item_id, embedding_id)
+        
+        return {"message": "Codex item generated successfully", "item": generated_item, "id": item_id, "embedding_id": embedding_id}
+    except Exception as e:
+        logger.error(f"Error generating codex item: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating codex item: {str(e)}")
+
+@codex_item_router.get("/")
+async def get_codex_items(project_id: str, current_user: User = Depends(get_current_active_user)):
+    codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
+    return {"codex_items": codex_items}
+
+
+@codex_item_router.post("/")
+async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        item_id = await db_instance.create_codex_item(
+            codex_item.name,
+            codex_item.description,
+            codex_item.type,
+            codex_item.subtype,
+            current_user.id,
+            project_id
+        )
+
+        # Add to knowledge base
         agent_manager = AgentManager(current_user.id, project_id)
         embedding_id = agent_manager.add_to_knowledge_base(
-            "codex_item", 
-            codex_item.description, 
+            "codex_item",
+            codex_item.description,
             {
-                "name": codex_item.name, 
-                "id": item_id, 
+                "name": codex_item.name,
+                "id": item_id,
                 "type": codex_item.type,
                 "subtype": codex_item.subtype
             }
         )
-        
+
         # Update the codex_item with the embedding_id
         db_instance.update_codex_item_embedding_id(item_id, embedding_id)
-        
+
         return {"message": "Codex item created successfully", "id": item_id, "embedding_id": embedding_id}
     except Exception as e:
         logger.error(f"Error creating codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @codex_item_router.put("/{item_id}")
 async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -666,9 +733,9 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
         existing_item = db_instance.get_codex_item_by_id(item_id, current_user.id, project_id)
         if not existing_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
-        
+
         updated_item = db_instance.update_codex_item(item_id, codex_item.name, codex_item.description, codex_item.type, codex_item.subtype, current_user.id, project_id)
-        
+
         # Update in knowledge base
         agent_manager = AgentManager(current_user.id, project_id)
         if existing_item.get('embedding_id'):
@@ -678,11 +745,11 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
                 "type": codex_item.type,
                 "subtype": codex_item.subtype  # This can be None, which will remove the field if it exists
             }
-            
+
             agent_manager.update_or_remove_from_knowledge_base(
-                existing_item['embedding_id'], 
-                'update', 
-                new_content=codex_item.description, 
+                existing_item['embedding_id'],
+                'update',
+                new_content=codex_item.description,
                 new_metadata=metadata
             )
         else:
@@ -693,7 +760,7 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
                 "type": codex_item.type,
                 "subtype": codex_item.subtype
             }
-            
+
             embedding_id = agent_manager.add_to_knowledge_base("codex_item", codex_item.description, metadata)
             db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
@@ -702,20 +769,21 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
         logger.error(f"Error updating codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @codex_item_router.delete("/{item_id}")
 async def delete_codex_item(item_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         codex_item = db_instance.get_codex_item_by_id(item_id, current_user.id, project_id)
         if not codex_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
-        
+
         # Delete from knowledge base if embedding_id exists
         if codex_item.get('embedding_id'):
             agent_manager = AgentManager(current_user.id, project_id)
             agent_manager.update_or_remove_from_knowledge_base(codex_item['embedding_id'], 'delete')
         else:
             logging.warning(f"No embedding_id found for codex item {item_id}. Skipping knowledge base deletion.")
-        
+
         # Delete from database
         deleted = db_instance.delete_codex_item(item_id, current_user.id, project_id)
         if deleted:
@@ -946,6 +1014,8 @@ app.include_router(settings_router)
 app.include_router(preset_router)
 app.include_router(project_router)
 app.include_router(universe_router)
+app.include_router(codex_router)  # Make sure this line is present
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

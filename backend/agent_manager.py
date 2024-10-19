@@ -16,6 +16,7 @@ import logging
 import uuid
 from database import db_instance
 from pydantic import BaseModel, Field
+
 import json
 # Load environment variables
 load_dotenv()
@@ -41,6 +42,11 @@ class CodexItem(BaseModel):
 
 class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
+
+
+class GeneratedCodexItem(BaseModel):
+    name: str = Field(description="Name of the codex item")
+    description: str = Field(description="Detailed description of the codex item")
 
 class AgentManager:
     def __init__(self, user_id: str, project_id: str):
@@ -620,3 +626,48 @@ class AgentManager:
         except Exception as e:
             self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
             return []
+
+    async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
+        self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
+        try:
+            parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['mainLLM']))
+            
+            prompt = ChatPromptTemplate.from_template("""
+            You are an expert at creating new codex items for stories. 
+            Create a new codex item with the following type, subtype, and description:
+
+            Type: {codex_type}
+            Subtype: {subtype}
+            Description: {description}
+
+            Create a concise and creative name for the codex item. 
+            Then, write a detailed description of the codex item, expanding on the provided description. 
+            Ensure that the name and description are consistent with the provided type and subtype.
+
+            {format_instructions}
+            """)
+            
+            llm = self._initialize_llm(self.model_settings['mainLLM'])
+            chain = prompt | llm | fixing_parser
+            
+            result = await chain.ainvoke({
+                "codex_type": codex_type,
+                "subtype": subtype or "N/A",
+                "description": description,
+                "format_instructions": parser.get_format_instructions()
+            })
+            
+            self.logger.debug(f"Generated codex item: {result}")
+            
+            if not isinstance(result, GeneratedCodexItem):
+                raise ValueError("Invalid result type from chain.invoke")
+            
+            return {"name": result.name, "description": result.description}
+
+        except Exception as e:
+            self.logger.error(f"Error generating codex item: {str(e)}", exc_info=True)
+            return {
+                "name": "Error generating codex item",
+                "description": f"An error occurred: {str(e)}"
+            }
