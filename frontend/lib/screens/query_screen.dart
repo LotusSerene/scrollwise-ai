@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../components/query.dart';
 
 class QueryScreen extends StatelessWidget {

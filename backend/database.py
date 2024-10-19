@@ -478,10 +478,22 @@ class Database:
         session = self.get_session()
         try:
             chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
+            
+            # Convert ChatHistoryItem objects to dictionaries
+            serializable_messages = [
+                {"type": msg["type"], "content": msg["content"]}
+                for msg in messages
+            ]
+            
             if chat_history:
-                chat_history.messages = json.dumps(messages)
+                chat_history.messages = json.dumps(serializable_messages)
             else:
-                chat_history = ChatHistory(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, messages=json.dumps(messages))
+                chat_history = ChatHistory(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    project_id=project_id,
+                    messages=json.dumps(serializable_messages)
+                )
                 session.add(chat_history)
             session.commit()
         except Exception as e:
@@ -641,13 +653,14 @@ class Database:
         finally:
             session.close()
 
-    def update_project(self, project_id: str, name: str, description: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def update_project(self, project_id: str, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         session = self.get_session()
         try:
             project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
             if project:
                 project.name = name
                 project.description = description
+                project.universe_id = universe_id
                 project.updated_at = datetime.datetime.now(timezone.utc)  # Use timezone-aware UTC time
                 session.commit()
                 return project.to_dict()
@@ -831,3 +844,4 @@ def get_chapter_count(user_id):
         return session.query(Chapter).filter_by(user_id=user_id).count()
     finally:
         session.close()
+

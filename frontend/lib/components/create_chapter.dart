@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:fluttertoast/fluttertoast.dart';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
+import '../providers/preset_provider.dart';
+import 'package:provider/provider.dart';
 
 class CreateChapter extends StatefulWidget {
   final String projectId;
@@ -16,18 +18,18 @@ class CreateChapter extends StatefulWidget {
 
 class _CreateChapterState extends State<CreateChapter> {
   final _formKey = GlobalKey<FormState>();
+  final TextEditingController _plotController = TextEditingController();
+  final TextEditingController _writingStyleController = TextEditingController();
+  final TextEditingController _styleGuideController = TextEditingController();
+  final TextEditingController _minWordCountController = TextEditingController();
+  final TextEditingController _additionalInstructionsController =
+      TextEditingController();
+  final TextEditingController _newPresetNameController =
+      TextEditingController();
+
   int _numChapters = 1;
-  String _plot = '';
-  String _writingStyle = '';
-  String _styleGuide = '';
-  int _minWordCount = 1000;
-  String _additionalInstructions = '';
   bool _isGenerating = false;
   String _streamedContent = '';
-  List<dynamic> _presets = [];
-  bool _isLoadingPresets = true;
-  String? _selectedPreset;
-  String _newPresetName = '';
   bool _isExpanded = false;
   int _currentChapter = 0;
   double _progress = 0.0;
@@ -37,141 +39,74 @@ class _CreateChapterState extends State<CreateChapter> {
   @override
   void initState() {
     super.initState();
-    _fetchPresets();
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    _updateFieldsFromPreset(presetProvider.currentPreset);
+    presetProvider.addListener(_onPresetChanged);
+
+    // Fetch presets when the widget is initialized
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      presetProvider.fetchPresets(widget.projectId);
+    });
   }
 
-  Future<void> _fetchPresets() async {
-    setState(() {
-      _isLoadingPresets = true;
-    });
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/presets?project_id=${widget.projectId}'),
-        headers: await getAuthHeaders(),
-      );
-      if (response.statusCode == 200) {
-        setState(() {
-          _presets = json.decode(response.body);
-          _isLoadingPresets = false;
-        });
-      } else {
-        throw Exception('Failed to load presets');
-      }
-    } catch (error) {
-      print('Error fetching presets: $error');
-      Fluttertoast.showToast(msg: 'Error fetching presets');
+  @override
+  void dispose() {
+    Provider.of<PresetProvider>(context, listen: false)
+        .removeListener(_onPresetChanged);
+    _plotController.dispose();
+    _writingStyleController.dispose();
+    _styleGuideController.dispose();
+    _minWordCountController.dispose();
+    _additionalInstructionsController.dispose();
+    _newPresetNameController.dispose();
+    super.dispose();
+  }
+
+  void _onPresetChanged() {
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    _updateFieldsFromPreset(presetProvider.currentPreset);
+  }
+
+  void _updateFieldsFromPreset(Map<String, dynamic>? preset) {
+    if (preset != null) {
       setState(() {
-        _isLoadingPresets = false;
+        _numChapters = preset['numChapters'] ?? 1;
+        _plotController.text = preset['plot'] ?? '';
+        _writingStyleController.text = preset['writingStyle'] ?? '';
+        _styleGuideController.text = preset['styleGuide'] ?? '';
+        _minWordCountController.text = preset['minWordCount']?.toString() ?? '';
+        _additionalInstructionsController.text =
+            preset['additionalInstructions'] ?? '';
       });
     }
   }
 
   Future<void> _handleSavePreset() async {
-    try {
-      final requestBody = {
-        'name': _newPresetName,
-        'data': {
-          'numChapters': _numChapters,
-          'plot': _plot,
-          'writingStyle': _writingStyle,
-          'styleGuide': _styleGuide,
-          'minWordCount': _minWordCount,
-          'additionalInstructions': _additionalInstructions,
-        },
-      };
-      requestBody['project_id'] = widget.projectId;
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    final newPresetName = _newPresetNameController.text;
 
-      final response = await http.post(
-        Uri.parse('$apiUrl/presets/'),
-        headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: utf8.encode(json.encode(requestBody)),
-      );
-
-      if (response.statusCode == 201) {
-        final newPreset = json.decode(response.body);
-        setState(() {
-          _presets.add(newPreset);
-          _newPresetName = '';
-        });
-        Fluttertoast.showToast(msg: 'Preset saved successfully');
-      } else {
-        final errorData = json.decode(response.body);
-        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
-      }
-    } catch (error) {
-      print('Error saving preset: $error');
-      Fluttertoast.showToast(msg: 'Error saving preset: ${error.toString()}');
-    }
-  }
-
-  Future<void> _handlePresetChange(String? presetName) async {
-    if (presetName == null) {
-      setState(() {
-        _selectedPreset = null;
-      });
+    if (newPresetName.isEmpty) {
+      Fluttertoast.showToast(msg: 'Please enter a preset name');
       return;
     }
 
-    try {
-      final response = await http.get(
-        Uri.parse(
-            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=${widget.projectId}'),
-        headers: await getAuthHeaders(),
-      );
+    final presetData = {
+      'numChapters': _numChapters,
+      'plot': _plotController.text,
+      'writingStyle': _writingStyleController.text,
+      'styleGuide': _styleGuideController.text,
+      'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
+      'additionalInstructions': _additionalInstructionsController.text,
+    };
 
-      if (response.statusCode == 200) {
-        final preset = json.decode(response.body);
-        _handleLoadPreset(preset);
-      } else {
-        throw Exception('Failed to load preset');
-      }
-    } catch (error) {
-      print('Error fetching preset: $error');
-      Fluttertoast.showToast(msg: 'Error fetching preset');
-      setState(() {
-        _selectedPreset = null;
-      });
+    try {
+      await presetProvider.savePreset(
+          newPresetName, presetData, widget.projectId);
+      Fluttertoast.showToast(msg: 'Preset saved successfully');
+      _newPresetNameController.clear();
     }
-  }
-
-  void _handleLoadPreset(Map<String, dynamic> preset) {
-    setState(() {
-      _selectedPreset = preset['name'];
-      _numChapters = preset['data']['numChapters'] ?? 1;
-      _plot = preset['data']['plot'] ?? '';
-      _writingStyle = preset['data']['writingStyle'] ?? '';
-      _styleGuide = preset['data']['styleGuide'] ?? '';
-      _minWordCount = preset['data']['minWordCount'] ?? 1000;
-      _additionalInstructions = preset['data']['additionalInstructions'] ?? '';
-    });
-    Fluttertoast.showToast(
-        msg: 'Preset "${preset['name']}" loaded successfully');
-  }
-
-  Future<void> _handleDeletePreset(String presetName) async {
-    try {
-      final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=${widget.projectId}'),
-        headers: await getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _presets.removeWhere((p) => p['name'] == presetName);
-          _selectedPreset = null;
-        });
-        Fluttertoast.showToast(msg: 'Preset deleted successfully');
-      } else {
-        final errorData = json.decode(response.body);
-        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
-      }
-    } catch (error) {
-      print('Error deleting preset: $error');
-      Fluttertoast.showToast(msg: 'Error deleting preset: ${error.toString()}');
+    catch (e) {
+      Fluttertoast.showToast(msg: 'Error saving preset: $e');
     }
   }
 
@@ -193,15 +128,15 @@ class _CreateChapterState extends State<CreateChapter> {
 
         final requestBody = {
           'numChapters': _numChapters,
-          'plot': _plot,
-          'writingStyle': _writingStyle,
-          'styleGuide': _styleGuide,
-          'minWordCount': _minWordCount,
-          'additionalInstructions': _additionalInstructions,
+          'plot': _plotController.text,
+          'writingStyle': _writingStyleController.text,
+          'styleGuide': _styleGuideController.text,
+          'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
+          'additionalInstructions': _additionalInstructionsController.text,
           'instructions': {
-            'styleGuide': _styleGuide,
-            'minWordCount': _minWordCount,
-            'additionalInstructions': _additionalInstructions,
+            'styleGuide': _styleGuideController.text,
+            'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
+            'additionalInstructions': _additionalInstructionsController.text,
           },
           'project_id': widget.projectId,
         };
@@ -293,6 +228,25 @@ class _CreateChapterState extends State<CreateChapter> {
     }
   }
 
+  void _handlePresetChange(String? newValue) {
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    if (newValue == null) {
+      presetProvider.clearSelectedPreset();
+    } else {
+      presetProvider.loadPreset(newValue, widget.projectId);
+    }
+  }
+
+  Future<void> _handleDeletePreset(String presetName) async {
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    try {
+      await presetProvider.deletePreset(presetName, widget.projectId);
+      Fluttertoast.showToast(msg: 'Preset deleted successfully');
+    } catch (error) {
+      Fluttertoast.showToast(msg: 'Error deleting preset: ${error.toString()}');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -319,7 +273,7 @@ class _CreateChapterState extends State<CreateChapter> {
                   const Text(
                     'Generate New Chapter',
                     style: TextStyle(
-                      color: Color(0xFF007bff), // Primary color for headings
+                      color: Color(0xFF007bff),
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
@@ -328,110 +282,111 @@ class _CreateChapterState extends State<CreateChapter> {
                   const Text(
                     'Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.',
                     style: TextStyle(
-                      color: Color(0xFFf8f9fa), // Light text color
+                      color: Color(0xFFf8f9fa),
                       fontSize: 16,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Presets:',
-                              style: TextStyle(
-                                color: Color(0xFFf8f9fa),
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            _isLoadingPresets
-                                ? const CircularProgressIndicator()
-                                : DropdownButtonFormField<String>(
-                                    value: _selectedPreset,
-                                    onChanged: _handlePresetChange,
-                                    items: _presets.map((preset) {
+                  Consumer<PresetProvider>(
+                    builder: (context, presetProvider, child) {
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Select Preset:',
+                                  style: TextStyle(
+                                    color: Color(0xFFf8f9fa),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                DropdownButton<String?>(
+                                  value: presetProvider.selectedPreset,
+                                  hint: Text('Select a preset'),
+                                  onChanged: _handlePresetChange,
+                                  items: [
+                                    DropdownMenuItem<String?>(
+                                      value: null,
+                                      child: Text('Select a preset'),
+                                    ),
+                                    ...presetProvider.presets
+                                        .map<DropdownMenuItem<String>>(
+                                            (String value) {
                                       return DropdownMenuItem<String>(
-                                        value: preset['name'],
-                                        child: Text(preset['name']),
+                                        value: value,
+                                        child: Text(value),
                                       );
                                     }).toList(),
-                                    decoration: const InputDecoration(
-                                      enabledBorder: OutlineInputBorder(
-                                        borderSide: BorderSide(
-                                            color: Color(0xFFced4da)),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderSide: BorderSide(
-                                            color: Color(0xFF007bff)),
-                                      ),
+                                  ],
+                                ),
+                                if (presetProvider.selectedPreset != null)
+                                  ElevatedButton(
+                                    onPressed: () => _handleDeletePreset(
+                                        presetProvider.selectedPreset!),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 20, vertical: 10),
+                                      textStyle: const TextStyle(fontSize: 16),
+                                    ),
+                                    child: const Text('Delete Preset'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Save New Preset:',
+                                  style: TextStyle(
+                                    color: Color(0xFFf8f9fa),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextFormField(
+                                  controller: _newPresetNameController,
+                                  decoration: const InputDecoration(
+                                    hintText: 'New preset name',
+                                    hintStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
                                     ),
                                   ),
-                            if (_selectedPreset != null)
-                              IconButton(
-                                onPressed: () =>
-                                    _handleDeletePreset(_selectedPreset!),
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 20),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Save Preset:',
-                              style: TextStyle(
-                                color: Color(0xFFf8f9fa),
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            TextFormField(
-                              decoration: const InputDecoration(
-                                hintText: 'Preset name',
-                                hintStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
                                 ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
+                                const SizedBox(height: 10),
+                                ElevatedButton(
+                                  onPressed: _handleSavePreset,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF007bff),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 20, vertical: 10),
+                                    textStyle: const TextStyle(fontSize: 16),
+                                  ),
+                                  child: const Text('Save Preset'),
                                 ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              onChanged: (value) {
-                                setState(() {
-                                  _newPresetName = value;
-                                });
-                              },
+                              ],
                             ),
-                            const SizedBox(height: 10),
-                            ElevatedButton(
-                              onPressed: _newPresetName.isNotEmpty
-                                  ? _handleSavePreset
-                                  : null,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF007bff),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 20, vertical: 10),
-                                textStyle: const TextStyle(fontSize: 16),
-                              ),
-                              child: const Text('Save'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 20),
                   Form(
@@ -466,6 +421,7 @@ class _CreateChapterState extends State<CreateChapter> {
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
+                          controller: _plotController,
                           decoration: const InputDecoration(
                             labelText: 'Plot',
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
@@ -478,15 +434,10 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
-                          initialValue: _plot,
-                          onChanged: (value) {
-                            setState(() {
-                              _plot = value;
-                            });
-                          },
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
+                          controller: _writingStyleController,
                           decoration: const InputDecoration(
                             labelText: 'Writing Style',
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
@@ -498,15 +449,10 @@ class _CreateChapterState extends State<CreateChapter> {
                             ),
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
-                          initialValue: _writingStyle,
-                          onChanged: (value) {
-                            setState(() {
-                              _writingStyle = value;
-                            });
-                          },
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
+                          controller: _styleGuideController,
                           decoration: const InputDecoration(
                             labelText: 'Style Guide',
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
@@ -519,15 +465,10 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
-                          initialValue: _styleGuide,
-                          onChanged: (value) {
-                            setState(() {
-                              _styleGuide = value;
-                            });
-                          },
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
+                          controller: _minWordCountController,
                           decoration: const InputDecoration(
                             labelText: 'Minimum Word Count',
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
@@ -540,12 +481,6 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           keyboardType: TextInputType.number,
-                          initialValue: _minWordCount.toString(),
-                          onChanged: (value) {
-                            setState(() {
-                              _minWordCount = int.tryParse(value) ?? 0;
-                            });
-                          },
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Please enter a number';
@@ -555,6 +490,7 @@ class _CreateChapterState extends State<CreateChapter> {
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
+                          controller: _additionalInstructionsController,
                           decoration: const InputDecoration(
                             labelText: 'Additional Instructions',
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
@@ -567,12 +503,6 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
-                          initialValue: _additionalInstructions,
-                          onChanged: (value) {
-                            setState(() {
-                              _additionalInstructions = value;
-                            });
-                          },
                         ),
                         const SizedBox(height: 20),
                         if (_isGenerating)
@@ -605,12 +535,9 @@ class _CreateChapterState extends State<CreateChapter> {
                           )
                         else
                           ElevatedButton(
-                            onPressed: _isGenerating
-                                ? null
-                                : () => _handleSubmit(context),
+                            onPressed: () => _handleSubmit(context),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(
-                                  0xFF007bff), // Primary color for button
+                              backgroundColor: const Color(0xFF007bff),
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 20, vertical: 10),
                               textStyle: const TextStyle(fontSize: 18),

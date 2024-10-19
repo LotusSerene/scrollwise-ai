@@ -397,7 +397,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     } else if (snapshot.hasError) {
                       return Text('Error: ${snapshot.error}');
                     } else {
-                      final universes = snapshot.data ?? []; // Handle null case
+                      final universes = snapshot.data ?? [];
                       return DropdownButton<String>(
                         value: project['universe_id'],
                         onChanged: (String? newValue) {
@@ -408,12 +408,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             value: null,
                             child: Text('No Universe'),
                           ),
-                          ...universes.map((universe) {
-                            return DropdownMenuItem<String>(
-                              value: universe['id'],
-                              child: Text(universe['name']),
-                            );
-                          }).toList(),
+                          if (universes.isNotEmpty)
+                            ...universes.map((universe) {
+                              return DropdownMenuItem<String>(
+                                value: universe['id'],
+                                child: Text(universe['name']),
+                              );
+                            }).toList(),
                         ],
                       );
                     }

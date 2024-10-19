@@ -147,7 +147,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str
     description: str
-    universe_id: str
+    universe_id: Optional[str] = None  # Make universe_id optional
 
 # Universe model
 class UniverseCreate(BaseModel):
@@ -160,6 +160,13 @@ class CodexItemGenerateRequest(BaseModel):
     codex_type: str = Field(..., description="Type of codex item (worldbuilding, character, item, lore)")
     subtype: Optional[str] = Field(None, description="Subtype of codex item (only for worldbuilding)")
     description: str = Field(..., description="Description of the codex item")
+
+class ChatHistoryItem(BaseModel):
+    type: str
+    content: str
+
+class ChatHistoryRequest(BaseModel):
+    chatHistory: List[ChatHistoryItem]
 
 
 # Helper functions
@@ -1006,7 +1013,7 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
 
 @project_router.put("/{project_id}")
 async def update_project(project_id: str, project: ProjectUpdate, current_user: User = Depends(get_current_active_user)):
-    updated_project = db_instance.update_project(project_id, project.name, project.description, current_user.id)
+    updated_project = db_instance.update_project(project_id, project.name, project.description, current_user.id, project.universe_id)
     if updated_project:
         return updated_project
     raise HTTPException(status_code=404, detail="Project not found")
@@ -1036,9 +1043,15 @@ async def get_chat_history(project_id: str, current_user: User = Depends(get_cur
     return {"chatHistory": chat_history}
 
 @app.post("/chat-history")
-async def save_chat_history(chat_history: List[Dict[str, str]], project_id: str, current_user: User = Depends(get_current_active_user)):
-    db_instance.save_chat_history(current_user.id, project_id, chat_history)
-    return {"message": "Chat history saved successfully"}
+async def save_chat_history(chat_history: ChatHistoryRequest, project_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        # Convert Pydantic models to dictionaries
+        chat_history_dicts = [item.dict() for item in chat_history.chatHistory]
+        db_instance.save_chat_history(current_user.id, project_id, chat_history_dicts)
+        return {"message": "Chat history saved successfully"}
+    except Exception as e:
+        logger.error(f"Error saving chat history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/knowledge-base/chat-history")
 async def get_knowledge_base_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):

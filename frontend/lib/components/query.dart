@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 
@@ -29,13 +30,15 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/knowledge-base/chat-history?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/knowledge-base/chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
         setState(() {
-          _chatHistory = List<Map<String, dynamic>>.from(jsonResponse['chatHistory']);
+          _chatHistory =
+              List<Map<String, dynamic>>.from(jsonResponse['chatHistory']);
         });
       }
     } catch (error) {
@@ -55,7 +58,8 @@ class _QueryState extends State<Query> {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse('$apiUrl/knowledge-base/query?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/knowledge-base/query?project_id=${widget.projectId}'),
         headers: headers,
         body: utf8.encode(json.encode({
           'query': _queryController.text,
@@ -74,15 +78,17 @@ class _QueryState extends State<Query> {
         // Save chat history
         await _saveChatHistory();
       } else {
+        // Remove the user's message if the request failed
         setState(() {
-          _chatHistory.removeLast(); // Remove the user's message if the request failed
+          _chatHistory.removeLast();
           _isLoading = false;
         });
         // Handle error
       }
     } catch (error) {
+      // Remove the user's message if the request failed
       setState(() {
-        _chatHistory.removeLast(); // Remove the user's message if the request failed
+        _chatHistory.removeLast();
         _isLoading = false;
       });
       // Handle error
@@ -96,10 +102,11 @@ class _QueryState extends State<Query> {
       await http.post(
         Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
         headers: headers,
-        body: utf8.encode(json.encode({'chatHistory': _chatHistory})),
+        body: json.encode({'chatHistory': _chatHistory}),
       );
     } catch (error) {
       // Handle error
+      print('Error saving chat history: $error');
     }
   }
 
@@ -127,7 +134,6 @@ class _QueryState extends State<Query> {
         children: [
           Expanded(
             child: ListView.builder(
-              reverse: true,
               itemCount: _chatHistory.length,
               itemBuilder: (context, index) {
                 final message = _chatHistory[index];
@@ -135,14 +141,16 @@ class _QueryState extends State<Query> {
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Card(
-                    color: isUser ? Colors.blue[100] : Colors.grey[200],
+                    color: isUser ? Colors.blue : const Color.fromARGB(255, 87, 87, 87),
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: Container(
-                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                        constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(context).size.width * 0.7),
                         padding: const EdgeInsets.all(8.0),
                         decoration: BoxDecoration(
-                          color: isUser ? Colors.lightBlue[100] : Colors.grey[200],
+                          color:
+                              isUser ? Colors.lightBlue : const Color.fromARGB(255, 87, 87, 87),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(message['content']),
