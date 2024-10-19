@@ -397,7 +397,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     } else if (snapshot.hasError) {
                       return Text('Error: ${snapshot.error}');
                     } else {
-                      final universes = snapshot.data!;
+                      final universes = snapshot.data ?? []; // Handle null case
                       return DropdownButton<String>(
                         value: project['universe_id'],
                         onChanged: (String? newValue) {

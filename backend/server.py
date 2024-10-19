@@ -1035,6 +1035,12 @@ app.include_router(project_router)
 app.include_router(universe_router)
 app.include_router(codex_router)
 
+@app.get("/chat-history")
+async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id, project_id)
+    chat_history = agent_manager.get_chat_history()
+    return {"chatHistory": chat_history}
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
