@@ -140,14 +140,22 @@ class PresetUpdate(BaseModel): # New model for updating presets
     name: str
     data: ChapterGenerationRequest
 
-# Add these models
 class ProjectCreate(BaseModel):
     name: str
     description: str
+    universe_id: str
 
 class ProjectUpdate(BaseModel):
     name: str
     description: str
+    universe_id: str
+
+# Universe model
+class UniverseCreate(BaseModel):
+    name: str
+
+class UniverseUpdate(BaseModel):
+    name: str
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -216,9 +224,57 @@ codex_item_router = APIRouter(prefix="/codex-items", tags=["Codex Items"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
 preset_router = APIRouter(prefix="/presets", tags=["Presets"]) # New router for presets
+project_router = APIRouter(prefix="/projects", tags=["Projects"])
+universe_router = APIRouter(prefix="/universes", tags=["Universes"])
 
-# Add a new router for projects
-project_router = APIRouter()
+# Universe routes
+@universe_router.post("/", response_model=str)
+async def create_universe(universe: UniverseCreate, current_user: User = Depends(get_current_active_user)):
+    universe_id = db_instance.create_universe(universe.name, current_user.id)
+    return universe_id
+
+@universe_router.get("/{universe_id}", response_model=Dict[str, Any])
+async def get_universe(universe_id: str, current_user: User = Depends(get_current_active_user)):
+    universe = db_instance.get_universe(universe_id, current_user.id)
+    if not universe:
+        raise HTTPException(status_code=404, detail="Universe not found")
+    return JSONResponse(content=universe)
+
+@universe_router.put("/{universe_id}", response_model=Dict[str, Any])
+async def update_universe(universe_id: str, universe: UniverseUpdate, current_user: User = Depends(get_current_active_user)):
+    updated_universe = db_instance.update_universe(universe_id, universe.name, current_user.id)
+    if not updated_universe:
+        raise HTTPException(status_code=404, detail="Universe not found")
+    return JSONResponse(content=updated_universe)
+
+@universe_router.delete("/{universe_id}", response_model=bool)
+async def delete_universe(universe_id: str, current_user: User = Depends(get_current_active_user)):
+    success = db_instance.delete_universe(universe_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Universe not found")
+    return JSONResponse(content={"success": success})
+
+@universe_router.get("/{universe_id}/codex", response_model=List[Dict[str, Any]])
+async def get_universe_codex(universe_id: str, current_user: User = Depends(get_current_active_user)):
+    codex_items = db_instance.get_universe_codex(universe_id, current_user.id)
+    return JSONResponse(content=codex_items)
+
+@universe_router.get("/{universe_id}/knowledge-base", response_model=List[Dict[str, Any]])
+async def get_universe_knowledge_base(universe_id: str, current_user: User = Depends(get_current_active_user)):
+    knowledge_base_items = db_instance.get_universe_knowledge_base(universe_id, current_user.id)
+    return JSONResponse(content=knowledge_base_items)
+
+@universe_router.get("/", response_model=List[Dict[str, Any]])
+async def get_universes(current_user: User = Depends(get_current_active_user)):
+    try:
+        universes = db_instance.get_universes(current_user.id)
+        return JSONResponse(content=universes)
+    except Exception as e:
+        logger.error(f"Error fetching universes: {str(e)}")
+        return JSONResponse(
+            content=jsonable_encoder({"detail": str(e)}),
+            status_code=500
+        )
 
 # Auth routes
 @auth_router.post("/token", response_model=Token)
@@ -254,13 +310,21 @@ async def register(user: User):
 
 # Chapter routes
 
+generation_tasks = {} # Dictionary to store generation tasks by user ID
+
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: ChapterGenerationRequest,
     project_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    background_tasks: BackgroundTasks = BackgroundTasks() # Add background_tasks parameter
 ):
     try:
+        user_id = current_user.id # Get the user ID
+
+        if user_id in generation_tasks and not generation_tasks[user_id].done(): # Check if a task is already running for this user
+            raise HTTPException(status_code=400, detail="Chapter generation already in progress.")
+
         agent_manager = AgentManager(current_user.id, project_id)
         previous_chapters = db_instance.get_all_chapters(current_user.id, project_id)
         codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
@@ -276,7 +340,9 @@ async def generate_chapters(
                 for i in range(request.numChapters):
                     chapter_number = len(previous_chapters) + i + 1
                     try:
-                        logging.debug(f"Starting generation for chapter {chapter_number}")
+                        # Send a starting message
+                        yield json.dumps({'type': 'start', 'chapterNumber': chapter_number}) + '\n'
+
                         chapter_content = ""
                         async for chunk in agent_manager.generate_chapter_stream(
                             chapter_number=chapter_number,
@@ -392,26 +458,38 @@ async def generate_chapters(
 
                     except Exception as e:
                         logging.error(f"Error generating chapter {chapter_number}: {str(e)}")
-                        yield json.dumps({'error': str(e)}) + '\n'
+                        yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
 
-                logging.debug("All chapters generated, sending 'done' signal")
                 yield json.dumps({'type': 'done'}) + '\n'
 
             except Exception as e:
                 logging.error(f"Error in generate function: {str(e)}")
-                yield json.dumps({'error': str(e)}) + '\n'
+                yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
             finally:
                 logging.debug("Generate function completed")
+                del generation_tasks[user_id] # Remove the task from the dictionary after completion or error
 
+        generation_tasks[user_id] = asyncio.create_task(generate()) # Store the task in the dictionary
+        background_tasks.add_task(generation_tasks[user_id]) # Add the task to background tasks
         return StreamingResponse(generate(), media_type="application/json")
+
+    except HTTPException as e: # Re-raise HTTPExceptions
+        raise e
     except Exception as e:
         logging.error(f"Error in generate_chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @chapter_router.post("/cancel")
 async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
-    # Implement cancellation logic here
-    return {"message": "Generation cancelled"}
+    user_id = current_user.id # Get the user ID
+    if user_id in generation_tasks:
+        generation_tasks[user_id].cancel()
+        del generation_tasks[user_id] # Remove the task from the dictionary after cancellation
+        return {"message": "Generation cancelled"}
+    else:
+        return {"message": "No generation in progress"}
+
 
 @chapter_router.get("/{chapter_id}")
 async def get_chapter(chapter_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -819,8 +897,9 @@ app.include_router(chapter_router)
 app.include_router(codex_item_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
-app.include_router(preset_router) # Include the preset router
-app.include_router(project_router, prefix="/projects", tags=["projects"])
+app.include_router(preset_router)
+app.include_router(project_router)
+app.include_router(universe_router)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

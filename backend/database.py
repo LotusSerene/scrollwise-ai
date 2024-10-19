@@ -1,6 +1,6 @@
 # backend/database.py
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session, joinedload
 from sqlalchemy.pool import QueuePool
@@ -31,15 +31,16 @@ class Project(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    universe_id = Column(String, ForeignKey('universes.id'), nullable=True)  # Add this line
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
-
 
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
             'description': self.description,
+            'universe_id': self.universe_id,  # Add this line
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
@@ -130,6 +131,18 @@ class Preset(Base): # New table for presets
     data = Column(JSON, nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     __table_args__ = (UniqueConstraint('user_id', 'name', name='_user_preset_uc'),)
+
+class Universe(Base):
+    __tablename__ = 'universes'
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name
+        }
 
 class Database:
     def __init__(self):
@@ -658,6 +671,96 @@ class Database:
             session.rollback()
             self.logger.error(f"Error deleting project: {str(e)}")
             raise
+        finally:
+            session.close()
+
+    def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            universes = session.query(Universe).filter_by(user_id=user_id).all()
+            return [universe.to_dict() for universe in universes]
+        except Exception as e:
+            self.logger.error(f"Error fetching universes: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def create_universe(self, name: str, user_id: str) -> str:
+        session = self.get_session()
+        try:
+            universe = Universe(id=str(uuid.uuid4()), name=name, user_id=user_id)
+            session.add(universe)
+            session.commit()
+            return universe.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating universe: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
+            if universe:
+                return universe.to_dict()
+            return None
+        finally:
+            session.close()
+
+    def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
+            if universe:
+                universe.name = name
+                session.commit()
+                return universe.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating universe: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def delete_universe(self, universe_id: str, user_id: str) -> bool:
+        session = self.get_session()
+        try:
+            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
+            if universe:
+                session.delete(universe)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting universe: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            codex_items = session.query(CodexItem).join(Project).filter(
+                and_(Project.universe_id == universe_id, CodexItem.user_id == user_id)
+            ).all()
+            return [item.to_dict() for item in codex_items]
+        finally:
+            session.close()
+
+    def get_universe_knowledge_base(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        # Implement this method based on how you store knowledge base items
+        # This is a placeholder implementation
+        return []
+
+    def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
+            return [project.to_dict() for project in projects]
         finally:
             session.close()
 
