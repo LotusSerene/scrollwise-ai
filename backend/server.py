@@ -1035,7 +1035,14 @@ async def get_chat_history(project_id: str, current_user: User = Depends(get_cur
     chat_history = agent_manager.get_chat_history()
     agent_manager = AgentManager(current_user.id, project_id)
     chat_history = agent_manager.get_chat_history()
+    agent_manager = AgentManager(current_user.id, project_id)
+    chat_history = agent_manager.get_chat_history()
     return {"chatHistory": chat_history}
+
+@app.post("/chat-history")
+async def save_chat_history(chat_history: List[Dict[str, str]], project_id: str, current_user: User = Depends(get_current_active_user)):
+    db_instance.save_chat_history(current_user.id, project_id, chat_history)
+    return {"message": "Chat history saved successfully"}
 
 @app.get("/knowledge-base/chat-history")
 async def get_knowledge_base_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):

@@ -138,7 +138,15 @@ class _QueryState extends State<Query> {
                     color: isUser ? Colors.blue[100] : Colors.grey[200],
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
-                      child: Text(message['content']),
+                      child: Container(
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                        padding: const EdgeInsets.all(8.0),
+                        decoration: BoxDecoration(
+                          color: isUser ? Colors.blue[100] : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(message['content']),
+                      ),
                     ),
                   ),
                 );
