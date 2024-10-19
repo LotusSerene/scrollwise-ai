@@ -6,7 +6,9 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 
 class CreateChapter extends StatefulWidget {
-  const CreateChapter({Key? key}) : super(key: key);
+  final String projectId;
+
+  const CreateChapter({Key? key, required this.projectId}) : super(key: key);
 
   @override
   State<CreateChapter> createState() => _CreateChapterState();
@@ -40,7 +42,7 @@ class _CreateChapterState extends State<CreateChapter> {
     });
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/presets/'),
+        Uri.parse('$apiUrl/presets?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
@@ -72,6 +74,7 @@ class _CreateChapterState extends State<CreateChapter> {
           'minWordCount': _minWordCount,
           'additionalInstructions': _additionalInstructions,
         },
+        'project_id': widget.projectId,
       };
 
       final response = await http.post(
@@ -110,7 +113,8 @@ class _CreateChapterState extends State<CreateChapter> {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
+        Uri.parse(
+            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
 
@@ -146,7 +150,8 @@ class _CreateChapterState extends State<CreateChapter> {
   Future<void> _handleDeletePreset(String presetName) async {
     try {
       final response = await http.delete(
-        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
+        Uri.parse(
+            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
 
@@ -191,10 +196,11 @@ class _CreateChapterState extends State<CreateChapter> {
             'minWordCount': _minWordCount,
             'additionalInstructions': _additionalInstructions,
           },
+          'project_id': widget.projectId,
         };
 
         final response = await http.post(
-          Uri.parse('$apiUrl/chapters/generate'),
+          Uri.parse('$apiUrl/chapters/generate?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode(requestBody),
         );

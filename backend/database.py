@@ -1,15 +1,18 @@
 # backend/database.py
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session, joinedload
 from sqlalchemy.pool import QueuePool
+from sqlalchemy.dialects.postgresql import TEXT
 import json
 import os
 from dotenv import load_dotenv
 import uuid
 import asyncio
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import datetime
+from datetime import timezone
 load_dotenv()
 
 Base = declarative_base()
@@ -22,14 +25,34 @@ class User(Base):
     api_key = Column(String)
     model_settings = Column(Text)
 
+class Project(Base):
+    __tablename__ = 'projects'
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        }
+
 class Chapter(Base):
     __tablename__ = 'chapters'
     id = Column(String, primary_key=True)
-    title = Column(String, nullable=False)
-    content = Column(Text, nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(TEXT, nullable=False)  # Use TEXT type for PostgreSQL
     chapter_number = Column(Integer, nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
-    embedding_id = Column(String)  # New column
+    embedding_id = Column(String)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
     def to_dict(self):
         return {
@@ -37,7 +60,7 @@ class Chapter(Base):
             'title': self.title,
             'content': self.content,
             'chapter_number': self.chapter_number,
-            'embedding_id': self.embedding_id  # Include embedding_id
+            'embedding_id': self.embedding_id
         }
 
 class ValidityCheck(Base):
@@ -54,6 +77,7 @@ class ValidityCheck(Base):
     continuity_feedback = Column(Text)
     test_results = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
     def to_dict(self):
         return {
@@ -78,7 +102,8 @@ class CodexItem(Base):
     type = Column(String, nullable=False)
     subtype = Column(String)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
-    embedding_id = Column(String)  # New column
+    embedding_id = Column(String)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
     def to_dict(self):
         return {
@@ -87,7 +112,7 @@ class CodexItem(Base):
             'description': self.description,
             'type': self.type,
             'subtype': self.subtype,
-            'embedding_id': self.embedding_id  # Include embedding_id
+            'embedding_id': self.embedding_id
         }
 
 class ChatHistory(Base):
@@ -95,6 +120,7 @@ class ChatHistory(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     messages = Column(Text, nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
 class Preset(Base): # New table for presets
     __tablename__ = 'presets'
@@ -102,6 +128,7 @@ class Preset(Base): # New table for presets
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     name = Column(String, nullable=False)
     data = Column(JSON, nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     __table_args__ = (UniqueConstraint('user_id', 'name', name='_user_preset_uc'),)
 
 class Database:
@@ -113,7 +140,8 @@ class Database:
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set")
         
-        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=20, max_overflow=0)
+        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=20, max_overflow=0, 
+                                    client_encoding='utf8')
         self.Session = scoped_session(sessionmaker(bind=self.engine))
         
         Base.metadata.create_all(self.engine)
@@ -152,22 +180,33 @@ class Database:
         finally:
             session.close()
 
-    def get_all_chapters(self, user_id):
+    def get_all_chapters(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            chapters = session.query(Chapter).filter_by(user_id=user_id).order_by(Chapter.chapter_number).all()
+            chapters = session.query(Chapter).filter_by(user_id=user_id, project_id=project_id).order_by(Chapter.chapter_number).all()
             return [chapter.to_dict() for chapter in chapters]
+        except Exception as e:
+            self.logger.error(f"Error fetching all chapters: {str(e)}")
+            raise
         finally:
             session.close()
 
-    async def create_chapter(self, title, content, user_id):
-        return await asyncio.to_thread(self._create_chapter, title, content, user_id)
+    async def create_chapter(self, title, content, user_id, project_id):
+        return await asyncio.to_thread(self._create_chapter, title, content, user_id, project_id)
 
-    def _create_chapter(self, title, content, user_id, embedding_id=None):
+    def _create_chapter(self, title, content, user_id, project_id, embedding_id=None):
         session = self.get_session()
         try:
-            chapter_number = session.query(Chapter).filter_by(user_id=user_id).count() + 1
-            chapter = Chapter(id=str(uuid.uuid4()), title=title, content=content, chapter_number=chapter_number, user_id=user_id, embedding_id=embedding_id)
+            chapter_number = session.query(Chapter).filter_by(user_id=user_id, project_id=project_id).count() + 1
+            chapter = Chapter(
+                id=str(uuid.uuid4()),
+                title=title,
+                content=content,
+                chapter_number=chapter_number,
+                user_id=user_id,
+                project_id=project_id,
+                embedding_id=embedding_id
+            )
             session.add(chapter)
             session.commit()
             return chapter.to_dict()
@@ -178,10 +217,10 @@ class Database:
         finally:
             session.close()
 
-    def update_chapter(self, chapter_id, title, content, user_id):
+    def update_chapter(self, chapter_id, title, content, user_id, project_id):
         session = self.get_session()
         try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
             if chapter:
                 chapter.title = title
                 chapter.content = content
@@ -195,14 +234,14 @@ class Database:
         finally:
             session.close()
 
-    def delete_chapter(self, chapter_id, user_id):
+    def delete_chapter(self, chapter_id, user_id, project_id):
         session = self.get_session()
         try:
             # First, delete related validity checks
-            session.query(ValidityCheck).filter_by(chapter_id=chapter_id, user_id=user_id).delete()
+            session.query(ValidityCheck).filter_by(chapter_id=chapter_id, user_id=user_id, project_id=project_id).delete()
 
             # Then, delete the chapter
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
             if chapter:
                 session.delete(chapter)
                 session.commit()
@@ -215,34 +254,28 @@ class Database:
         finally:
             session.close()
 
-    def get_chapter(self, chapter_id, user_id):
+    def get_chapter(self, chapter_id, user_id, project_id):
         session = self.get_session()
         try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id).first()
+            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
             if chapter:
-                return {
-                    'id': chapter.id,
-                    'title': chapter.title,
-                    'content': chapter.content,
-                    'chapter_number': chapter.chapter_number,
-                    'embedding_id': chapter.embedding_id  # Include embedding_id
-                }
+                return chapter.to_dict()
             return None
         finally:
             session.close()
 
-    def get_all_validity_checks(self, user_id):
+    def get_all_validity_checks(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            checks = session.query(ValidityCheck).filter_by(user_id=user_id).all()
+            checks = session.query(ValidityCheck).filter_by(user_id=user_id, project_id=project_id).all()
             return [check.to_dict() for check in checks]
         finally:
             session.close()
 
-    def delete_validity_check(self, check_id, user_id):
+    def delete_validity_check(self, check_id, user_id, project_id):
         session = self.get_session()
         try:
-            validity_check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id).first()
+            validity_check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id, project_id=project_id).first()
             if validity_check:
                 session.delete(validity_check)
                 session.commit()
@@ -255,7 +288,7 @@ class Database:
         finally:
             session.close()
 
-    async def create_codex_item(self, name: str, description: str, item_type: str, subtype: Optional[str], user_id: str) -> str:
+    async def create_codex_item(self, name: str, description: str, item_type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
         session = self.get_session()
         try:
             item_id = str(uuid.uuid4())
@@ -263,9 +296,10 @@ class Database:
                 id=item_id,
                 name=name,
                 description=description,
-                type=item_type,  # Use the correct type here
+                type=item_type,
                 subtype=subtype,
-                user_id=user_id
+                user_id=user_id,
+                project_id=project_id
             )
             session.add(new_item)
             session.commit()
@@ -277,18 +311,18 @@ class Database:
         finally:
             session.close()
 
-    def get_all_codex_items(self, user_id):
+    def get_all_codex_items(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            codex_items = session.query(CodexItem).filter_by(user_id=user_id).all()
+            codex_items = session.query(CodexItem).filter_by(user_id=user_id, project_id=project_id).all()
             return [item.to_dict() for item in codex_items]
         finally:
             session.close()
 
-    def update_codex_item(self, item_id, name, description, type, subtype, user_id):
+    def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
             if codex_item:
                 codex_item.name = name
                 codex_item.description = description
@@ -304,10 +338,10 @@ class Database:
         finally:
             session.close()
 
-    def delete_codex_item(self, item_id, user_id):
+    def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
             if codex_item:
                 session.delete(codex_item)
                 session.commit()
@@ -320,19 +354,12 @@ class Database:
         finally:
             session.close()
 
-    def get_codex_item_by_id(self, item_id, user_id):
+    def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id).first()
+            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
             if codex_item:
-                return {
-                    'id': codex_item.id,
-                    'name': codex_item.name,
-                    'description': codex_item.description,
-                    'type': codex_item.type,
-                    'subtype': codex_item.subtype,
-                    'embedding_id': codex_item.embedding_id  # Include embedding_id
-                }
+                return codex_item.to_dict()
             return None
         finally:
             session.close()
@@ -404,10 +431,10 @@ class Database:
         finally:
             session.close()
 
-    async def save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
-        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id)
+    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str, project_id: str):
+        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id, project_id)
 
-    def _save_validity_check(self, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id):
+    def _save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
             validity_check = ValidityCheck(
@@ -422,7 +449,8 @@ class Database:
                 continuity=continuity,
                 continuity_feedback=continuity_feedback,
                 test_results=test_results,
-                user_id=user_id
+                user_id=user_id,
+                project_id=project_id
             )
             session.add(validity_check)
             session.commit()
@@ -433,14 +461,14 @@ class Database:
         finally:
             session.close()
 
-    def save_chat_history(self, user_id, messages):
+    def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
         session = self.get_session()
         try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
             if chat_history:
                 chat_history.messages = json.dumps(messages)
             else:
-                chat_history = ChatHistory(id=str(uuid.uuid4()), user_id=user_id, messages=json.dumps(messages))
+                chat_history = ChatHistory(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, messages=json.dumps(messages))
                 session.add(chat_history)
             session.commit()
         except Exception as e:
@@ -450,18 +478,18 @@ class Database:
         finally:
             session.close()
 
-    def get_chat_history(self, user_id):
+    def get_chat_history(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
             return json.loads(chat_history.messages) if chat_history else []
         finally:
             session.close()
 
-    def delete_chat_history(self, user_id):
+    def delete_chat_history(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id).first()
+            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
             if chat_history:
                 session.delete(chat_history)
                 session.commit()
@@ -471,15 +499,15 @@ class Database:
             raise
         finally:
             session.close()
-    def create_preset(self, user_id, name, data):
+    def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
         session = self.get_session()
         try:
-            # Check if a preset with the same name and user_id already exists
-            existing_preset = session.query(Preset).filter_by(user_id=user_id, name=name).first()
+            # Check if a preset with the same name, user_id, and project_id already exists
+            existing_preset = session.query(Preset).filter_by(user_id=user_id, project_id=project_id, name=name).first()
             if existing_preset:
-                raise ValueError(f"A preset with name '{name}' already exists for this user.")
+                raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
             
-            preset = Preset(id=str(uuid.uuid4()), user_id=user_id, name=name, data=data)
+            preset = Preset(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, name=name, data=data)
             session.add(preset)
             session.commit()
             return preset.id
@@ -494,18 +522,18 @@ class Database:
         finally:
             session.close()
 
-    def get_presets(self, user_id):
+    def get_presets(self, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            presets = session.query(Preset).filter_by(user_id=user_id).all()
+            presets = session.query(Preset).filter_by(user_id=user_id, project_id=project_id).all()
             return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
         finally:
             session.close()
 
-    def delete_preset(self, preset_name, user_id):
+    def delete_preset(self, preset_name: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id).first()
+            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id).first()
             if preset:
                 session.delete(preset)
                 session.commit()
@@ -518,10 +546,10 @@ class Database:
         finally:
             session.close()
 
-    def get_preset_by_name(self, preset_name, user_id):
+    def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id).first()
+            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id).first()
             if preset:
                 return {"id": preset.id, "name": preset.name, "data": preset.data}
             return None
@@ -562,6 +590,76 @@ class Database:
         finally:
             session.close()
 
+    def create_project(self, name: str, description: str, user_id: str) -> str:
+        session = self.get_session()
+        try:
+            project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
+            session.add(project)
+            session.commit()
+            return project.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating project: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            projects = session.query(Project).filter_by(user_id=user_id).all()
+            return [project.to_dict() for project in projects]
+        finally:
+            session.close()
+
+    def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
+            return project.to_dict() if project else None
+        finally:
+            session.close()
+
+    def update_project(self, project_id: str, name: str, description: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
+            if project:
+                project.name = name
+                project.description = description
+                project.updated_at = datetime.datetime.now(timezone.utc)  # Use timezone-aware UTC time
+                session.commit()
+                return project.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating project: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def delete_project(self, project_id: str, user_id: str) -> bool:
+        session = self.get_session()
+        try:
+            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
+            if project:
+                # Delete related data
+                session.query(Chapter).filter_by(project_id=project_id).delete()
+                session.query(ValidityCheck).filter_by(project_id=project_id).delete()
+                session.query(CodexItem).filter_by(project_id=project_id).delete()
+                session.query(ChatHistory).filter_by(project_id=project_id).delete()
+                session.query(Preset).filter_by(project_id=project_id).delete()
+                
+                session.delete(project)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting project: {str(e)}")
+            raise
+        finally:
+            session.close()
 
 db_instance = Database()
 

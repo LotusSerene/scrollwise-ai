@@ -6,7 +6,9 @@ import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
 class Query extends StatefulWidget {
-  const Query({Key? key}) : super(key: key);
+  final String projectId;
+
+  const Query({Key? key, required this.projectId}) : super(key: key);
 
   @override
   State<Query> createState() => _QueryState();
@@ -27,23 +29,27 @@ class _QueryState extends State<Query> {
 
     try {
       final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse('$apiUrl/knowledge-base/query'),
+        Uri.parse(
+            '$apiUrl/knowledge-base/query?project_id=${widget.projectId}'),
         headers: headers,
         body: json.encode({
           'query': _queryController.text,
-          'chatHistory': [] // Add chat history if available
+          'chatHistory': [], // Add chat history if available
         }),
       );
-      final jsonResponse = json.decode(response.body);
-      if (response.statusCode == 200 && !jsonResponse.containsKey('error')) {
+
+      if (response.statusCode == 200) {
+        final jsonResponse = json.decode(response.body);
         setState(() {
           _response = jsonResponse['response'];
           _isLoading = false;
         });
       } else {
+        final errorData = json.decode(response.body);
         setState(() {
-          _response = jsonResponse['error'] ?? 'Error processing query';
+          _response = errorData['detail'] ?? 'Error processing query';
           _isLoading = false;
         });
       }

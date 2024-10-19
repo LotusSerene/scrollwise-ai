@@ -19,10 +19,11 @@ def flatten_metadata(metadata):
 
 
 class VectorStore:
-    def __init__(self, user_id, api_key, embeddings_model):
+    def __init__(self, user_id, project_id, api_key, embeddings_model):
         self.chroma_url = os.getenv("CHROMA_SERVER_URL", "http://localhost:8000")
         self.chroma_port = int(os.getenv("CHROMA_SERVER_PORT", "8000"))
         self.user_id = user_id
+        self.project_id = project_id
         self.api_key = api_key
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
@@ -45,9 +46,10 @@ class VectorStore:
             self.logger.debug("Chroma client initialized successfully")
             
             self.logger.debug("Initializing Chroma vector store")
+            collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
             self.vector_store = Chroma(
                 client=chroma_client,
-                collection_name=f"user_{user_id}",
+                collection_name=collection_name,
                 embedding_function=self.embeddings,
             )
             self.logger.debug("Chroma vector store initialized successfully")
@@ -64,6 +66,7 @@ class VectorStore:
         if metadata is None:
             metadata = {}
         metadata["user_id"] = self.user_id
+        metadata["project_id"] = self.project_id
         flattened_metadata = flatten_metadata(metadata)
         
         # Filter out None values from metadata
@@ -98,9 +101,20 @@ class VectorStore:
         self.logger.debug(f"Updating in knowledge base..., embedding ID: {embedding_id}")
         try:
             if new_content or new_metadata:
+                # Fetch the current metadata
+                current_metadata = self.vector_store._collection.get(ids=[embedding_id])['metadatas'][0]
+                
                 if new_metadata is None:
                     new_metadata = {}
                 new_metadata["user_id"] = self.user_id
+                new_metadata["project_id"] = self.project_id
+
+                # Update the current metadata with new values, removing keys if the new value is None
+                for key, value in new_metadata.items():
+                    if value is None:
+                        current_metadata.pop(key, None)  # Remove the key if it exists
+                    else:
+                        current_metadata[key] = value
 
                 # If new content is provided, we need to compute new embeddings
                 if new_content:
@@ -113,7 +127,7 @@ class VectorStore:
                     ids=[embedding_id],
                     embeddings=new_embeddings[0] if new_embeddings else None,
                     documents=[new_content] if new_content else None,
-                    metadatas=[new_metadata] if new_metadata else None
+                    metadatas=[current_metadata]
                 )
 
                 self.logger.info(f"Updated content... Embedding ID: {embedding_id}")
@@ -126,7 +140,7 @@ class VectorStore:
     def similarity_search(self, query: str, k: int = 5) -> List[Document]:
         self.logger.info(f"Starting similarity search for query: {query}")
         results = self.vector_store.similarity_search(
-            query, k=k, filter={"user_id": self.user_id}
+            query, k=k, filter={"user_id": self.user_id, "project_id": self.project_id}
         )
         self.logger.info(f"Similarity search completed, found {len(results)} results")
         return results
@@ -200,7 +214,7 @@ class VectorStore:
         self.vector_store.delete_collection()
         self.vector_store = Chroma(
             client=self.vector_store._client,
-            collection_name=f"user_{self.user_id}",
+            collection_name=f"user_{self.user_id}_project_{self.project_id}",
             embedding_function=self.embeddings,
         )
 

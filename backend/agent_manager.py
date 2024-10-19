@@ -43,23 +43,24 @@ class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
 
 class AgentManager:
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, project_id: str):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        self.logger.info(f"Initializing AgentManager for user: {user_id}")
+        self.logger.info(f"Initializing AgentManager for user: {user_id} and project: {project_id}")
         self.user_id = user_id
+        self.project_id = project_id
         self.api_key = self._get_api_key()
         self.model_settings = self._get_model_settings()
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
-        self.chat_history = db_instance.get_chat_history(user_id)
-        self.logger.info(f"AgentManager initialized for user: {user_id}")
+        self.chat_history = db_instance.get_chat_history(user_id, project_id)
+        self.logger.info(f"AgentManager initialized for user: {user_id} and project: {project_id}")
 
         self.setup_caching()
         self.setup_rate_limiter()
         self.llm = self._initialize_llm(self.model_settings['mainLLM'])
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
-        self.vector_store = VectorStore(self.user_id, self.api_key, self.model_settings['embeddingsModel'])
+        self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
         self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
 
     def _get_api_key(self) -> str:
@@ -151,6 +152,7 @@ class AgentManager:
             }, config={"configurable": {"session_id": f"chapter_{chapter_number}"}},
             ):
                 chapter_content += chunk
+                self.logger.debug(f"Generated chapter content before saving: {chapter_content!r}")
                 yield {"type": "chunk", "content": chunk}
 
             self.logger.info("Chapter generation completed")
@@ -342,14 +344,14 @@ class AgentManager:
         return chapter
 
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = db_instance.create_chapter(chapter_title, chapter, self.user_id)
-        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number})
+        chapter_id = db_instance.create_chapter(chapter_title, chapter, self.user_id, self.project_id)
+        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number, "project_id": self.project_id})
         self.logger.info(f"Chapter {chapter_number} saved to the knowledge base with ID: {chapter_id}")
         return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_title = f'Chapter {chapter_number}'
-        db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id)
+        db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id, self.project_id)
         self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
@@ -453,14 +455,14 @@ class AgentManager:
         context = "\n".join([doc.page_content for doc in relevant_docs])
         
         # Add codex items information
-        codex_items = db_instance.get_all_codex_items(self.user_id)
+        codex_items = db_instance.get_all_codex_items(self.user_id, self.project_id)
         if codex_items:
             context += "\n\nCodex Items:\n"
             for codex_item in codex_items:
                 context += f"{codex_item['name']}: {codex_item['description']}\n"
         
         # Add chapters information (you might want to limit this to avoid token limits)
-        chapters = db_instance.get_all_chapters(self.user_id)
+        chapters = db_instance.get_all_chapters(self.user_id, self.project_id)
         if chapters:
             context += "\n\nChapters:\n"
             for chapter in chapters:
@@ -557,7 +559,7 @@ class AgentManager:
 
     def reset_memory(self):
         self.chat_history = []
-        db_instance.delete_chat_history(self.user_id)
+        db_instance.delete_chat_history(self.user_id, self.project_id)
         self.logger.info("Chat history has been reset.")
 
     def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:

@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import '../components/knowledge_base.dart';
 
 class KnowledgeBaseScreen extends StatelessWidget {
-  const KnowledgeBaseScreen({Key? key}) : super(key: key);
+  final String projectId;
+  const KnowledgeBaseScreen({Key? key, required this.projectId}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Knowledge Base')),
-      body: const KnowledgeBase(),
+      body: KnowledgeBase(projectId: projectId),
     );
   }
 }

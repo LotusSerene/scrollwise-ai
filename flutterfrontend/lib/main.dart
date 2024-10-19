@@ -6,6 +6,12 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/editor_screen.dart';
+import 'screens/projects_screen.dart';
+import 'screens/create_screen.dart';
+import 'screens/codex_screen.dart';
+import 'screens/validity_screen.dart';
+import 'screens/knowledge_base_screen.dart';
+import 'screens/query_screen.dart';
 import 'utils/auth.dart';
 import 'utils/theme.dart';
 import 'package:flutter/services.dart';
@@ -40,13 +46,19 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const AuthWrapper(),
-        '/main': (context) => const MainScreen(),
+        '/projects': (context) => const ProjectsScreen(),
+        '/home': (context) => const HomeScreen(), // Removed projectId argument
         '/login': (context) => LoginScreen(onLogin: (token) {
               Provider.of<AppState>(context, listen: false).setLoggedIn(true);
-              Navigator.pushReplacementNamed(context, '/main');
+              Navigator.pushReplacementNamed(context, '/projects');
             }),
         '/editor': (context) => const EditorScreen(),
         '/settings': (context) => const SettingsScreen(),
+        '/create': (context) => CreateScreen(projectId: ModalRoute.of(context)!.settings.arguments as String),
+        '/codex': (context) => CodexScreen(projectId: ModalRoute.of(context)!.settings.arguments as String),
+        '/validity': (context) => ValidityScreen(projectId: ModalRoute.of(context)!.settings.arguments as String),
+        '/knowledge_base': (context) => KnowledgeBaseScreen(projectId: ModalRoute.of(context)!.settings.arguments as String),
+        '/query': (context) => QueryScreen(projectId: ModalRoute.of(context)!.settings.arguments as String),
       },
     );
   }
@@ -64,93 +76,14 @@ class AuthWrapper extends StatelessWidget {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         } else if (snapshot.data == true) {
-          return const MainScreen();
+          return const ProjectsScreen();
         } else {
           return LoginScreen(onLogin: (token) {
             Provider.of<AppState>(context, listen: false).setLoggedIn(true);
-            Navigator.pushReplacementNamed(context, '/main');
+            Navigator.pushReplacementNamed(context, '/projects');
           });
         }
       },
     );
-  }
-}
-
-class MainScreen extends StatefulWidget {
-  const MainScreen({Key? key}) : super(key: key);
-
-  @override
-  _MainScreenState createState() => _MainScreenState();
-}
-
-class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 0;
-  final List<Widget> _screens = [
-    const HomeScreen(),
-    const EditorScreen(),
-    const SettingsScreen(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gemini'),
-      ),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(
-                color: Colors.blue,
-              ),
-              child: Text('Gemini',
-                  style: TextStyle(color: Colors.white, fontSize: 24)),
-            ),
-            ListTile(
-              title: const Text('Home'),
-              onTap: () => _onItemTapped(0),
-            ),
-            ListTile(
-              title: const Text('Editor'),
-              onTap: () => _onItemTapped(1),
-            ),
-            ListTile(
-              title: const Text('Settings'),
-              onTap: () => _onItemTapped(2),
-            ),
-            ListTile(
-              title: const Text('Logout'),
-              onTap: () async {
-                await removeAuthToken();
-                Provider.of<AppState>(context, listen: false).setLoggedIn(false);
-                Navigator.pushReplacementNamed(context, '/');
-              },
-            ),
-          ],
-        ),
-      ),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.edit), label: 'Editor'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
-        ],
-      ),
-    );
-  }
-
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
   }
 }

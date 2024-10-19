@@ -4,10 +4,12 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'package:file_picker/file_picker.dart'; // Import FilePicker
+import 'package:file_picker/file_picker.dart';
 
 class KnowledgeBase extends StatefulWidget {
-  const KnowledgeBase({Key? key}) : super(key: key);
+  final String projectId;
+
+  const KnowledgeBase({Key? key, required this.projectId}) : super(key: key);
 
   @override
   State<KnowledgeBase> createState() => _KnowledgeBaseState();
@@ -27,7 +29,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   Future<void> _fetchKnowledgeBaseContent() async {
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/knowledge-base'),
+        Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
@@ -57,7 +59,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         headers: headers,
         body: {
           'documents': text,
-          'metadata': json.encode({'type': 'text'})
+          'metadata':
+              json.encode({'type': 'text', 'project_id': widget.projectId})
         },
       );
       final jsonResponse = json.decode(response.body);
@@ -92,8 +95,11 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       final file =
           await http.MultipartFile.fromPath('file', _selectedFile.path);
       request.files.add(file);
-      request.fields['metadata'] =
-          json.encode({'type': 'file', 'filename': _selectedFile.path});
+      request.fields['metadata'] = json.encode({
+        'type': 'file',
+        'filename': _selectedFile.path,
+        'project_id': widget.projectId
+      });
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
       final jsonResponse = json.decode(response.body);

@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 
 class Dashboard extends StatefulWidget {
-  const Dashboard({Key? key}) : super(key: key);
+  final String projectId;
+
+  const Dashboard({Key? key, required this.projectId}) : super(key: key);
 
   @override
   State<Dashboard> createState() => _DashboardState();
@@ -33,10 +35,10 @@ class _DashboardState extends State<Dashboard> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/chapters'),
+        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
         headers: headers,
       );
-      final jsonResponse = json.decode(response.body);
+      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && !jsonResponse.containsKey('error')) {
         if (mounted) {
           Provider.of<AppState>(context, listen: false)

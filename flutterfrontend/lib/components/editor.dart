@@ -9,9 +9,11 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 
 class Editor extends StatefulWidget {
+  final String projectId;
   final String? chapterId;
 
-  const Editor({Key? key, this.chapterId}) : super(key: key);
+  const Editor({Key? key, required this.projectId, this.chapterId})
+      : super(key: key);
 
   @override
   State<Editor> createState() => _EditorState();
@@ -47,17 +49,16 @@ class _EditorState extends State<Editor> {
       try {
         final headers = await getAuthHeaders();
         final response = await http.get(
-          Uri.parse('$apiUrl/chapters/$chapterId'),
+          Uri.parse(
+              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
           headers: headers,
         );
         if (response.statusCode == 200) {
           final chapter = json.decode(response.body);
           setState(() {
             _selectedChapter = chapter;
-            _chapterTitleController.text =
-                _decodeSpecialCharacters(chapter['title']);
-            _chapterContentController.text =
-                _decodeSpecialCharacters(chapter['content']);
+            _chapterTitleController.text = chapter['title'];
+            _chapterContentController.text = chapter['content'];
           });
         } else {
           Fluttertoast.showToast(msg: 'Error loading chapter');
@@ -69,31 +70,31 @@ class _EditorState extends State<Editor> {
     }
   }
 
-  String _decodeSpecialCharacters(String text) {
+  Future<void> _handleChapterClick(dynamic chapter) async {
     try {
-      return utf8.decode(text.codeUnits);
-    } catch (e) {
-      print('Error decoding text: $e');
-      return text;
-    }
-  }
+      final headers = await getAuthHeaders();
+      final response = await http.get(
+        Uri.parse(
+            '$apiUrl/chapters/${chapter['id']}?project_id=${widget.projectId}'),
+        headers: headers,
+      );
 
-  String _encodeSpecialCharacters(String text) {
-    try {
-      return utf8.encode(text).toString();
-    } catch (e) {
-      print('Error encoding text: $e');
-      return text;
+      if (response.statusCode == 200) {
+        final fetchedChapter = json.decode(utf8.decode(response.bodyBytes));
+        setState(() {
+          _selectedChapter = fetchedChapter;
+          _chapterTitleController.text = fetchedChapter['title'];
+          _chapterContentController.text = fetchedChapter['content'];
+          _error = null;
+        });
+      } else {
+        print('Error loading chapter: ${response.statusCode}');
+        Fluttertoast.showToast(msg: 'Error loading chapter');
+      }
+    } catch (error) {
+      print('Error loading chapter: $error');
+      Fluttertoast.showToast(msg: 'Error loading chapter');
     }
-  }
-
-  void _handleChapterClick(dynamic chapter) {
-    setState(() {
-      _selectedChapter = chapter;
-      _chapterTitleController.text = chapter['title'];
-      _chapterContentController.text = chapter['content'];
-      _error = null;
-    });
   }
 
   void _handleCreateChapter() {
@@ -109,7 +110,7 @@ class _EditorState extends State<Editor> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/chapters/$chapterId'),
+        Uri.parse('$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
       final jsonResponse = json.decode(response.body);
@@ -143,22 +144,24 @@ class _EditorState extends State<Editor> {
 
     try {
       final requestBody = {
-        'title': _encodeSpecialCharacters(_chapterTitleController.text),
-        'content': _encodeSpecialCharacters(_chapterContentController.text),
+        'title': _chapterTitleController.text,
+        'content': _chapterContentController.text,
+        'project_id': widget.projectId,
       };
 
       http.Response response;
       if (_selectedChapter != null) {
         // Update existing chapter
         response = await http.put(
-          Uri.parse('$apiUrl/chapters/$chapterId'),
+          Uri.parse(
+              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode(requestBody),
         );
       } else {
         // Create new chapter
         response = await http.post(
-          Uri.parse('$apiUrl/chapters'),
+          Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode(requestBody),
         );
@@ -247,7 +250,7 @@ class _EditorState extends State<Editor> {
                             final chapter = appState.chapters[index];
                             return ListTile(
                               title: Text(
-                                _decodeSpecialCharacters(chapter['title']),
+                                chapter['title'],
                                 style: const TextStyle(color: Colors.white),
                               ),
                               tileColor: _selectedChapter == chapter

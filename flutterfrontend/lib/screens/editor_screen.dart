@@ -11,7 +11,7 @@ class EditorScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Editor')),
-      body: Editor(chapterId: chapterId),
+      body: Editor(projectId: '{{PROJECT_ID}}', chapterId: chapterId),
     );
   }
 }

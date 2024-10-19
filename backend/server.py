@@ -140,6 +140,15 @@ class PresetUpdate(BaseModel): # New model for updating presets
     name: str
     data: ChapterGenerationRequest
 
+# Add these models
+class ProjectCreate(BaseModel):
+    name: str
+    description: str
+
+class ProjectUpdate(BaseModel):
+    name: str
+    description: str
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -208,6 +217,9 @@ knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Bas
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
 preset_router = APIRouter(prefix="/presets", tags=["Presets"]) # New router for presets
 
+# Add a new router for projects
+project_router = APIRouter()
+
 # Auth routes
 @auth_router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -245,12 +257,13 @@ async def register(user: User):
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: ChapterGenerationRequest,
+    project_id: str,
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        agent_manager = AgentManager(current_user.id)
-        previous_chapters = db_instance.get_all_chapters(current_user.id)
-        codex_items = db_instance.get_all_codex_items(current_user.id)
+        agent_manager = AgentManager(current_user.id, project_id)
+        previous_chapters = db_instance.get_all_chapters(current_user.id, project_id)
+        codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
 
         instructions = {
             "styleGuide": request.styleGuide,
@@ -293,22 +306,59 @@ async def generate_chapters(
 
                         logging.debug("Saving new codex items")
                         for item in new_codex_items:
-                            item_id = await db_instance.create_codex_item(item['name'], item['description'], item['type'], item['subtype'], current_user.id)
+                            item_id = await db_instance.create_codex_item(
+                                item['name'],
+                                item['description'],
+                                item['type'],
+                                item['subtype'],
+                                current_user.id,
+                                project_id
+                            )
                             # Add new codex item to knowledge base
-                            embedding_id = agent_manager.add_to_knowledge_base("codex_item", item['description'], {"name": item['name'], "id": item_id, "type": item['type'], "subtype": item['subtype']})
+                            embedding_id = agent_manager.add_to_knowledge_base(
+                                "codex_item",
+                                item['description'],
+                                {
+                                    "name": item['name'],
+                                    "id": item_id,
+                                    "type": item['type'],
+                                    "subtype": item['subtype']
+                                }
+                            )
                             # Update the codex item with the embedding_id
                             db_instance.update_codex_item_embedding_id(item_id, embedding_id)
                             # Add the new codex item to the codex_items list
-                            codex_items.append({"id": item_id, "name": item['name'], "description": item['description'], "type": item['type'], "subtype": item['subtype'], "embedding_id": embedding_id})
+                            codex_items.append({
+                                "id": item_id,
+                                "name": item['name'],
+                                "description": item['description'],
+                                "type": item['type'],
+                                "subtype": item['subtype'],
+                                "embedding_id": embedding_id
+                            })
+
                         logging.debug("New codex items saved and added to knowledge base")
 
                         logging.debug("Saving chapter")
-                        new_chapter = await db_instance.create_chapter(chapter_title, chapter_content, current_user.id)
+                        new_chapter = await db_instance.create_chapter(
+                            chapter_title,  # No encoding/decoding
+                            chapter_content,  # No encoding/decoding
+                            current_user.id,
+                            project_id
+                        )
                         logging.debug(f"Chapter saved with id: {new_chapter['id']}")
 
                         # Add generated chapter to knowledge base
-                        embedding_id = agent_manager.add_to_knowledge_base("chapter", chapter_content, {"title": chapter_title, "id": new_chapter['id'], "type": "chapter"})
-                        
+                        embedding_id = agent_manager.add_to_knowledge_base(
+                            "chapter",
+                            chapter_content,
+                            {
+                                "title": chapter_title,
+                                "id": new_chapter['id'],
+                                "type": "chapter"
+                            }
+                        )
+
                         # Update the chapter with the embedding_id
                         db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
@@ -324,7 +374,8 @@ async def generate_chapters(
                             continuity=bool(validity['continuity']),
                             continuity_feedback=str(validity.get('continuity_feedback', '')),
                             test_results=str(validity.get('test_results', '')),
-                            user_id=current_user.id
+                            user_id=current_user.id,
+                            project_id=project_id
                         )
                         logging.debug("Validity check saved")
 
@@ -345,8 +396,9 @@ async def generate_chapters(
 
                 logging.debug("All chapters generated, sending 'done' signal")
                 yield json.dumps({'type': 'done'}) + '\n'
+
             except Exception as e:
-                logging.error(f"Unexpected error in generate function: {str(e)}")
+                logging.error(f"Error in generate function: {str(e)}")
                 yield json.dumps({'error': str(e)}) + '\n'
             finally:
                 logging.debug("Generate function completed")
@@ -357,31 +409,53 @@ async def generate_chapters(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.post("/cancel")
-async def cancel_chapter_generation(current_user: User = Depends(get_current_active_user)):
+async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
     # Implement cancellation logic here
     return {"message": "Generation cancelled"}
 
-@chapter_router.get("/")
-async def get_chapters(request: Request, current_user: User = Depends(get_current_active_user)):
+@chapter_router.get("/{chapter_id}")
+async def get_chapter(chapter_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        chapters = db_instance.get_all_chapters(current_user.id)
+        chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        
+        return chapter
+    except Exception as e:
+        logging.error(f"Error fetching chapter: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@chapter_router.get("/")
+async def get_chapters(project_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        chapters = db_instance.get_all_chapters(current_user.id, project_id)
         return {"chapters": chapters}
     except Exception as e:
         logger.error(f"Error fetching chapters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.post("/")
-async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_active_user)):
+async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         new_chapter = await db_instance.create_chapter(
-            chapter.title.encode('utf-8').decode('utf-8'),
-            chapter.content.encode('utf-8').decode('utf-8'),
-            current_user.id
+            chapter.title,
+            chapter.content,
+            current_user.id,
+            project_id
         )
         
         # Add to knowledge base
-        agent_manager = AgentManager(current_user.id)
-        embedding_id = agent_manager.add_to_knowledge_base("chapter", chapter.content, {"title": chapter.title, "id": new_chapter['id'], "type": "chapter"})
+        agent_manager = AgentManager(current_user.id, project_id)
+        embedding_id = agent_manager.add_to_knowledge_base(
+            "chapter",
+            chapter.content,
+            {
+                "title": chapter.title,
+                "id": new_chapter['id'],
+                "type": "chapter"
+            }
+        )
         
         # Update the chapter with the embedding_id
         db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
@@ -390,23 +464,24 @@ async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(ge
     except Exception as e:
         logger.error(f"Error creating chapter: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
+    
 @chapter_router.put("/{chapter_id}")
-async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: User = Depends(get_current_active_user)):
+async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        existing_chapter = db_instance.get_chapter(chapter_id, current_user.id)
+        existing_chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not existing_chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         
         updated_chapter = db_instance.update_chapter(
             chapter_id,
-            chapter.title.encode('utf-8').decode('utf-8'),
-            chapter.content.encode('utf-8').decode('utf-8'),
-            current_user.id
+            chapter.title,  # Removed encoding/decoding
+            chapter.content,  # Removed encoding/decoding
+            current_user.id,
+            project_id
         )
         
         # Update in knowledge base
-        agent_manager = AgentManager(current_user.id)
+        agent_manager = AgentManager(current_user.id, project_id)
         agent_manager.update_or_remove_from_knowledge_base(
             existing_chapter['embedding_id'], 
             'update', 
@@ -420,21 +495,21 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, current_user: 
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @chapter_router.delete("/{chapter_id}")
-async def delete_chapter(chapter_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_chapter(chapter_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        chapter = db_instance.get_chapter(chapter_id, current_user.id)
+        chapter = db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         
         # Delete from knowledge base if embedding_id exists
         if chapter.get('embedding_id'):
-            agent_manager = AgentManager(current_user.id)
+            agent_manager = AgentManager(current_user.id, project_id)
             agent_manager.update_or_remove_from_knowledge_base(chapter['embedding_id'], 'delete')
         else:
             logging.warning(f"No embedding_id found for chapter {chapter_id}. Skipping knowledge base deletion.")
         
         # Delete from database
-        db_instance.delete_chapter(chapter_id, current_user.id)
+        db_instance.delete_chapter(chapter_id, current_user.id, project_id)
         
         return {"message": "Chapter deleted successfully"}
     except Exception as e:
@@ -443,30 +518,31 @@ async def delete_chapter(chapter_id: str, current_user: User = Depends(get_curre
 
 # Codex Item routes
 @codex_item_router.get("/")
-async def get_codex_items(current_user: User = Depends(get_current_active_user)):
-    codex_items = db_instance.get_all_codex_items(current_user.id)
+async def get_codex_items(project_id: str, current_user: User = Depends(get_current_active_user)):
+    codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
     return {"codex_items": codex_items}
 
 @codex_item_router.post("/")
-async def create_codex_item(codex_item: CodexItemCreate, current_user: User = Depends(get_current_active_user)):
+async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         item_id = await db_instance.create_codex_item(
             codex_item.name, 
             codex_item.description, 
-            codex_item.type,  # Pass the correct type
+            codex_item.type,
             codex_item.subtype, 
-            current_user.id
+            current_user.id,
+            project_id
         )
         
         # Add to knowledge base
-        agent_manager = AgentManager(current_user.id)
+        agent_manager = AgentManager(current_user.id, project_id)
         embedding_id = agent_manager.add_to_knowledge_base(
             "codex_item", 
             codex_item.description, 
             {
                 "name": codex_item.name, 
                 "id": item_id, 
-                "type": codex_item.type,  # Use the correct type
+                "type": codex_item.type,
                 "subtype": codex_item.subtype
             }
         )
@@ -480,26 +556,40 @@ async def create_codex_item(codex_item: CodexItemCreate, current_user: User = De
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @codex_item_router.put("/{item_id}")
-async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, current_user: User = Depends(get_current_active_user)):
+async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        existing_item = db_instance.get_codex_item_by_id(item_id, current_user.id)
+        existing_item = db_instance.get_codex_item_by_id(item_id, current_user.id, project_id)
         if not existing_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
         
-        updated_item = db_instance.update_codex_item(item_id, codex_item.name, codex_item.description, codex_item.type, codex_item.subtype, current_user.id)
+        updated_item = db_instance.update_codex_item(item_id, codex_item.name, codex_item.description, codex_item.type, codex_item.subtype, current_user.id, project_id)
         
         # Update in knowledge base
-        agent_manager = AgentManager(current_user.id)
+        agent_manager = AgentManager(current_user.id, project_id)
         if existing_item.get('embedding_id'):
+            metadata = {
+                "name": codex_item.name,
+                "id": item_id,
+                "type": codex_item.type,
+                "subtype": codex_item.subtype  # This can be None, which will remove the field if it exists
+            }
+            
             agent_manager.update_or_remove_from_knowledge_base(
                 existing_item['embedding_id'], 
                 'update', 
                 new_content=codex_item.description, 
-                new_metadata={"name": codex_item.name, "id": item_id, "type": codex_item.type, "subtype": codex_item.subtype}
+                new_metadata=metadata
             )
         else:
             # If no embedding_id exists, create a new one
-            embedding_id = agent_manager.add_to_knowledge_base("codex_item", codex_item.description, {"name": codex_item.name, "id": item_id, "type": codex_item.type, "subtype": codex_item.subtype})
+            metadata = {
+                "name": codex_item.name,
+                "id": item_id,
+                "type": codex_item.type,
+                "subtype": codex_item.subtype
+            }
+            
+            embedding_id = agent_manager.add_to_knowledge_base("codex_item", codex_item.description, metadata)
             db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
         return updated_item
@@ -508,21 +598,21 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, current_u
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @codex_item_router.delete("/{item_id}")
-async def delete_codex_item(item_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_codex_item(item_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        codex_item = db_instance.get_codex_item_by_id(item_id, current_user.id)
+        codex_item = db_instance.get_codex_item_by_id(item_id, current_user.id, project_id)
         if not codex_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
         
         # Delete from knowledge base if embedding_id exists
         if codex_item.get('embedding_id'):
-            agent_manager = AgentManager(current_user.id)
+            agent_manager = AgentManager(current_user.id, project_id)
             agent_manager.update_or_remove_from_knowledge_base(codex_item['embedding_id'], 'delete')
         else:
             logging.warning(f"No embedding_id found for codex item {item_id}. Skipping knowledge base deletion.")
         
         # Delete from database
-        deleted = db_instance.delete_codex_item(item_id, current_user.id)
+        deleted = db_instance.delete_codex_item(item_id, current_user.id, project_id)
         if deleted:
             return {"message": "Codex item deleted successfully"}
         else:
@@ -536,12 +626,13 @@ async def delete_codex_item(item_id: str, current_user: User = Depends(get_curre
 async def add_to_knowledge_base(
     documents: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
-    metadata_str: Optional[str] = Form(None), # Add metadata parameter
+    metadata_str: Optional[str] = Form(None),
+    project_id: str = Form(...),
     current_user: User = Depends(get_current_active_user)
 ):
     logger.info(f"Received request to add to knowledge base. Documents: {documents}, File: {file}")
     
-    agent_manager = AgentManager(current_user.id)
+    agent_manager = AgentManager(current_user.id, project_id)
     
     if documents:
         logger.info(f"Adding document: {documents}")
@@ -563,9 +654,9 @@ async def add_to_knowledge_base(
         raise HTTPException(status_code=400, detail="No documents or file provided")
 
 @knowledge_base_router.get("/")
-async def get_knowledge_base_content(current_user: User = Depends(get_current_active_user)):
+async def get_knowledge_base_content(project_id: str, current_user: User = Depends(get_current_active_user)):
     logging.debug(f"Fetching knowledge base content for user: {current_user.id}")
-    agent_manager = AgentManager(current_user.id)
+    agent_manager = AgentManager(current_user.id, project_id)
     content = agent_manager.get_knowledge_base_content()
     logging.debug(f"Knowledge base content fetched for user: {current_user.id}")
     formatted_content = [
@@ -583,29 +674,29 @@ async def get_knowledge_base_content(current_user: User = Depends(get_current_ac
     return {"content": formatted_content}
 
 @knowledge_base_router.put("/{embedding_id}")
-async def update_knowledge_base_item(embedding_id: str, new_content: str, new_metadata: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
-    agent_manager = AgentManager(current_user.id)
+async def update_knowledge_base_item(embedding_id: str, new_content: str, new_metadata: Dict[str, Any], project_id: str, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id, project_id)
     agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'update', new_content, new_metadata)
     return {"message": "Knowledge base item updated successfully"}
 
 @knowledge_base_router.delete("/{embedding_id}")
-async def delete_knowledge_base_item(embedding_id: str, current_user: User = Depends(get_current_active_user)):
-    agent_manager = AgentManager(current_user.id)
+async def delete_knowledge_base_item(embedding_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id, project_id)
     agent_manager.update_or_remove_from_knowledge_base(embedding_id, 'delete')
     return {"message": "Knowledge base item deleted successfully"}
 
 @knowledge_base_router.post("/query")
-async def query_knowledge_base(query_data: KnowledgeBaseQuery, current_user: User = Depends(get_current_active_user)):
+async def query_knowledge_base(query_data: KnowledgeBaseQuery, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        result = await AgentManager(current_user.id).generate_with_retrieval(query_data.query, query_data.chatHistory)
+        result = await AgentManager(current_user.id, project_id).generate_with_retrieval(query_data.query, query_data.chatHistory)
         return {"response": result}
     except Exception as e:
         logger.error(f"Error in query_knowledge_base: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @knowledge_base_router.post("/reset-chat-history")
-async def reset_chat_history(current_user: User = Depends(get_current_active_user)):
-    agent_manager = AgentManager(current_user.id)
+async def reset_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id, project_id)
     agent_manager.reset_memory()
     return {"message": "Chat history reset successfully"}
 
@@ -639,33 +730,19 @@ async def save_model_settings(settings: ModelSettings, current_user: User = Depe
 
 # Add this new route for chat history
 @app.get("/chat-history")
-async def get_chat_history(current_user: User = Depends(get_current_active_user)):
+async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
     logging.debug(f"Fetching chat history for user: {current_user.id}")
-    chat_history = db_instance.get_chat_history(current_user.id)
+    chat_history = db_instance.get_chat_history(current_user.id, project_id)
     logging.debug(f"Chat history fetched: {len(chat_history)} messages")
     return {"chatHistory": chat_history}
 
 # Preset routes
 
 
-@preset_router.post("/", response_model=PresetCreate)
-async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
+@preset_router.post("/")
+async def create_preset(preset: PresetCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        # Validate the preset data
-        if not preset.name or not preset.data:
-            raise HTTPException(status_code=400, detail="Preset name and data are required")
-
-        # Ensure all required fields are present in the data
-        required_fields = ['numChapters', 'plot', 'writingStyle', 'styleGuide', 'minWordCount', 'additionalInstructions']
-        missing_fields = [field for field in required_fields if field not in preset.data]
-        
-        if missing_fields:
-            raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing_fields)}")
-
-        # Create the preset
-        preset_id = db_instance.create_preset(current_user.id, preset.name, preset.data)
-        
-        # Return the created preset
+        preset_id = db_instance.create_preset(current_user.id, project_id, preset.name, preset.data)
         return {"id": preset_id, "name": preset.name, "data": preset.data}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -673,16 +750,16 @@ async def create_preset(preset: PresetCreate, current_user: User = Depends(get_c
         logger.error(f"Error creating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@preset_router.get("/", response_model=List[PresetCreate])
-async def get_presets(current_user: User = Depends(get_current_active_user)):
+@preset_router.get("/")
+async def get_presets(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        presets = db_instance.get_presets(current_user.id)
+        presets = db_instance.get_presets(current_user.id, project_id)
         return presets
     except Exception as e:
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@preset_router.get("/{preset_name}", response_model=PresetCreate)
+@preset_router.get("/{preset_name}")
 async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
     try:
         preset = db_instance.get_preset_by_name(preset_name, current_user.id)
@@ -704,6 +781,38 @@ async def delete_preset(preset_name: str, current_user: User = Depends(get_curre
         logger.error(f"Error deleting preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Add these routes
+@project_router.post("/")
+async def create_project(project: ProjectCreate, current_user: User = Depends(get_current_active_user)):
+    project_id = db_instance.create_project(project.name, project.description, current_user.id)
+    return {"message": "Project created successfully", "project_id": project_id}
+
+@project_router.get("/")
+async def get_projects(current_user: User = Depends(get_current_active_user)):
+    projects = db_instance.get_projects(current_user.id)
+    return {"projects": projects}
+
+@project_router.get("/{project_id}")
+async def get_project(project_id: str, current_user: User = Depends(get_current_active_user)):
+    project = db_instance.get_project(project_id, current_user.id)
+    if project:
+        return project
+    raise HTTPException(status_code=404, detail="Project not found")
+
+@project_router.put("/{project_id}")
+async def update_project(project_id: str, project: ProjectUpdate, current_user: User = Depends(get_current_active_user)):
+    updated_project = db_instance.update_project(project_id, project.name, project.description, current_user.id)
+    if updated_project:
+        return updated_project
+    raise HTTPException(status_code=404, detail="Project not found")
+
+@project_router.delete("/{project_id}")
+async def delete_project(project_id: str, current_user: User = Depends(get_current_active_user)):
+    success = db_instance.delete_project(project_id, current_user.id)
+    if success:
+        return {"message": "Project deleted successfully"}
+    raise HTTPException(status_code=404, detail="Project not found")
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
@@ -711,6 +820,7 @@ app.include_router(codex_item_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
 app.include_router(preset_router) # Include the preset router
+app.include_router(project_router, prefix="/projects", tags=["projects"])
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -742,18 +852,18 @@ async def health_check():
         return JSONResponse({"status": "Error", "error": str(e)}, status_code=500)
 
 @app.get("/validity-checks")
-async def get_validity_checks(current_user: User = Depends(get_current_active_user)):
+async def get_validity_checks(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        validity_checks = db_instance.get_all_validity_checks(current_user.id)
+        validity_checks = db_instance.get_all_validity_checks(current_user.id, project_id)
         return {"validityChecks": validity_checks}
     except Exception as e:
         logging.error(f"Error fetching validity checks: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/validity-checks/{check_id}")
-async def delete_validity_check(check_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_validity_check(check_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        result = db_instance.delete_validity_check(check_id, current_user.id)
+        result = db_instance.delete_validity_check(check_id, current_user.id, project_id)
         if result:
             return {"message": "Validity check deleted successfully"}
         else:

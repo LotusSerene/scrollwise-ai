@@ -43,7 +43,8 @@ class _LoginScreenState extends State<LoginScreen> {
             widget.onLogin(data['access_token']);
             await setAuthToken(data['access_token']); // Store the token
             Fluttertoast.showToast(msg: 'Login successful!');
-            Navigator.pushReplacementNamed(context, '/main');
+            Navigator.pushReplacementNamed(
+                context, '/projects'); // Changed to '/projects'
           } else {
             Fluttertoast.showToast(msg: 'Invalid credentials');
           }

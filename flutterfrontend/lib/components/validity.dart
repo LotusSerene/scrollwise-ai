@@ -6,7 +6,9 @@ import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
 class Validity extends StatefulWidget {
-  const Validity({Key? key}) : super(key: key);
+  final String projectId;
+
+  const Validity({Key? key, required this.projectId}) : super(key: key);
 
   @override
   State<Validity> createState() => _ValidityState();
@@ -25,7 +27,7 @@ class _ValidityState extends State<Validity> {
   Future<void> _fetchValidityChecks() async {
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/validity-checks'),
+        Uri.parse('$apiUrl/validity-checks?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
@@ -50,11 +52,11 @@ class _ValidityState extends State<Validity> {
   Future<void> _handleDeleteCheck(String checkId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$apiUrl/validity-checks/$checkId'),
+        Uri.parse(
+            '$apiUrl/validity-checks/$checkId?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
-      final jsonResponse = json.decode(response.body);
-      if (response.statusCode == 204 && !jsonResponse.containsKey('error')) {
+      if (response.statusCode == 200) {
         setState(() {
           _validityChecks.removeWhere((check) => check['id'] == checkId);
           if (_selectedCheck != null && _selectedCheck['id'] == checkId) {
@@ -63,7 +65,8 @@ class _ValidityState extends State<Validity> {
         });
         Fluttertoast.showToast(msg: 'Validity check deleted successfully');
       } else {
-        final errorMessage = jsonResponse['error'] ?? 'Error deleting validity check';
+        final errorMessage = json.decode(response.body)['detail'] ??
+            'Error deleting validity check';
         Fluttertoast.showToast(msg: errorMessage);
       }
     } catch (error) {
@@ -106,15 +109,20 @@ class _ValidityState extends State<Validity> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Validity: ${check['isValid'] ? 'Valid' : 'Invalid'}'),
+                        Text(
+                            'Validity: ${check['isValid'] ? 'Valid' : 'Invalid'}'),
                         Text('Chapter ID: ${check['chapterId']}'),
                         Text('Feedback: ${_formatString(check['feedback'])}'),
                         Text('Review: ${_formatString(check['review'])}'),
-                        Text('Style Guide Adherence: ${_formatBool(check['style_guide_adherence'])}'),
-                        Text('Style Guide Feedback: ${_formatString(check['style_guide_feedback'])}'),
+                        Text(
+                            'Style Guide Adherence: ${_formatBool(check['style_guide_adherence'])}'),
+                        Text(
+                            'Style Guide Feedback: ${_formatString(check['style_guide_feedback'])}'),
                         Text('Continuity: ${_formatBool(check['continuity'])}'),
-                        Text('Continuity Feedback: ${_formatString(check['continuity_feedback'])}'),
-                        Text('Test Results: ${_formatString(check['test_results'])}'),
+                        Text(
+                            'Continuity Feedback: ${_formatString(check['continuity_feedback'])}'),
+                        Text(
+                            'Test Results: ${_formatString(check['test_results'])}'),
                       ],
                     ),
                   ),

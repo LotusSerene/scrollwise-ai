@@ -1,18 +1,34 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 class AppState extends ChangeNotifier {
   bool _isLoggedIn = false;
+  String? _currentProjectId;
   List<dynamic> _chapters = [];
   List<dynamic> _codexItems = [];
   List<dynamic> _validityChecks = [];
-
+  String? _token;
   bool get isLoggedIn => _isLoggedIn;
+  String? get currentProjectId => _currentProjectId;
   List<dynamic> get chapters => _chapters;
   List<dynamic> get codexItems => _codexItems;
   List<dynamic> get validityChecks => _validityChecks;
-
+  String? get token => _token;
   void setLoggedIn(bool value) {
     _isLoggedIn = value;
+    notifyListeners();
+  }
+
+  void setCurrentProject(String? projectId) {
+    _currentProjectId = projectId;
+    // Clear existing data when switching projects
+    _chapters = [];
+    _codexItems = [];
+    _validityChecks = [];
+    notifyListeners();
+  }
+
+  void setToken(String? token) {
+    _token = token;
     notifyListeners();
   }
 
