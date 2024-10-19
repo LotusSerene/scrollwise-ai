@@ -659,6 +659,23 @@ class Database:
         finally:
             session.close()
 
+    def update_project_universe(self, project_id: str, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
+            if project:
+                project.universe_id = universe_id
+                project.updated_at = datetime.datetime.now(timezone.utc)  # Use timezone-aware UTC time
+                session.commit()
+                return project.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error updating project universe: {str(e)}")
+            raise
+        finally:
+            session.close()
+
     def delete_project(self, project_id: str, user_id: str) -> bool:
         session = self.get_session()
         try:

@@ -903,6 +903,17 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
 
+@project_router.put("/{project_id}/universe", response_model=Dict[str, Any])
+async def update_project_universe(project_id: str, universe_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        updated_project = db_instance.update_project_universe(project_id, universe_id, current_user.id)
+        if not updated_project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return updated_project
+    except Exception as e:
+        logger.error(f"Error updating project universe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
