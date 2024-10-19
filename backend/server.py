@@ -264,6 +264,18 @@ async def get_universe_knowledge_base(universe_id: str, current_user: User = Dep
     knowledge_base_items = db_instance.get_universe_knowledge_base(universe_id, current_user.id)
     return JSONResponse(content=knowledge_base_items)
 
+@universe_router.get("/{universe_id}/projects", response_model=List[Dict[str, Any]])
+async def get_projects_by_universe(universe_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        projects = db_instance.get_projects_by_universe(universe_id, current_user.id)
+        return JSONResponse(content=projects)
+    except Exception as e:
+        logger.error(f"Error fetching projects by universe: {str(e)}")
+        return JSONResponse(
+            content=jsonable_encoder({"detail": str(e)}),
+            status_code=500
+        )
+
 @universe_router.get("/", response_model=List[Dict[str, Any]])
 async def get_universes(current_user: User = Depends(get_current_active_user)):
     try:

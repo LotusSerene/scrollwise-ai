@@ -625,6 +625,14 @@ class Database:
         finally:
             session.close()
 
+    def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
+            return [project.to_dict() for project in projects]
+        finally:
+            session.close()
+
     def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         session = self.get_session()
         try:
@@ -695,7 +703,7 @@ class Database:
         except Exception as e:
             session.rollback()
             self.logger.error(f"Error creating universe: {str(e)}")
-            raise
+            raise ValueError(str(e))  # Ensure the error is a string
         finally:
             session.close()
 

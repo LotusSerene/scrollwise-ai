@@ -79,10 +79,13 @@ class _UniverseScreenState extends State<UniverseScreen> {
         setState(() {
           _projects = json.decode(response.body);
         });
+      } else {
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
       }
     } catch (error) {
       print('Error fetching universe projects: $error');
-      Fluttertoast.showToast(msg: 'Error fetching universe projects');
+      Fluttertoast.showToast(msg: 'Error fetching universe projects: ${error.toString()}');
     }
   }
 
