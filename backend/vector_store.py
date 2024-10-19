@@ -53,6 +53,7 @@ class VectorStore:
                 embedding_function=self.embeddings,
             )
             self.logger.debug("Chroma vector store initialized successfully")
+            self.logger.info(f"Vector store initialized for user: {user_id} and project: {project_id}")
         except Exception as e:
             self.logger.error(f"Error initializing Chroma vector store: {str(e)}")
             raise
@@ -83,6 +84,8 @@ class VectorStore:
             self.logger.info(f"Added content to knowledge base for user {self.user_id}. Embedding ID: {embedding_id}")
             return embedding_id
         except Exception as e:
+            self.logger.error(f"Error adding content to knowledge base: {str(e)}")
+            raise
             self.logger.error(
                 f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
             )
@@ -144,6 +147,7 @@ class VectorStore:
         )
         self.logger.info(f"Similarity search completed, found {len(results)} results")
         return results
+        return results
 
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         self.logger.debug(
@@ -170,7 +174,7 @@ class VectorStore:
         self.logger.info(
             f"Retrieved {len(content)} items from knowledge base for user {self.user_id}"
         )
-        return content
+        return content if content else []
 
     def _get_type(self, doc: Any) -> str:
         if isinstance(doc, Document):
