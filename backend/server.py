@@ -488,7 +488,7 @@ async def generate_chapters(
         generation_tasks[user_id][project_id] = generation_task
         background_tasks.add_task(await_and_log_exceptions, generation_task, user_id, project_id)
 
-        return StreamingResponse(generate(), media_type="application/json")
+        return StreamingResponse(await generate(), media_type="application/json")
 
     except HTTPException as e:
         raise e
