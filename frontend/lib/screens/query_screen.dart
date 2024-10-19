@@ -8,6 +8,9 @@ class QueryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Knowledge Base Query'),
+      ),
       body: Query(projectId: projectId),
     );
   }

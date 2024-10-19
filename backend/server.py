@@ -873,19 +873,6 @@ async def reset_chat_history(project_id: str, current_user: User = Depends(get_c
     agent_manager.reset_memory()
     return {"message": "Chat history reset successfully"}
 
-# Settings routes
-@settings_router.post("/api-key")
-async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)):
-    db_instance.save_api_key(current_user.id, api_key_update.apiKey)
-    return {"message": "API key saved successfully"}
-
-@settings_router.get("/api-key")
-async def check_api_key(current_user: User = Depends(get_current_active_user)):
-    api_key = db_instance.get_api_key(current_user.id)
-    is_set = bool(api_key)
-    masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
-    return {"isSet": is_set, "apiKey": masked_key}
-
 @settings_router.delete("/api-key")
 async def remove_api_key(current_user: User = Depends(get_current_active_user)):
     db_instance.remove_api_key(current_user.id)
@@ -901,13 +888,6 @@ async def save_model_settings(settings: ModelSettings, current_user: User = Depe
     db_instance.save_model_settings(current_user.id, settings.dict())
     return {"message": "Model settings saved successfully"}
 
-# Add this new route for chat history
-@app.get("/chat-history")
-async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
-    logging.debug(f"Fetching chat history for user: {current_user.id}")
-    chat_history = db_instance.get_chat_history(current_user.id, project_id)
-    logging.debug(f"Chat history fetched: {len(chat_history)} messages")
-    return {"chatHistory": chat_history}
 
 # Preset routes
 
@@ -932,10 +912,26 @@ async def get_presets(project_id: str, current_user: User = Depends(get_current_
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@preset_router.get("/{preset_name}")
-async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
+@preset_router.put("/{preset_name}")  # Update route
+async def update_preset(preset_name: str, preset_update: PresetUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        preset = db_instance.get_preset_by_name(preset_name, current_user.id)
+        existing_preset = db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
+        if not existing_preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+
+        # Update the preset data
+        updated_data = preset_update.data.dict()
+        db_instance.update_preset(preset_name, current_user.id, project_id, updated_data)
+
+        return {"message": "Preset updated successfully", "name": preset_name, "data": updated_data}
+    except Exception as e:
+        logger.error(f"Error updating preset: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@preset_router.get("/{preset_name}")
+async def get_preset(preset_name: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        preset = db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
         if not preset:
             raise HTTPException(status_code=404, detail="Preset not found")
         return preset
@@ -944,9 +940,9 @@ async def get_preset(preset_name: str, current_user: User = Depends(get_current_
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @preset_router.delete("/{preset_name}")
-async def delete_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
+async def delete_preset(preset_name: str, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        deleted = db_instance.delete_preset(preset_name, current_user.id)
+        deleted = db_instance.delete_preset(preset_name, current_user.id, project_id)
         if deleted:
             return {"message": "Preset deleted successfully"}
         raise HTTPException(status_code=404, detail="Preset not found")
@@ -954,7 +950,6 @@ async def delete_preset(preset_name: str, current_user: User = Depends(get_curre
         logger.error(f"Error deleting preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Add these routes
 @project_router.post("/")
 async def create_project(project: ProjectCreate, current_user: User = Depends(get_current_active_user)):
     try:
@@ -990,21 +985,6 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
 
-@project_router.put("/{project_id}/universe")
-async def update_project_universe(project_id: str, universe: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
-    try:
-        universe_id = universe.get('universe_id')
-        if universe_id is None:
-            raise HTTPException(status_code=400, detail="universe_id is required")
-        
-        updated_project = db_instance.update_project_universe(project_id, universe_id, current_user.id)
-        if not updated_project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        return updated_project
-    except Exception as e:
-        logger.error(f"Error updating project universe: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
@@ -1014,7 +994,7 @@ app.include_router(settings_router)
 app.include_router(preset_router)
 app.include_router(project_router)
 app.include_router(universe_router)
-app.include_router(codex_router)  # Make sure this line is present
+app.include_router(codex_router)
 
 
 @app.middleware("http")
