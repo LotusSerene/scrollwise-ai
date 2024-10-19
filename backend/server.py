@@ -876,6 +876,12 @@ async def reset_chat_history(project_id: str, current_user: User = Depends(get_c
     agent_manager.reset_memory()
     return {"message": "Chat history reset successfully"}
 
+@knowledge_base_router.get("/chat-history")
+async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
+    agent_manager = AgentManager(current_user.id, project_id)
+    chat_history = agent_manager.get_chat_history()
+    return {"chatHistory": chat_history}
+
 # Settings routes
 @settings_router.post("/api-key")
 async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)):

@@ -568,6 +568,9 @@ class AgentManager:
         db_instance.delete_chat_history(self.user_id, self.project_id)
         self.logger.info("Chat history has been reset.")
 
+    def get_chat_history(self):
+        return db_instance.get_chat_history(self.user_id, self.project_id)
+
     def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
         codex_item_names = [item['name'] for item in codex_items]
         
