@@ -37,8 +37,8 @@ import asyncio
 class CodexItem(BaseModel):
     name: str = Field(default="", description="Name of the codex item")
     description: str = Field(default="", description="Description of the codex item")
-    type: str = Field(default="lore", description="Type of the codex item (e.g., lore, worldbuilding, item, character)")
-    subtype: Optional[str] = Field(default=None, description="Subtype of the codex item (e.g., history, culture, geography, lore)")
+    type: str = Field(default="worldbuilding", description="Type of the codex item (e.g., worldbuilding, character, item, lore)")
+    subtype: Optional[str] = Field(default=None, description="Subtype of the codex item (e.g., history, culture, geography)")
 
 class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
@@ -644,6 +644,9 @@ class AgentManager:
             Create a concise and creative name for the codex item. 
             Then, write a detailed description of the codex item, expanding on the provided description. 
             Ensure that the name and description are consistent with the provided type and subtype.
+
+            Types: worldbuilding, character, item, lore
+            Subtypes (for worldbuilding only): history, culture, geography
 
             {format_instructions}
             """)

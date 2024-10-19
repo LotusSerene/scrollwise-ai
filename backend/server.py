@@ -157,7 +157,7 @@ class UniverseUpdate(BaseModel):
     name: str
 
 class CodexItemGenerateRequest(BaseModel):
-    codex_type: str = Field(..., description="Type of codex item (all, worldbuilding, character, item, lore)")
+    codex_type: str = Field(..., description="Type of codex item (worldbuilding, character, item, lore)")
     subtype: Optional[str] = Field(None, description="Subtype of codex item (only for worldbuilding)")
     description: str = Field(..., description="Description of the codex item")
 

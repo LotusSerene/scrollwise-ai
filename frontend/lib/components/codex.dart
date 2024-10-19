@@ -178,10 +178,10 @@ class _CodexState extends State<Codex> {
                         });
                       },
                       items: <String>[
-                        'lore',
                         'worldbuilding',
+                        'character',
                         'item',
-                        'character'
+                        'lore'
                       ].map<DropdownMenuItem<String>>((String value) {
                         return DropdownMenuItem<String>(
                           value: value,
