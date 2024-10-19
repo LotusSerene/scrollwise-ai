@@ -592,8 +592,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Logout'),
-            onTap: () {
-              // Handle logout functionality
+            onTap: () async {
+              await removeAuthToken();
+              Navigator.pushReplacementNamed(context, '/login');
             },
           ),
         ],
