@@ -1033,10 +1033,6 @@ app.include_router(codex_router)
 async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id, project_id)
     chat_history = agent_manager.get_chat_history()
-    agent_manager = AgentManager(current_user.id, project_id)
-    chat_history = agent_manager.get_chat_history()
-    agent_manager = AgentManager(current_user.id, project_id)
-    chat_history = agent_manager.get_chat_history()
     return {"chatHistory": chat_history}
 
 @app.post("/chat-history")
