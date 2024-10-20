@@ -11,6 +11,7 @@ import 'screens/codex_screen.dart';
 import 'screens/validity_screen.dart';
 import 'screens/knowledge_base_screen.dart';
 import 'screens/query_screen.dart';
+import 'screens/chapters_screen.dart'; // Import ChaptersScreen
 import 'utils/auth.dart';
 import 'utils/theme.dart';
 import 'package:flutter/services.dart';
@@ -48,7 +49,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const AuthWrapper(),
         '/projects': (context) => const ProjectsScreen(),
-        '/home': (context) => const HomeScreen(), // Use HomeScreen widget
+        '/home': (context) => const HomeScreen(),
         '/login': (context) => LoginScreen(onLogin: (token) {
               Provider.of<AppState>(context, listen: false).setLoggedIn(true);
               Navigator.pushReplacementNamed(context, '/projects');
@@ -63,6 +64,8 @@ class MyApp extends StatelessWidget {
             projectId: ModalRoute.of(context)!.settings.arguments as String),
         '/query': (context) => QueryScreen(
             projectId: ModalRoute.of(context)!.settings.arguments as String),
+        '/chapters': (context) => ChaptersScreen(
+            projectId: ModalRoute.of(context)!.settings.arguments as String), // Added ChaptersScreen route
       },
     );
   }

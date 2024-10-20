@@ -70,23 +70,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
       try {
         final response = await http.post(
-          Uri.parse('$apiUrl/auth/register'),
-          headers: {'Content-Type': 'application/json'},
-          body: {
+          Uri.parse('$apiUrl/auth/register'), // Corrected endpoint
+          headers: {'Content-Type': 'application/json'}, // Use JSON for body
+          body: json.encode({ // Encode body as JSON
             'username': _emailController.text,
             'password': _passwordController.text,
-          }
+          }),
         );
 
-        if (response.statusCode == 201) {
-          Fluttertoast.showToast(
-              msg: 'Registration successful! Please log in.');
+        if (response.statusCode == 201) { 
+          // Successful registration
+          Fluttertoast.showToast(msg: 'Registration successful! You can now log in.');
+          // Optionally clear the form fields:
+          _emailController.clear();
+          _passwordController.clear();
         } else {
-          Fluttertoast.showToast(msg: 'Error registering');
+          Fluttertoast.showToast(msg: 'Registration failed. Please try again.');
+          // Handle other status codes or errors from the backend if needed
         }
       } catch (error) {
         print('Registration error: $error');
-        Fluttertoast.showToast(msg: 'Error registering');
+        Fluttertoast.showToast(msg: 'Error during registration.');
       } finally {
         setState(() {
           _isLoading = false;
@@ -94,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

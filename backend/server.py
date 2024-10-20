@@ -145,9 +145,10 @@ class ProjectCreate(BaseModel):
     universe_id: Optional[str] = None  # Make universe_id optional
 
 class ProjectUpdate(BaseModel):
-    name: str
-    description: str
-    universe_id: Optional[str] = None  # Make universe_id optional
+    name: Optional[str] = None
+    description: Optional[str] = None
+    universe_id: Optional[str] = None
+    target_word_count: Optional[int] = None
 
 # Universe model
 class UniverseCreate(BaseModel):
@@ -168,6 +169,8 @@ class ChatHistoryItem(BaseModel):
 class ChatHistoryRequest(BaseModel):
     chatHistory: List[ChatHistoryItem]
 
+class UpdateTargetWordCountRequest(BaseModel):
+    targetWordCount: int
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -247,13 +250,34 @@ project_router = APIRouter(prefix="/projects", tags=["Projects"])
 universe_router = APIRouter(prefix="/universes", tags=["Universes"])
 codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for codex
 
+# Project routes with target word count update
+@project_router.put("/{project_id}/target-word-count")
+async def update_project_target_word_count(
+    project_id: str,
+    update_data: UpdateTargetWordCountRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        updated_project = db_instance.update_project_target_word_count(
+            project_id, update_data.targetWordCount, current_user.id
+        )
+        if not updated_project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return updated_project
+    except Exception as e:
+        logger.error(f"Error updating project target word count: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # Universe routes
-@universe_router.post("/", response_model=str)
+@universe_router.post("/", response_model=Dict[str, Any])
 async def create_universe(universe: UniverseCreate, current_user: User = Depends(get_current_active_user)):
-    universe_id = db_instance.create_universe(universe.name, current_user.id)
-    return universe_id
+    try:
+        universe_id = db_instance.create_universe(universe.name, current_user.id)
+        return {"id": universe_id, "name": universe.name}
+    except Exception as e:
+        logger.error(f"Error creating universe: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @universe_router.get("/{universe_id}", response_model=Dict[str, Any])
 async def get_universe(universe_id: str, current_user: User = Depends(get_current_active_user)):
@@ -978,10 +1002,7 @@ async def delete_preset(preset_name: str, project_id: str, current_user: User = 
 @project_router.put("/{project_id}/universe")
 async def update_project_universe(project_id: str, universe: Dict[str, Any], current_user: User = Depends(get_current_active_user)):
     try:
-        universe_id = universe.get('universe_id')
-        if universe_id is None:
-            raise HTTPException(status_code=400, detail="universe_id is required")
-        
+        universe_id = universe.get('universe_id')  # This can now be None
         updated_project = db_instance.update_project_universe(project_id, universe_id, current_user.id)
         if not updated_project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -1013,10 +1034,21 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
 
 @project_router.put("/{project_id}")
 async def update_project(project_id: str, project: ProjectUpdate, current_user: User = Depends(get_current_active_user)):
-    updated_project = db_instance.update_project(project_id, project.name, project.description, current_user.id, project.universe_id)
-    if updated_project:
-        return updated_project
-    raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        updated_project = db_instance.update_project(
+            project_id,
+            project.name,
+            project.description,
+            current_user.id,
+            project.universe_id,
+            project.target_word_count
+        )
+        if updated_project:
+            return updated_project
+        raise HTTPException(status_code=404, detail="Project not found")
+    except Exception as e:
+        logger.error(f"Error updating project: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @project_router.delete("/{project_id}")
 async def delete_project(project_id: str, current_user: User = Depends(get_current_active_user)):

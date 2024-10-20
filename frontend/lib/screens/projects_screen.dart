@@ -6,9 +6,9 @@ import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'universe_screen.dart';
 import 'dart:io';
 import 'dart:async';
+import 'universe_list_screen.dart';
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
@@ -33,6 +33,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   void initState() {
     super.initState();
     _fetchData();
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    _projectNameController.dispose();
+    _projectDescriptionController.dispose();
+    _universeNameController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchData() async {
@@ -70,7 +79,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             Uri.parse('$apiUrl/projects'),
             headers: headers,
           )
-          .timeout(Duration(seconds: 10)); // Add a timeout
+          .timeout(Duration(seconds: 10));
       if (!_mounted) return;
       if (response.statusCode == 200) {
         setState(() {
@@ -139,12 +148,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           body: utf8.encode(json.encode(requestBody)),
         );
 
-        if (response.statusCode == 201) {
+        if (response.statusCode == 201 || response.statusCode == 200) {
           final newProject = json.decode(utf8.decode(response.bodyBytes));
           setState(() {
             _projects.add(newProject);
             _projectNameController.clear();
             _projectDescriptionController.clear();
+            _selectedUniverseId = null;
           });
           Fluttertoast.showToast(msg: 'Project created successfully');
         } else {
@@ -159,37 +169,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
-  Future<void> _createUniverse() async {
-    if (_universeFormKey.currentState!.validate()) {
-      try {
-        final headers = {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/json',
-        };
-        final response = await http.post(
-          Uri.parse('$apiUrl/universes'),
-          headers: headers,
-          body:
-              utf8.encode(json.encode({'name': _universeNameController.text})),
-        );
+  Future<void> _createUniverse(String name) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/universes'),
+        headers: await getAuthHeaders(),
+        body: json.encode({'name': name}),
+      );
 
-        if (response.statusCode == 201) {
-          final newUniverse = json.decode(utf8.decode(response.bodyBytes));
-          setState(() {
-            _universes.add(newUniverse);
-            _universeNameController.clear();
-          });
-          Fluttertoast.showToast(msg: 'Universe created successfully');
-          _fetchUniverses(); // Refresh the list of universes
-        } else {
-          final errorData = json.decode(response.body);
-          throw Exception(errorData['detail'] ?? 'Unknown error occurred');
-        }
-      } catch (error) {
-        print('Error creating universe: $error');
-        Fluttertoast.showToast(
-            msg: 'Error creating universe: ${error.toString()}');
+      if (response.statusCode == 200) {
+        Fluttertoast.showToast(msg: 'Universe created successfully');
+        _fetchData();
+      } else {
+        throw Exception('Failed to create universe');
       }
+    } catch (error) {
+      print('Error creating universe: $error');
+      Fluttertoast.showToast(
+          msg: 'Error creating universe: ${error.toString()}');
     }
   }
 
@@ -197,21 +194,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     try {
       final response = await http.put(
         Uri.parse('$apiUrl/universes/$universeId'),
-        headers: {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: utf8.encode(json.encode({
-          'name': newName,
-        })),
+        headers: await getAuthHeaders(),
+        body: json.encode({'name': newName}),
       );
 
       if (response.statusCode == 200) {
         Fluttertoast.showToast(msg: 'Universe updated successfully');
-        _fetchUniverses(); // Refresh the list of universes
+        _fetchData();
       } else {
-        final errorData = json.decode(response.body);
-        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
+        throw Exception('Failed to update universe');
       }
     } catch (error) {
       print('Error updating universe: $error');
@@ -229,10 +220,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
       if (response.statusCode == 200) {
         Fluttertoast.showToast(msg: 'Universe deleted successfully');
-        _fetchUniverses(); // Refresh the list of universes
+        _fetchData();
       } else {
-        final errorData = json.decode(response.body);
-        throw Exception(errorData['detail'] ?? 'Unknown error occurred');
+        throw Exception('Failed to delete universe');
       }
     } catch (error) {
       print('Error deleting universe: $error');
@@ -275,8 +265,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               onPressed: () {
                 if (_universeFormKey.currentState!.validate()) {
                   if (universeId == null) {
-                    _universeNameController.text = controller.text;
-                    _createUniverse();
+                    _createUniverse(controller.text);
                   } else {
                     _updateUniverse(universeId, controller.text);
                   }
@@ -305,7 +294,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
       if (response.statusCode == 200) {
         Fluttertoast.showToast(msg: 'Project updated successfully');
-        _fetchProjects(); // Refresh the list of projects
+        _fetchProjects();
       } else {
         throw Exception('Failed to update project');
       }
@@ -320,61 +309,70 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
-      child: Builder(
-        builder: (BuildContext context) {
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('Projects & Universes'),
-              bottom: const TabBar(
-                tabs: [
-                  Tab(text: 'Projects'),
-                  Tab(text: 'Universes'),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Projects & Universes'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Projects'),
+              Tab(text: 'Universes'),
+            ],
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: [
+                  _buildProjectsTab(),
+                  Builder(
+                    builder: (BuildContext context) {
+                      try {
+                        return UniverseListScreen();
+                      } catch (e, stackTrace) {
+                        print(
+                            'Error building UniverseListScreen: $e\n$stackTrace');
+                        return const Center(
+                            child: Text('Error loading Universe List'));
+                      }
+                    },
+                  ),
                 ],
               ),
+        floatingActionButton: Builder(
+          builder: (BuildContext context) => FloatingActionButton(
+            onPressed: () {
+              final TabController tabController =
+                  DefaultTabController.of(context);
+              if (tabController.index == 0) {
+                // Show project creation form
+                _showProjectDialog();
+              } else {
+                // Navigate to create universe screen or show universe creation dialog
+                _showUniverseDialog();
+              }
+            },
+            child: const Icon(Icons.add),
+          ),
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          items: const <BottomNavigationBarItem>[
+            BottomNavigationBarItem(
+              icon: Icon(Icons.folder),
+              label: 'Projects',
             ),
-            body: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    children: [
-                      _buildProjectsTab(),
-                      _buildUniversesTab(),
-                    ],
-                  ),
-            floatingActionButton: FloatingActionButton(
-              onPressed: () {
-                final TabController tabController =
-                    DefaultTabController.of(context);
-                if (tabController.index == 0) {
-                  // Show project creation form
-                  _showProjectDialog();
-                } else {
-                  // Show universe creation dialog
-                  _showUniverseDialog();
-                }
-              },
-              child: const Icon(Icons.add),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings),
+              label: 'Settings',
             ),
-            bottomNavigationBar: BottomNavigationBar(
-              items: const <BottomNavigationBarItem>[
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.folder),
-                  label: 'Projects',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.settings),
-                  label: 'Settings',
-                ),
-              ],
-              currentIndex: 0,
-              onTap: (index) {
-                if (index == 1) {
-                  Navigator.pushNamed(context, '/settings');
-                }
-              },
-            ),
-            drawer: _buildDrawer(),
-          );
-        },
+          ],
+          currentIndex: 0,
+          onTap: (index) {
+            if (index == 1) {
+              Navigator.pushNamed(context, '/settings');
+            }
+          },
+        ),
+        drawer: _buildDrawer(),
       ),
     );
   }
@@ -382,181 +380,56 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Widget _buildProjectsTab() {
     return _projects.isEmpty
         ? const Center(child: Text('No projects found.'))
-        : ListView.builder(
-            itemCount: _projects.length,
-            itemBuilder: (context, index) {
-              final project = _projects[index];
-              return ListTile(
-                title: Text(project['name']),
-                subtitle: Text(project['description']),
-                trailing: FutureBuilder<List<dynamic>>(
-                  future: _fetchUniverses(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const CircularProgressIndicator();
-                    } else if (snapshot.hasError) {
-                      return Text('Error: ${snapshot.error}');
-                    } else {
-                      final universes = snapshot.data ?? [];
-                      return DropdownButton<String>(
-                        value: project['universe_id'],
-                        onChanged: (String? newValue) {
-                          _updateProjectUniverse(project['id'], newValue);
-                        },
-                        items: [
-                          const DropdownMenuItem<String>(
-                            value: null,
-                            child: Text('No Universe'),
-                          ),
-                          if (universes.isNotEmpty)
-                            ...universes.map((universe) {
-                              return DropdownMenuItem<String>(
-                                value: universe['id'],
-                                child: Text(universe['name']),
-                              );
-                            }).toList(),
-                        ],
-                      );
-                    }
-                  },
-                ),
-                onTap: () {
-                  Provider.of<AppState>(context, listen: false)
-                      .setCurrentProject(project['id']);
-                  Navigator.pushReplacementNamed(context, '/home',
-                      arguments: project['id']);
-                },
-              );
-            },
-          );
-  }
-
-  Widget _buildUniversesTab() {
-    return _universes.isEmpty
-        ? const Center(child: Text('No universes found.'))
-        : ListView.builder(
-            itemCount: _universes.length,
-            itemBuilder: (context, index) {
-              final universe = _universes[index];
-              return ListTile(
-                title: Text(universe['name']),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          UniverseScreen(universeId: universe['id']),
+        : _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView.builder(
+                itemCount: _projects.length,
+                itemBuilder: (context, index) {
+                  final project = _projects[index];
+                  return ListTile(
+                    title: Text(project['name']),
+                    subtitle: Text(project['description']),
+                    trailing: FutureBuilder<List<dynamic>>(
+                      future: _fetchUniverses(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const CircularProgressIndicator();
+                        } else if (snapshot.hasError) {
+                          return Text('Error: ${snapshot.error}');
+                        } else {
+                          final universes = snapshot.data ?? [];
+                          return DropdownButton<String>(
+                            value: project['universe_id'],
+                            onChanged: (String? newValue) {
+                              _updateProjectUniverse(project['id'], newValue);
+                            },
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: null,
+                                child: Text('No Universe'),
+                              ),
+                              if (universes.isNotEmpty)
+                                ...universes.map((universe) {
+                                  return DropdownMenuItem<String>(
+                                    value: universe['id'],
+                                    child: Text(universe['name']),
+                                  );
+                                }).toList(),
+                            ],
+                          );
+                        }
+                      },
                     ),
+                    onTap: () {
+                      Provider.of<AppState>(context, listen: false)
+                          .setCurrentProject(project['id']);
+                      Navigator.pushReplacementNamed(context, '/home',
+                          arguments: project['id']);
+                    },
                   );
                 },
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () {
-                        _showUniverseDialog(
-                          universeId: universe['id'],
-                          universeName: universe['name'],
-                        );
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () {
-                        _deleteUniverse(universe['id']);
-                      },
-                    ),
-                  ],
-                ),
               );
-            },
-          );
-  }
-
-  void _showProjectDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Create Project'),
-          content: Form(
-            key: _projectFormKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _projectNameController,
-                  decoration: const InputDecoration(labelText: 'Project Name'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a project name';
-                    }
-                    return null;
-                  },
-                ),
-                TextFormField(
-                  controller: _projectDescriptionController,
-                  decoration:
-                      const InputDecoration(labelText: 'Project Description'),
-                ),
-                FutureBuilder<List<dynamic>>(
-                  future: _fetchUniverses(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const CircularProgressIndicator();
-                    } else if (snapshot.hasError) {
-                      return Text('Error: ${snapshot.error}');
-                    } else {
-                      final universes = snapshot.data!;
-                      return DropdownButtonFormField<String>(
-                        value: _selectedUniverseId,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedUniverseId = value;
-                          });
-                        },
-                        items: universes.map((universe) {
-                          return DropdownMenuItem<String>(
-                            value: universe['id'],
-                            child: Text(universe['name']),
-                          );
-                        }).toList(),
-                        decoration:
-                            const InputDecoration(labelText: 'Universe'),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please select a universe';
-                          }
-                          return null;
-                        },
-                      );
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancel'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            TextButton(
-              child: const Text('Create'),
-              onPressed: () {
-                if (_projectFormKey.currentState!.validate()) {
-                  _createProject();
-                  Navigator.of(context).pop();
-                }
-              },
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Widget _buildDrawer() {
@@ -600,6 +473,92 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showProjectDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Create Project'),
+          content: Form(
+            key: _projectFormKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _projectNameController,
+                  decoration: const InputDecoration(labelText: 'Project Name'),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter a project name';
+                    }
+                    return null;
+                  },
+                ),
+                TextFormField(
+                  controller: _projectDescriptionController,
+                  decoration:
+                      const InputDecoration(labelText: 'Project Description'),
+                ),
+                FutureBuilder<List<dynamic>>(
+                  future: _fetchUniverses(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const CircularProgressIndicator();
+                    } else if (snapshot.hasError) {
+                      return Text('Error: ${snapshot.error}');
+                    } else {
+                      final universes = snapshot.data!;
+                      return DropdownButtonFormField<String?>(
+                        value: _selectedUniverseId,
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedUniverseId = value;
+                          });
+                        },
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('No Universe'),
+                          ),
+                          ...universes.map((universe) {
+                            return DropdownMenuItem<String?>(
+                              value: universe['id'],
+                              child: Text(universe['name']),
+                            );
+                          }).toList(),
+                        ],
+                        decoration: const InputDecoration(
+                            labelText: 'Universe (Optional)'),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('Create'),
+              onPressed: () {
+                if (_projectFormKey.currentState!.validate()) {
+                  _createProject();
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

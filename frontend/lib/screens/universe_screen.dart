@@ -46,6 +46,8 @@ class _UniverseScreenState extends State<UniverseScreen> {
       );
       if (universeResponse.statusCode == 200) {
         _universeData = json.decode(utf8.decode(universeResponse.bodyBytes));
+      } else {
+        throw Exception('Failed to load universe data');
       }
 
       // Fetch projects
@@ -55,6 +57,8 @@ class _UniverseScreenState extends State<UniverseScreen> {
       );
       if (projectsResponse.statusCode == 200) {
         _projects = json.decode(utf8.decode(projectsResponse.bodyBytes));
+      } else {
+        throw Exception('Failed to load projects');
       }
 
       // Fetch codex items
@@ -74,8 +78,7 @@ class _UniverseScreenState extends State<UniverseScreen> {
       if (knowledgeBaseResponse.statusCode == 200) {
         Map<String, dynamic> responseData =
             json.decode(utf8.decode(knowledgeBaseResponse.bodyBytes));
-        _knowledgeBaseItems =
-            Map<String, List<dynamic>>.from(responseData['content']);
+        _knowledgeBaseItems = Map<String, List<dynamic>>.from(responseData);
       }
 
       setState(() {
@@ -83,7 +86,8 @@ class _UniverseScreenState extends State<UniverseScreen> {
       });
     } catch (error) {
       print('Error fetching universe data: $error');
-      Fluttertoast.showToast(msg: 'Error fetching universe data');
+      Fluttertoast.showToast(
+          msg: 'Error fetching universe data: ${error.toString()}');
       setState(() {
         _isLoading = false;
       });

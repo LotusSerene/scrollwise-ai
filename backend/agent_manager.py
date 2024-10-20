@@ -636,17 +636,37 @@ class AgentManager:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['mainLLM']))
             
+            # Fetch all existing codex items for the user and project
+            existing_codex_items = db_instance.get_all_codex_items(self.user_id, self.project_id)
+            
             prompt = ChatPromptTemplate.from_template("""
-            You are an expert at creating new codex items for stories. 
-            Create a new codex item with the following type, subtype, and description:
+            You are a master storyteller and world-builder, tasked with creating rich, detailed codex items for an immersive narrative universe. Your expertise spans across various domains, including history, culture, geography, character development, and artifact creation. Your goal is to craft a new codex item that seamlessly integrates into the story world.
+
+            Create a new codex item based on the following specifications:
 
             Type: {codex_type}
             Subtype: {subtype}
-            Description: {description}
+            Initial Description: {description}
 
-            Create a concise and creative name for the codex item. 
-            Then, write a detailed description of the codex item, expanding on the provided description. 
-            Ensure that the name and description are consistent with the provided type and subtype.
+            Existing Codex Items:
+            {existing_codex_items}
+
+            Your task:
+            1. Devise a concise, evocative name for the codex item that captures its essence.
+            2. Craft a comprehensive description that expands significantly on the initial description, adding depth, context, and vivid details.
+            3. Ensure perfect consistency between the name, description, and the specified type and subtype.
+            4. Make sure the new codex item is consistent with and complements the existing codex items. Do not contradict or duplicate information from existing items.
+
+            Specific guidelines based on codex type:
+            - Lore: Include a precise date or time period for the event. Describe its historical significance and lasting impact on the world.
+            - Character: Detail the character's age, gender, physical appearance, personality traits, motivations, and role in the story world.
+            - Item: Elaborate on the item's appearance, materials, origin, magical or technological properties, cultural significance, and any legends associated with it.
+            - Worldbuilding: 
+              * History: Describe key events, eras, or figures that shaped this aspect of the world.
+              * Culture: Detail customs, beliefs, social structures, or artistic expressions.
+              * Geography: Paint a vivid picture of the landscape, climate, flora, fauna, and how it influences the inhabitants.
+
+            Remember to interweave the codex item seamlessly with existing world elements, hinting at connections to other potential codex items. Your description should ignite curiosity and invite further exploration of the story world.
 
             Types: worldbuilding, character, item, lore
             Subtypes (for worldbuilding only): history, culture, geography
@@ -661,6 +681,7 @@ class AgentManager:
                 "codex_type": codex_type,
                 "subtype": subtype or "N/A",
                 "description": description,
+                "existing_codex_items": json.dumps([item.to_dict() for item in existing_codex_items], indent=2),
                 "format_instructions": parser.get_format_instructions()
             })
             
@@ -677,3 +698,4 @@ class AgentManager:
                 "name": "Error generating codex item",
                 "description": f"An error occurred: {str(e)}"
             }
+

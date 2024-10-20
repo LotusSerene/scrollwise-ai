@@ -31,7 +31,8 @@ class Project(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
-    universe_id = Column(String, ForeignKey('universes.id'), nullable=True)  # Add this line
+    universe_id = Column(String, ForeignKey('universes.id'), nullable=True)
+    target_word_count = Column(Integer, default=0) # Added target_word_count column
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
 
@@ -40,7 +41,8 @@ class Project(Base):
             'id': self.id,
             'name': self.name,
             'description': self.description,
-            'universe_id': self.universe_id,  # Add this line
+            'universe_id': self.universe_id,
+            'targetWordCount': self.target_word_count, # Added targetWordCount to dict
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
@@ -49,7 +51,7 @@ class Chapter(Base):
     __tablename__ = 'chapters'
     id = Column(String, primary_key=True)
     title = Column(String(255), nullable=False)
-    content = Column(TEXT, nullable=False)  # Use TEXT type for PostgreSQL
+    content = Column(TEXT, nullable=False)
     chapter_number = Column(Integer, nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)
@@ -123,7 +125,7 @@ class ChatHistory(Base):
     messages = Column(Text, nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
-class Preset(Base): # New table for presets
+class Preset(Base):
     __tablename__ = 'presets'
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
@@ -183,8 +185,8 @@ class Database:
             if user:
                 return {
                     'id': user.id,
-                    'username': user.email,  # Map email to username
-                    'hashed_password': user.password,  # Use hashed_password instead of password
+                    'username': user.email,
+                    'hashed_password': user.password,
                     'email': user.email,
                     'api_key': user.api_key,
                     'model_settings': json.loads(user.model_settings) if user.model_settings else None
@@ -615,10 +617,10 @@ class Database:
         finally:
             session.close()
 
-    def create_project(self, name: str, description: str, user_id: str) -> str:
+    def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
         session = self.get_session()
         try:
-            project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id)
+            project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, universe_id=universe_id)
             session.add(project)
             session.commit()
             return project.id
@@ -653,15 +655,20 @@ class Database:
         finally:
             session.close()
 
-    def update_project(self, project_id: str, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         session = self.get_session()
         try:
             project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
             if project:
-                project.name = name
-                project.description = description
-                project.universe_id = universe_id
-                project.updated_at = datetime.datetime.now(timezone.utc)  # Use timezone-aware UTC time
+                if name is not None:
+                    project.name = name
+                if description is not None:
+                    project.description = description
+                if universe_id is not None:
+                    project.universe_id = universe_id
+                if target_word_count is not None:
+                    project.target_word_count = target_word_count
+                project.updated_at = datetime.datetime.now(timezone.utc)
                 session.commit()
                 return project.to_dict()
             return None
@@ -672,13 +679,13 @@ class Database:
         finally:
             session.close()
 
-    def update_project_universe(self, project_id: str, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
         session = self.get_session()
         try:
             project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
             if project:
-                project.universe_id = universe_id
-                project.updated_at = datetime.datetime.now(timezone.utc)  # Use timezone-aware UTC time
+                project.universe_id = universe_id  # This can now be None
+                project.updated_at = datetime.datetime.now(timezone.utc)
                 session.commit()
                 return project.to_dict()
             return None
@@ -694,13 +701,19 @@ class Database:
         try:
             project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
             if project:
-                # Delete related data
-                session.query(Chapter).filter_by(project_id=project_id).delete()
+                # Delete related data in the correct order
+                # First, delete validity checks
                 session.query(ValidityCheck).filter_by(project_id=project_id).delete()
+                
+                # Then delete chapters
+                session.query(Chapter).filter_by(project_id=project_id).delete()
+                
+                # Delete other related data
                 session.query(CodexItem).filter_by(project_id=project_id).delete()
                 session.query(ChatHistory).filter_by(project_id=project_id).delete()
                 session.query(Preset).filter_by(project_id=project_id).delete()
                 
+                # Finally, delete the project
                 session.delete(project)
                 session.commit()
                 return True

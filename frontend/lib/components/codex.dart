@@ -181,7 +181,7 @@ class _CodexState extends State<Codex> {
                         'worldbuilding',
                         'character',
                         'item',
-                        'lore'
+                        'lore' // Added 'lore' to the list
                       ].map<DropdownMenuItem<String>>((String value) {
                         return DropdownMenuItem<String>(
                           value: value,

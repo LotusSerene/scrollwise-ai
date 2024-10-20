@@ -29,8 +29,42 @@ class _EditorState extends State<Editor> {
   @override
   void initState() {
     super.initState();
+    _fetchChapters();
     if (widget.chapterId != null) {
       _loadChapter(widget.chapterId!);
+    }
+  }
+
+  Future<void> _fetchChapters() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    setState(() {
+      _error = null;
+    });
+
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+        final List<dynamic> chapters = jsonResponse['chapters'];
+        appState.setChapters(chapters);
+      } else {
+        final errorMessage = 'Error fetching chapters: ${response.statusCode}';
+        print(errorMessage);
+        setState(() {
+          _error = errorMessage;
+        });
+      }
+    } catch (error) {
+      final errorMessage = 'Error fetching chapters: $error';
+      print(errorMessage);
+      setState(() {
+        _error = errorMessage;
+      });
     }
   }
 
@@ -113,14 +147,15 @@ class _EditorState extends State<Editor> {
         Uri.parse('$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
-      final jsonResponse = json.decode(response.body);
-      if (response.statusCode == 204 && !jsonResponse.containsKey('error')) {
+      if (response.statusCode == 200) {
         Provider.of<AppState>(context, listen: false).removeChapter(chapterId);
         setState(() {
           _selectedChapter = null;
         });
         Fluttertoast.showToast(msg: 'Chapter deleted successfully');
+        _fetchChapters();
       } else {
+        final jsonResponse = json.decode(response.body);
         final errorMessage = jsonResponse['error'] ?? 'Error deleting chapter';
         Fluttertoast.showToast(msg: errorMessage);
       }
@@ -189,6 +224,7 @@ class _EditorState extends State<Editor> {
         } else {
           Fluttertoast.showToast(msg: 'Chapter created successfully');
         }
+        _fetchChapters();
       } else {
         final errorMessage = jsonResponse['error'] ?? 'Error saving chapter';
         Fluttertoast.showToast(msg: errorMessage);
@@ -244,28 +280,33 @@ class _EditorState extends State<Editor> {
                       ),
                       const SizedBox(height: 10),
                       Expanded(
-                        child: ListView.builder(
-                          itemCount: appState.chapters.length,
-                          itemBuilder: (context, index) {
-                            final chapter = appState.chapters[index];
-                            return ListTile(
-                              title: Text(
-                                chapter['title'],
-                                style: const TextStyle(color: Colors.white),
+                        child: _error != null
+                            ? Center(
+                                child: Text(_error!,
+                                    style: TextStyle(color: Colors.red)))
+                            : ListView.builder(
+                                itemCount: appState.chapters.length,
+                                itemBuilder: (context, index) {
+                                  final chapter = appState.chapters[index];
+                                  return ListTile(
+                                    title: Text(
+                                      chapter['title'],
+                                      style:
+                                          const TextStyle(color: Colors.white),
+                                    ),
+                                    tileColor: _selectedChapter == chapter
+                                        ? Colors.grey[700]
+                                        : null,
+                                    onTap: () => _handleChapterClick(chapter),
+                                    trailing: IconButton(
+                                      onPressed: () =>
+                                          _handleDeleteChapter(chapter['id']),
+                                      icon: const Icon(Icons.delete,
+                                          color: Colors.red),
+                                    ),
+                                  );
+                                },
                               ),
-                              tileColor: _selectedChapter == chapter
-                                  ? Colors.grey[700]
-                                  : null,
-                              onTap: () => _handleChapterClick(chapter),
-                              trailing: IconButton(
-                                onPressed: () =>
-                                    _handleDeleteChapter(chapter['id']),
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                              ),
-                            );
-                          },
-                        ),
                       ),
                       const SizedBox(height: 10),
                       ElevatedButton(

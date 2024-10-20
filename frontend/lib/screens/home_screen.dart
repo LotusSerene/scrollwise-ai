@@ -5,11 +5,11 @@ import '../components/validity.dart';
 import '../components/knowledge_base.dart';
 import '../components/query.dart';
 import '../components/create_chapter.dart';
-import '../components/project_settings.dart'; // Import ProjectSettings
-import 'package:provider/provider.dart'; // Import provider
-import '../providers/app_state.dart'; // Import AppState
-import '../components/editor.dart'; // Import Editor
-import '../components/codex_generation.dart'; // Import CodexGeneration
+import '../components/project_settings.dart';
+import 'package:provider/provider.dart';
+import '../providers/app_state.dart';
+import '../components/editor.dart';
+import '../components/codex_generation.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -24,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this); // Increased length
+    _tabController = TabController(length: 9, vsync: this);
   }
 
   @override
@@ -59,24 +59,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Tab(text: 'Knowledge Base'),
             Tab(text: 'Query'),
             Tab(text: 'Generate'),
-            Tab(text: 'Codex Generation'), // Added Codex Generation tab
-            Tab(text: 'Project Settings'), // Added Project Settings tab
+            Tab(text: 'Codex Generation'),
+            Tab(text: 'Project Settings'),
           ],
         ),
       ),
       body: projectId == null
-          ? const Center(child: Text('Select a project'))
+          ? const Center(
+              child: Text('Select a project'),
+            )
           : TabBarView(
               controller: _tabController,
               children: <Widget>[
-                Dashboard(projectId: projectId),
+                Dashboard(
+                  projectId: projectId,
+                  onProgressChanged: (chapters, codexEntries, wordCount) {
+                    // Update the app state with the new progress values.
+                    appState.updateProgress(
+                        chapters, codexEntries, wordCount);
+                  },
+                ),
                 Editor(projectId: projectId),
                 Codex(projectId: projectId),
                 Validity(projectId: projectId),
                 KnowledgeBase(projectId: projectId),
                 Query(projectId: projectId),
                 CreateChapter(projectId: projectId),
-                CodexGeneration(projectId: projectId), // Added CodexGeneration
+                CodexGeneration(projectId: projectId),
                 ProjectSettings(projectId: projectId),
               ],
             ),
