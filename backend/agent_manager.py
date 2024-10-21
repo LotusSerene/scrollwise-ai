@@ -851,14 +851,20 @@ class AgentManager:
         
         # Deduplicate and store relationships
         unique_relationships = {}
+        character_ids = {}
+        for character_name in characters:
+            character = db_instance.get_character_by_name(character_name, self.user_id, self.project_id)
+            if character:
+                character_ids[character_name] = character['id']
+        
         for relationship in all_relationships:
             key = frozenset([relationship.character1, relationship.character2])
             if key not in unique_relationships:
                 unique_relationships[key] = relationship
                 try:
                     db_instance.create_character_relationship(
-                        character_id=relationship.character1,
-                        related_character_id=relationship.character2,
+                        character_id=character_ids[relationship.character1],
+                        related_character_id=character_ids[relationship.character2],
                         relationship_type=relationship.relationship_type,
                         project_id=self.project_id
                     )
