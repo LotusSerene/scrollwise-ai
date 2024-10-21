@@ -63,60 +63,23 @@ class _CharacterRelationshipsScreenState
         ? relationshipProvider.graphData
         : _generateGraphData(relationshipProvider.relationships);
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Wrap(
-            spacing: 8.0,
-            children: appState.codexItems
-                .where((item) => item['type'] == 'character')
-                .map((character) => FilterChip(
-                      label: Text(character['name']),
-                      selected:
-                          _selectedCharacters.containsKey(character['id']),
-                      onSelected: (selected) {
-                        setState(() {
-                          if (selected) {
-                            _selectedCharacters[character['id']] =
-                                character['name'];
-                          } else {
-                            _selectedCharacters.remove(character['id']);
-                          }
-                        });
-                      },
-                    ))
-                .toList(),
+    return CustomScrollView(
+      slivers: [
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              return relationshipProvider.isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : relationshipProvider.relationships.isEmpty
+                      ? const Center(child: Text('No relationships found'))
+                      : graphData['nodes'].isNotEmpty
+                          ? RelationshipTree(graphData: graphData)
+                          : const Center(child: Text('Unable to generate graph'));
+            },
+            childCount: 1,
           ),
         ),
-        ElevatedButton(
-          onPressed: _selectedCharacters.length >= 2
-              ? () async {
-                  await relationshipProvider.analyzeRelationships(
-                      _selectedCharacters.keys.toList(), widget.projectId);
-                  if (relationshipProvider.error != null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(relationshipProvider.error!)),
-                    );
-                  } else if (relationshipProvider.message != null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(relationshipProvider.message!)),
-                    );
-                  }
-                }
-              : null,
-          child: const Text('Analyze Relationships'),
-        ),
-        Expanded(
-          child: relationshipProvider.isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : relationshipProvider.relationships.isEmpty
-                  ? const Center(child: Text('No relationships found'))
-                  : graphData['nodes'].isNotEmpty
-                      ? RelationshipTree(graphData: graphData)
-                      : const Center(child: Text('Unable to generate graph')),
-        ),
-        Expanded(
+        SliverToBoxAdapter(
           child: ListView.builder(
             itemCount: relationshipProvider.relationships.length,
             itemBuilder: (context, index) {
