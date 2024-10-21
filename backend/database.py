@@ -2,7 +2,7 @@
 import logging
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session, joinedload
+from sqlalchemy.orm import sessionmaker, scoped_session, joinedload, relationship
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.dialects.postgresql import TEXT
 import json
@@ -13,6 +13,10 @@ import asyncio
 from typing import Optional, List, Dict, Any
 import datetime
 from datetime import timezone
+from sqlalchemy import exists
+from sqlalchemy import alias
+
+
 load_dotenv()
 
 Base = declarative_base()
@@ -32,9 +36,16 @@ class Project(Base):
     description = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     universe_id = Column(String, ForeignKey('universes.id'), nullable=True)
-    target_word_count = Column(Integer, default=0) # Added target_word_count column
+    target_word_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+
+    # Add these relationships with cascade delete
+    chapters = relationship("Chapter", cascade="all, delete-orphan", back_populates="project")
+    validity_checks = relationship("ValidityCheck", cascade="all, delete-orphan", back_populates="project")
+    codex_items = relationship("CodexItem", cascade="all, delete-orphan", back_populates="project")
+    chat_histories = relationship("ChatHistory", cascade="all, delete-orphan", back_populates="project")
+    presets = relationship("Preset", cascade="all, delete-orphan", back_populates="project")
 
     def to_dict(self):
         return {
@@ -42,7 +53,7 @@ class Project(Base):
             'name': self.name,
             'description': self.description,
             'universe_id': self.universe_id,
-            'targetWordCount': self.target_word_count, # Added targetWordCount to dict
+            'targetWordCount': self.target_word_count,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
@@ -56,6 +67,9 @@ class Chapter(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    last_processed_position = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    project = relationship("Project", back_populates="chapters")
 
     def to_dict(self):
         return {
@@ -63,7 +77,8 @@ class Chapter(Base):
             'title': self.title,
             'content': self.content,
             'chapter_number': self.chapter_number,
-            'embedding_id': self.embedding_id
+            'embedding_id': self.embedding_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 class ValidityCheck(Base):
@@ -72,15 +87,16 @@ class ValidityCheck(Base):
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
     chapter_title = Column(String)
     is_valid = Column(Boolean)
-    feedback = Column(Text)
-    review = Column(Text)
-    style_guide_adherence = Column(Boolean)
-    style_guide_feedback = Column(Text)
-    continuity = Column(Boolean)
-    continuity_feedback = Column(Text)
-    test_results = Column(Text)
+    overall_score = Column(Integer) # Added overall_score
+    general_feedback = Column(Text) # Changed feedback to general_feedback
+    style_guide_adherence_score = Column(Integer) # Added style_guide_adherence_score
+    style_guide_adherence_explanation = Column(Text) # Added style_guide_adherence_explanation
+    continuity_score = Column(Integer) # Added continuity_score
+    continuity_explanation = Column(Text) # Added continuity_explanation
+    areas_for_improvement = Column(JSON) # Changed test_results to areas_for_improvement
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    project = relationship("Project", back_populates="validity_checks")
 
     def to_dict(self):
         return {
@@ -88,13 +104,13 @@ class ValidityCheck(Base):
             'chapterId': self.chapter_id,
             'chapterTitle': self.chapter_title,
             'isValid': self.is_valid,
-            'feedback': self.feedback,
-            'review': self.review,
-            'style_guide_adherence': self.style_guide_adherence,
-            'style_guide_feedback': self.style_guide_feedback,
-            'continuity': self.continuity,
-            'continuity_feedback': self.continuity_feedback,
-            'test_results': self.test_results
+            'overallScore': self.overall_score, # Added overallScore
+            'generalFeedback': self.general_feedback, # Changed feedback to generalFeedback
+            'styleGuideAdherenceScore': self.style_guide_adherence_score, # Added styleGuideAdherenceScore
+            'styleGuideAdherenceExplanation': self.style_guide_adherence_explanation, # Added styleGuideAdherenceExplanation
+            'continuityScore': self.continuity_score, # Added continuityScore
+            'continuityExplanation': self.continuity_explanation, # Added continuityExplanation
+            'areasForImprovement': self.areas_for_improvement # Changed test_results to areasForImprovement
         }
 
 class CodexItem(Base):
@@ -107,16 +123,36 @@ class CodexItem(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    # Add these fields for character-specific information
+    backstory = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    
+    # Add these relationships
+    relationships = relationship("CharacterRelationship", 
+                                 foreign_keys="CharacterRelationship.character_id",
+                                 back_populates="character")
+    related_to = relationship("CharacterRelationship",
+                              foreign_keys="CharacterRelationship.related_character_id",
+                              back_populates="related_character")
+    events = relationship("Event", back_populates="character")
+    project = relationship("Project", back_populates="codex_items")
 
     def to_dict(self):
-        return {
+        data = {
             'id': self.id,
             'name': self.name,
             'description': self.description,
             'type': self.type,
             'subtype': self.subtype,
-            'embedding_id': self.embedding_id
+            'backstory': self.backstory if self.type == 'character' else None,
+            'embedding_id': self.embedding_id,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
         }
+        if self.type == 'character':
+            data['backstory'] = self.backstory
+        return data
 
 class ChatHistory(Base):
     __tablename__ = 'chat_history'
@@ -124,6 +160,7 @@ class ChatHistory(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     messages = Column(Text, nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    project = relationship("Project", back_populates="chat_histories")
 
 class Preset(Base):
     __tablename__ = 'presets'
@@ -133,6 +170,7 @@ class Preset(Base):
     data = Column(JSON, nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     __table_args__ = (UniqueConstraint('user_id', 'name', name='_user_preset_uc'),)
+    project = relationship("Project", back_populates="presets")
 
 class Universe(Base):
     __tablename__ = 'universes'
@@ -144,6 +182,103 @@ class Universe(Base):
         return {
             'id': self.id,
             'name': self.name
+        }
+class ProcessedChapter(Base):
+    __tablename__ = 'processed_chapters'
+    id = Column(String, primary_key=True)
+    chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    processed_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class CharacterRelationship(Base):
+    __tablename__ = 'character_relationships'
+    id = Column(String, primary_key=True)
+    character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)  # Change this
+    related_character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)  # Change this
+    relationship_type = Column(String, nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+
+    # Update these relationship definitions
+    character = relationship("CodexItem", 
+                             foreign_keys=[character_id], 
+                             back_populates="relationships")
+    related_character = relationship("CodexItem", 
+                                     foreign_keys=[related_character_id],
+                                     back_populates="related_to")
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'character_id': self.character_id,
+            'related_character_id': self.related_character_id,
+            'relationship_type': self.relationship_type
+        }
+
+class Event(Base):
+    __tablename__ = 'events'
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    date = Column(DateTime, nullable=False)
+    character_id = Column(String, ForeignKey('codex_items.id'), nullable=True)  # Change this
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    location_id = Column(String, ForeignKey('locations.id'), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+
+    character = relationship("CodexItem", back_populates="events")
+    location = relationship("Location", back_populates="events")
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'description': self.description,
+            'date': self.date.isoformat(),
+            'character_id': self.character_id,
+            'location_id': self.location_id,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        }
+
+class Location(Base):
+    __tablename__ = 'locations'
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    coordinates = Column(String, nullable=True)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+
+    events = relationship("Event", back_populates="location")
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'coordinates': self.coordinates,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        }
+
+class CharacterBackstory(Base):
+    __tablename__ = 'character_backstories'
+    id = Column(String, primary_key=True)
+    character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
+    content = Column(Text, nullable=False)
+    chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'character_id': self.character_id,
+            'content': self.content,
+            'chapter_id': self.chapter_id,
+            'created_at': self.created_at.isoformat()
         }
 
 class Database:
@@ -446,10 +581,10 @@ class Database:
         finally:
             session.close()
 
-    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str, project_id: str):
-        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, feedback, review, style_guide_adherence, style_guide_feedback, continuity, continuity_feedback, test_results, user_id, project_id)
+    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
+        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, overall_score, general_feedback, style_guide_adherence_score, style_guide_adherence_explanation, continuity_score, continuity_explanation, areas_for_improvement, user_id, project_id)
 
-    def _save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, feedback: str, review: str, style_guide_adherence: bool, style_guide_feedback: str, continuity: bool, continuity_feedback: str, test_results: str, user_id: str, project_id: str):
+    def _save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         session = self.get_session()
         try:
             validity_check = ValidityCheck(
@@ -457,13 +592,13 @@ class Database:
                 chapter_id=chapter_id,
                 chapter_title=chapter_title,
                 is_valid=is_valid,
-                feedback=feedback,
-                review=review,
-                style_guide_adherence=style_guide_adherence,
-                style_guide_feedback=style_guide_feedback,
-                continuity=continuity,
-                continuity_feedback=continuity_feedback,
-                test_results=test_results,
+                overall_score=overall_score,
+                general_feedback=general_feedback,
+                style_guide_adherence_score=style_guide_adherence_score,
+                style_guide_adherence_explanation=style_guide_adherence_explanation,
+                continuity_score=continuity_score,
+                continuity_explanation=continuity_explanation,
+                areas_for_improvement=areas_for_improvement,
                 user_id=user_id,
                 project_id=project_id
             )
@@ -701,19 +836,6 @@ class Database:
         try:
             project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
             if project:
-                # Delete related data in the correct order
-                # First, delete validity checks
-                session.query(ValidityCheck).filter_by(project_id=project_id).delete()
-                
-                # Then delete chapters
-                session.query(Chapter).filter_by(project_id=project_id).delete()
-                
-                # Delete other related data
-                session.query(CodexItem).filter_by(project_id=project_id).delete()
-                session.query(ChatHistory).filter_by(project_id=project_id).delete()
-                session.query(Preset).filter_by(project_id=project_id).delete()
-                
-                # Finally, delete the project
                 session.delete(project)
                 session.commit()
                 return True
@@ -802,7 +924,7 @@ class Database:
         finally:
             session.close()
 
-    def get_universe_knowledge_base(self, universe_id: str, user_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
         session = self.get_session()
         try:
             # Fetch all projects for the given universe
@@ -812,27 +934,28 @@ class Database:
             # Initialize the result dictionary
             knowledge_base = {project.id: [] for project in projects}
 
-            # Fetch all chapters for these projects
-            chapters = session.query(Chapter).filter(Chapter.project_id.in_(project_ids)).all()
-            for chapter in chapters:
-                knowledge_base[chapter.project_id].append({
-                    'id': chapter.id,
-                    'type': 'chapter',
-                    'title': chapter.title,
-                    'content': chapter.content,
-                    'embedding_id': chapter.embedding_id
-                })
+            # Fetch chapters and codex items with pagination
+            for project_id in project_ids:
+                chapters = session.query(Chapter).filter_by(project_id=project_id).limit(limit).offset(offset).all()
+                codex_items = session.query(CodexItem).filter_by(project_id=project_id).limit(limit).offset(offset).all()
 
-            # Fetch all codex items for these projects
-            codex_items = session.query(CodexItem).filter(CodexItem.project_id.in_(project_ids)).all()
-            for item in codex_items:
-                knowledge_base[item.project_id].append({
-                    'id': item.id,
-                    'type': 'codex_item',
-                    'name': item.name,
-                    'description': item.description,
-                    'embedding_id': item.embedding_id
-                })
+                for chapter in chapters:
+                    knowledge_base[project_id].append({
+                        'id': chapter.id,
+                        'type': 'chapter',
+                        'title': chapter.title,
+                        'content': chapter.content,
+                        'embedding_id': chapter.embedding_id
+                    })
+
+                for item in codex_items:
+                    knowledge_base[project_id].append({
+                        'id': item.id,
+                        'type': 'codex_item',
+                        'name': item.name,
+                        'description': item.description,
+                        'embedding_id': item.embedding_id
+                    })
 
             # Remove any empty projects
             knowledge_base = {k: v for k, v in knowledge_base.items() if v}
@@ -849,12 +972,294 @@ class Database:
         finally:
             session.close()
 
+    def get_character(self, character_id: str, user_id: str, project_id: str):
+        return self.get_codex_item_by_id(character_id, user_id, project_id)
+
+
+    def create_event(self, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> str:
+        session = self.get_session()
+        try:
+            # Check if the project exists and belongs to the user
+            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
+            if not project_exists:
+                raise ValueError("Project not found or doesn't belong to the user")
+
+            event = Event(id=str(uuid.uuid4()), title=title, description=description, date=date, character_id=character_id, location_id=location_id, project_id=project_id)
+            session.add(event)
+            session.commit()
+            return event.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating event: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            # Check if the project belongs to the user
+            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
+            if not project_exists:
+                raise ValueError("Project not found or doesn't belong to the user")
+
+            events = session.query(Event).filter_by(project_id=project_id).all()
+            return [event.to_dict() for event in events]
+        finally:
+            session.close()
+
+    def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
+        session = self.get_session()
+        try:
+            # Check if the project exists and belongs to the user
+            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
+            if not project_exists:
+                raise ValueError("Project not found or doesn't belong to the user")
+
+            location = Location(id=str(uuid.uuid4()), name=name, description=description, coordinates=coordinates, user_id=user_id, project_id=project_id)
+            session.add(location)
+            session.commit()
+            return location.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating location: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            locations = session.query(Location).filter_by(user_id=user_id, project_id=project_id).all()
+            return [location.to_dict() for location in locations]
+        finally:
+            session.close()
+
+
+    def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
+        session = self.get_session()
+        try:
+            processed_chapter = session.query(ProcessedChapter).filter_by(
+                chapter_id=chapter_id, 
+                project_id=project_id
+            ).first()
+            return processed_chapter is not None
+        finally:
+            session.close()
+
+    def mark_latest_chapter_processed(self, project_id: str, function_name: str):
+        session = self.get_session()
+        try:
+            latest_chapter = session.query(Chapter).filter(
+                Chapter.project_id == project_id
+            ).order_by(Chapter.created_at.desc()).first()
+
+            if latest_chapter:
+                processed_chapter = ProcessedChapter(
+                    id=str(uuid.uuid4()),
+                    chapter_id=latest_chapter.id,
+                    project_id=project_id,
+                    processed_at=datetime.datetime.utcnow()
+                )
+                session.add(processed_chapter)
+                session.commit()
+        finally:
+            session.close()
+
+    def get_remaining_chapter_content(self, chapter_id: str, project_id: str) -> Optional[str]:
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(
+                id=chapter_id, 
+                project_id=project_id
+            ).first()
+            if chapter:
+                return chapter.content[chapter.last_processed_position:]
+            return None
+        finally:
+            session.close()
+
+    def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter_by(
+                id=character_id, 
+                user_id=user_id, 
+                project_id=project_id, 
+                type='character'
+            ).first()
+            if character:
+                if character.backstory:
+                    character.backstory += f"\n\n{content}"
+                else:
+                    character.backstory = content
+                character.updated_at = datetime.datetime.now(timezone.utc)
+                session.commit()
+                return character.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving character backstory: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            backstories = session.query(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at).all()
+            return [backstory.to_dict() for backstory in backstories]
+        finally:
+            session.close()
+
+    def get_characters_from_codex(self, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            characters = session.query(CodexItem).filter_by(
+                user_id=user_id, 
+                project_id=project_id, 
+                type='character'
+            ).all()
+            return [character.to_dict() for character in characters]
+        finally:
+            session.close()
+
+    def mark_latest_chapter_processed(self, project_id: str, function_name: str):
+        session = self.get_session()
+        try:
+            latest_chapter = session.query(Chapter).filter(
+                Chapter.project_id == project_id
+            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
+
+            if latest_chapter:
+                processed_chapter = ProcessedChapter(
+                    id=str(uuid.uuid4()),
+                    chapter_id=latest_chapter.id,
+                    project_id=project_id,
+                    processed_at=datetime.datetime.utcnow()
+                )
+                session.add(processed_chapter)
+                session.commit()
+        finally:
+            session.close()
+
+    def get_latest_unprocessed_chapter_content(self, project_id: str, function_name: str) -> Optional[str]:
+        session = self.get_session()
+        try:
+            # Query for the latest chapter that hasn't been processed for this function
+            latest_chapter = session.query(Chapter).filter(
+                Chapter.project_id == project_id,
+                ~exists().where(
+                    and_(
+                        ProcessedChapter.chapter_id == Chapter.id,
+                        ProcessedChapter.project_id == project_id
+                    )
+                )
+            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
+
+            if latest_chapter:
+                return latest_chapter.content
+            return None
+        finally:
+            session.close()
+
+    def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str) -> str:
+        session = self.get_session()
+        try:
+            # Check if both characters exist in the codex_items table
+            character = session.query(CodexItem).filter_by(id=character_id, project_id=project_id, type='character').first()
+            related_character = session.query(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character').first()
+
+            if not character or not related_character:
+                raise ValueError("One or both characters do not exist in the codex")
+
+            relationship = CharacterRelationship(
+                id=str(uuid.uuid4()),
+                character_id=character.id,
+                related_character_id=related_character.id,
+                relationship_type=relationship_type,
+                project_id=project_id
+            )
+            session.add(relationship)
+            session.commit()
+            return relationship.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating character relationship: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            Character = alias(CodexItem)
+            RelatedCharacter = alias(CodexItem)
+            
+            relationships = session.query(
+                CharacterRelationship,
+                Character.c.name.label('character_name'),
+                RelatedCharacter.c.name.label('related_character_name')
+            ).join(
+                Character, CharacterRelationship.character_id == Character.c.id
+            ).join(
+                RelatedCharacter, CharacterRelationship.related_character_id == RelatedCharacter.c.id
+            ).filter(
+                Character.c.project_id == project_id,
+                Character.c.user_id == user_id,
+                Character.c.type == 'character',
+                RelatedCharacter.c.type == 'character'
+            ).all()
+            
+            return [{
+                'id': relationship.CharacterRelationship.id,
+                'character_id': relationship.CharacterRelationship.character_id,
+                'character_name': relationship.character_name,
+                'related_character_id': relationship.CharacterRelationship.related_character_id,
+                'related_character_name': relationship.related_character_name,
+                'relationship_type': relationship.CharacterRelationship.relationship_type
+            } for relationship in relationships]
+        finally:
+            session.close()
+
+    def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            relationship = session.query(CharacterRelationship).join(
+                CodexItem, CharacterRelationship.character_id == CodexItem.id
+            ).filter(
+                CharacterRelationship.id == relationship_id,
+                CodexItem.project_id == project_id,
+                CodexItem.user_id == user_id
+            ).first()
+            if relationship:
+                relationship.relationship_type = relationship_type
+                session.commit()
+                return relationship.to_dict()
+            return None
+        except Exception as e:
+            session.rollback()
+
+    def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
+        session = self.get_session()
+        try:
+            relationship = session.query(CharacterRelationship).join(
+                CodexItem, CharacterRelationship.character_id == CodexItem.id
+            ).filter(
+                CharacterRelationship.id == relationship_id,
+                CodexItem.project_id == project_id,
+                CodexItem.user_id == user_id
+            ).first()
+            if relationship:
+                session.delete(relationship)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting character relationship: {str(e)}")
+            raise
+        finally:
+            session.close()
+
 db_instance = Database()
-
-def get_chapter_count(user_id):
-    session = db_instance.get_session()
-    try:
-        return session.query(Chapter).filter_by(user_id=user_id).count()
-    finally:
-        session.close()
-
