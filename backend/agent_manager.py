@@ -844,6 +844,9 @@ class AgentManager:
         if not chapter_content:
             return []
 
+        # Create a list of character pairs to analyze
+        characters_to_analyze = [(characters[i], characters[j]) for i in range(len(characters)) for j in range(i+1, len(characters))]
+
         all_relationships = await self.process_large_content(chapter_content, "relationship_analysis", process_chunk)
         
         # Deduplicate and store relationships
