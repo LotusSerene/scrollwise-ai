@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:graphview/GraphView.dart';
+import 'package:flutter_graph/flutter_graph.dart';
 
 class RelationshipTree extends StatelessWidget {
   final Map<String, dynamic> graphData;
@@ -8,44 +8,35 @@ class RelationshipTree extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Graph graph = Graph()..isTree = true;
-    final nodes = <Node>[];
-    final edges = <Edge>[];
+    final graph = Graph(
+      nodes: graphData['nodes']?.map((node) => Node(id: node['id'])).toList() ?? [],
+      edges: graphData['edges']?.map((edge) => Edge(from: edge['from'], to: edge['to'])).toList() ?? [],
+    );
 
-    // Create nodes
-    for (final node in graphData['nodes'] ?? []) {
-      nodes.add(Node.Id(node['id']));
-    }
-
-    // Create edges
-    for (final edge in graphData['edges'] ?? []) {
-      final fromNode = nodes.firstWhere((n) => n.key!.value == edge['from']);
-      final toNode = nodes.firstWhere((n) => n.key!.value == edge['to']);
-      edges.add(Edge(fromNode, toNode));
-    }
-
-    graph.addNodes(nodes);
-    graph.addEdges(edges);
-
-    return InteractiveViewer(
-      constrained: false,
-      boundaryMargin: const EdgeInsets.all(100),
-      minScale: 0.01,
-      maxScale: 5.6,
-      child: GraphView(
-        graph: graph,
-        algorithm: BuchheimWalkerAlgorithm(
-          BuchheimWalkerConfiguration(),
-          TreeEdgeRenderer(BuchheimWalkerConfiguration()),
-        ),
-        paint: Paint()
-          ..color = Colors.green
-          ..strokeWidth = 1
-          ..style = PaintingStyle.stroke,
-        builder: (Node node) {
-          return rectangleWidget(node.key!.value.toString());
-        },
-      ),
+    return VirtualizedGraphView(
+      graph: graph,
+      nodeBuilder: (node) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.red,
+            borderRadius: BorderRadius.circular(4),
+            boxShadow: const [
+              BoxShadow(color: Colors.black26, spreadRadius: 1, blurRadius: 2)
+            ],
+          ),
+          child: Text(node.id),
+        );
+      },
+      edgeBuilder: (edge) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.green,
+            shape: BoxShape.rectangle,
+          ),
+        );
+      },
+      loadingIndicator: const CircularProgressIndicator(),
     );
   }
 
