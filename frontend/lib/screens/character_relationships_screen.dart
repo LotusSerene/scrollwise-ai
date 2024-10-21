@@ -63,44 +63,77 @@ class _CharacterRelationshipsScreenState
         ? relationshipProvider.graphData
         : _generateGraphData(relationshipProvider.relationships);
 
-    return CustomScrollView(
-      slivers: [
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              return relationshipProvider.isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : relationshipProvider.relationships.isEmpty
-                      ? const Center(child: Text('No relationships found'))
-                      : graphData['nodes'].isNotEmpty
-                          ? RelationshipTree(graphData: graphData)
-                          : const Center(child: Text('Unable to generate graph'));
-            },
-            childCount: 1,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Wrap(
+            spacing: 8.0,
+            children: appState.codexItems
+                .where((item) => item['type'] == 'character')
+                .map((character) => FilterChip(
+                      label: Text(character['name']),
+                      selected: _selectedCharacters.containsKey(character['id']),
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedCharacters[character['id']] = character['name'];
+                          } else {
+                            _selectedCharacters.remove(character['id']);
+                          }
+                        });
+                      },
+                    ))
+                .toList(),
           ),
         ),
-        Flexible(
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: relationshipProvider.relationships.length,
-            itemBuilder: (context, index) {
-              final relationship = relationshipProvider.relationships[index];
-              return ListTile(
-                title: Text(
-                    '${relationship.characterName ?? 'Unknown'} - ${relationship.relatedCharacterName ?? 'Unknown'}'),
-                subtitle: Text(relationship.relationshipType ?? 'Unknown'),
-                trailing: IconButton(
-                  icon: Icon(Icons.delete),
-                  onPressed: () {
-                    relationshipProvider.deleteRelationship(
-                        relationship.id, widget.projectId);
-                  },
+        ElevatedButton(
+          onPressed: _selectedCharacters.length >= 2
+              ? () async {
+                  // ... existing code ...
+                }
+              : null,
+          child: const Text('Analyze Relationships'),
+        ),
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.4,
+                  child: relationshipProvider.isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : relationshipProvider.relationships.isEmpty
+                          ? const Center(child: Text('No relationships found'))
+                          : graphData['nodes'].isNotEmpty
+                              ? RelationshipTree(graphData: graphData)
+                              : const Center(child: Text('Unable to generate graph')),
                 ),
-                onTap: () {
-                  _showEditRelationshipDialog(context, relationship);
-                },
-              );
-            },
+              ),
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final relationship = relationshipProvider.relationships[index];
+                    return ListTile(
+                      title: Text(
+                          '${relationship.characterName ?? 'Unknown'} - ${relationship.relatedCharacterName ?? 'Unknown'}'),
+                      subtitle: Text(relationship.relationshipType ?? 'Unknown'),
+                      trailing: IconButton(
+                        icon: Icon(Icons.delete),
+                        onPressed: () {
+                          relationshipProvider.deleteRelationship(
+                              relationship.id, widget.projectId);
+                        },
+                      ),
+                      onTap: () {
+                        _showEditRelationshipDialog(context, relationship);
+                      },
+                    );
+                  },
+                  childCount: relationshipProvider.relationships.length,
+                ),
+              ),
+            ],
           ),
         ),
       ],
