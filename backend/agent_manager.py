@@ -247,6 +247,7 @@ class AgentManager:
 
     def _construct_context(self, plot: str, writing_style: str, 
                            codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
+        context = ""
         context += "Codex Items:\n"
         for name, description in codex_items.items():
             context += f"{name}: {description}\n"
