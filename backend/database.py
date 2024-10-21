@@ -1168,9 +1168,18 @@ class Database:
     def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str) -> str:
         session = self.get_session()
         try:
+            # Ensure character IDs are not None before querying
+            if character_id is None or related_character_id is None:
+                raise ValueError("Character IDs cannot be None")
+
             # Check if both characters exist in the codex_items table
             character = session.query(CodexItem).filter_by(id=character_id, project_id=project_id, type='character').first()
             related_character = session.query(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character').first()
+
+            if not character:
+                self.logger.error(f"Character with ID {character_id} not found in the codex")
+            if not related_character:
+                self.logger.error(f"Character with ID {related_character_id} not found in the codex")
 
             if not character or not related_character:
                 raise ValueError("One or both characters do not exist in the codex")
