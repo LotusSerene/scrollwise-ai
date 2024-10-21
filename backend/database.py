@@ -189,7 +189,7 @@ class ProcessedChapter(Base):
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     processed_at = Column(DateTime, default=datetime.datetime.utcnow)
-    function_name = Column(String, nullable=False)
+    function_name = Column(String, default='default_function_name', nullable=False)
 
 class CharacterRelationship(Base):
     __tablename__ = 'character_relationships'
@@ -1060,7 +1060,8 @@ class Database:
                     id=str(uuid.uuid4()),
                     chapter_id=latest_chapter.id,
                     project_id=project_id,
-                    processed_at=datetime.datetime.utcnow()
+                    processed_at=datetime.datetime.utcnow(),
+                    function_name=function_name
                 )
                 session.add(processed_chapter)
                 session.commit()
