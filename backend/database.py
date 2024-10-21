@@ -976,6 +976,16 @@ class Database:
     def get_character(self, character_id: str, user_id: str, project_id: str):
         return self.get_codex_item_by_id(character_id, user_id, project_id)
 
+    def get_character_by_name(self, name: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter_by(name=name, user_id=user_id, project_id=project_id, type='character').first()
+            if character:
+                return character.to_dict()
+            return None
+        finally:
+            session.close()
+
 
     def create_event(self, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> str:
         session = self.get_session()
