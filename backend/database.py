@@ -189,6 +189,7 @@ class ProcessedChapter(Base):
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     processed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    function_name = Column(String, nullable=False)  # Add this line
     function_name = Column(String, nullable=False)
 
 class CharacterRelationship(Base):
