@@ -1,53 +1,100 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_graph/flutter_graph.dart';
+ import 'package:flutter/material.dart';
+ import 'package:graphview/graphview.dart';
 
-class RelationshipTree extends StatefulWidget {
-  final Map<String, dynamic> graphData;
+ class RelationshipTree extends StatefulWidget {
+   final Map<String, dynamic> graphData;
 
-  const RelationshipTree({Key? key, required this.graphData}) : super(key: key);
+   const RelationshipTree({Key? key, required this.graphData}) : super(key: key);
 
-  @override
-  _RelationshipTreeState createState() => _RelationshipTreeState();
-}
+   @override
+   _RelationshipTreeState createState() => _RelationshipTreeState();
+ }
 
-class _RelationshipTreeState extends State<RelationshipTree> {
-  late GraphData _graphData;
-  bool _isLoading = true;
+ class _RelationshipTreeState extends State<RelationshipTree> {
+   late Graph _graph;
+   late VisibleRegion _visibleRegion;
 
-  @override
-  void initState() {
-    super.initState();
-    _graphData = GraphData(nodes: widget.graphData['nodes'], edges: widget.graphData['edges']);
-    _isLoading = false;
-  }
+   @override
+   void initState() {
+     super.initState();
+     _graph = Graph()..isTree = true;
+     final nodes = <Node>[];
+     final edges = <Edge>[];
 
-  @override
-  Widget build(BuildContext context) {
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : GraphView(
-            graphData: _graphData,
-            nodeBuilder: (context, node) {
-              return Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.blue,
-                ),
-                child: Center(
-                  child: Text(node.data['label']),
-                ),
-              );
-            },
-            edgeBuilder: (context, edge) {
-              return Container(
-                width: 2,
-                height: 50,
-                color: Colors.grey,
-              );
-            },
-            virtualization: true,
-          );
-  }
-}
+     // Create nodes
+     for (final node in widget.graphData['nodes'] ?? []) {
+       nodes.add(Node.Id(node['id']));
+     }
+
+     // Create edges
+     for (final edge in widget.graphData['edges'] ?? []) {
+       final fromNode = nodes.firstWhere((n) => n.key!.value == edge['from']);
+       final toNode = nodes.firstWhere((n) => n.key!.value == edge['to']);
+       edges.add(Edge(fromNode, toNode));
+     }
+
+     _graph.addNodes(nodes);
+     _graph.addEdges(edges);
+   }
+
+   @override
+ Widget build(BuildContext context) {
+     _visibleRegion = VisibleRegion.fromContext(context);
+
+     if (widget.graphData['nodes'] == null || widget.graphData['nodes'].isEmpty) {
+       return const Center(
+         child: Text('No data available'),
+       );
+     }
+
+     return InteractiveViewer(
+       constrained: false,
+       boundaryMargin: const EdgeInsets.all(100),
+       minScale: 0.01,
+       maxScale: 5.6,
+       child: GraphView(
+         graph: _graph,
+         algorithm: BuchheimWalkerAlgorithm(
+           BuchheimWalkerConfiguration(),
+           TreeEdgeRenderer(BuchheimWalkerConfiguration()),
+         ),
+         paint: Paint()
+           ..color = Colors.green
+           ..strokeWidth = 1
+           ..style = PaintingStyle.stroke,
+         builder: (Node node) {
+           if (_visibleRegion.contains(node)) {
+             return rectangleWidget(node.key!.value.toString());
+           } else {
+             return simplifiedRectangleWidget(node.key!.value.toString());
+           }
+         },
+       ),
+     );
+   }
+
+   Widget rectangleWidget(String name) {
+     return Container(
+       padding: const EdgeInsets.all(16),
+       decoration: BoxDecoration(
+         color: Colors.red,
+         borderRadius: BorderRadius.circular(4),
+         boxShadow: const [
+           BoxShadow(color: Colors.black26, spreadRadius: 1, blurRadius: 2)
+         ],
+       ),
+       child: Text(name),
+     );
+   }
+
+   Widget simplifiedRectangleWidget(String name) {
+     return Container(
+       padding: const EdgeInsets.all(8),
+       decoration: BoxDecoration(
+         color: Colors.grey,
+         borderRadius: BorderRadius.circular(2),
+       ),
+       child: Text(name),
+     );
+   }
+ }
