@@ -178,7 +178,7 @@ class AgentManager:
         try:
             codex_items_dict = {item['name']: item['description'] for item in codex_items}
             
-            context = await asyncio.to_thread(self._construct_context, plot, writing_style, instructions, codex_items_dict, previous_chapters)
+            context = await asyncio.to_thread(self._construct_context, plot, writing_style, codex_items_dict, previous_chapters)
             
             prompt = await asyncio.to_thread(self._construct_prompt, instructions, context)
 
@@ -245,7 +245,7 @@ class AgentManager:
         for item in sync_generator(*args, **kwargs):
             yield item
 
-    def _construct_context(self, plot: str, writing_style: str, instructions: Dict[str, Any], 
+    def _construct_context(self, plot: str, writing_style: str, 
                            codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
         context = f"Plot: {plot}\n\n"
         context += f"Writing Style: {writing_style}\n\n"
