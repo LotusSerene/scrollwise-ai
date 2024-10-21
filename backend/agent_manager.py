@@ -99,6 +99,24 @@ class LocationDescription(BaseModel):
     description: str = Field(..., description="Detailed description of the location")
     significance: str = Field(..., description="Significance of the location in the story")
 
+class TaskState(BaseModel):
+    task_type: str
+    current_position: int
+    intermediate_results: List[Any]
+
+class Subtask(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    description: str
+    status: str = "pending"
+    result: Optional[Any] = None
+
+class ComplexTask(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    description: str
+    subtasks: List[Subtask]
+    status: str = "pending"
+    result: Optional[Any] = None
+
 class AgentManager:
     def __init__(self, user_id: str, project_id: str):
         self.logger = logging.getLogger(__name__)
@@ -119,6 +137,9 @@ class AgentManager:
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
         self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
+        self.task_states: Dict[str, TaskState] = {}
+        self.agents: Dict[str, Any] = {}  # For multi-agent collaboration
+        self.complex_tasks: Dict[str, ComplexTask] = {}
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -618,64 +639,234 @@ class AgentManager:
     def get_chat_history(self):
         return db_instance.get_chat_history(self.user_id, self.project_id)
 
-    def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        codex_item_names = [item['name'] for item in codex_items]
+    def chunk_content(self, content: str, max_tokens: int) -> List[str]:
+        chunks = []
+        current_chunk = ""
+        current_tokens = 0
         
-        parser = PydanticOutputParser(pydantic_object=CodexExtraction)
-        fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['CodexExtractionLLM']))
+        for sentence in content.split('.'):
+            sentence_tokens = self.estimate_token_count(sentence)
+            if current_tokens + sentence_tokens > max_tokens:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence
+                current_tokens = sentence_tokens
+            else:
+                current_chunk += sentence + '.'
+                current_tokens += sentence_tokens
         
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    async def process_large_content(self, content: str, task_type: str, process_func: callable):
+        chunks = self.chunk_content(content, self.MAX_INPUT_TOKENS // 2)
+        state = self.task_states.get(task_type, TaskState(task_type=task_type, current_position=0, intermediate_results=[]))
+        
+        for i, chunk in enumerate(chunks[state.current_position:], start=state.current_position):
+            result = await process_func(chunk)
+            state.intermediate_results.extend(result)
+            state.current_position = i + 1
+            self.task_states[task_type] = state
+        
+        return state.intermediate_results
+
+    def decompose_task(self, task: str) -> ComplexTask:
         prompt = ChatPromptTemplate.from_template("""
-        You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
-
-        For each new codex item you find:
-        1. Provide its name
-        2. Write a brief description of the codex item based on information in the chapter
-        3. Determine the type of codex item (lore, worldbuilding, item, character)
-        4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
-
-        IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
-
-        If you truly find no new codex items after a thorough analysis, return an empty list.
-
-        Chapter:
-        {chapter}
-
-        Existing Codex Items:
-        {codex_items}
-
-        Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
-
-        {format_instructions}
+        You are an expert task manager. Your job is to decompose a complex task into smaller, manageable subtasks.
+        
+        Complex task: {task}
+        
+        Break this task down into 3-5 subtasks. For each subtask, provide:
+        1. A brief description of the subtask
+        2. The expected output or result of the subtask
+        
+        Format your response as a JSON object with the following structure:
+        {{
+            "description": "overall task description",
+            "subtasks": [
+                {{
+                    "description": "subtask 1 description"
+                }},
+                ...
+            ]
+        }}
         """)
 
-        extraction_chain = prompt | self._initialize_llm(self.model_settings['CodexExtractionLLM']) | fixing_parser
+        chain = prompt | self.llm | StrOutputParser()
+        result = chain.invoke({"task": task})
+        
+        task_dict = json.loads(result)
+        complex_task = ComplexTask(
+            description=task_dict["description"],
+            subtasks=[Subtask(**subtask) for subtask in task_dict["subtasks"]]
+        )
+        self.complex_tasks[complex_task.id] = complex_task
+        return complex_task
 
-        try:
-            result = extraction_chain.invoke({
-                "chapter": chapter,
-                "codex_items": ", ".join(codex_item_names),
+    async def process_subtask(self, subtask: Subtask) -> Any:
+        prompt = ChatPromptTemplate.from_template("""
+        Process the following subtask:
+        
+        Subtask: {subtask_description}
+        
+        Provide a detailed response or solution for this subtask.
+        """)
+
+        chain = prompt | self.llm | StrOutputParser()
+        result = await chain.ainvoke({"subtask_description": subtask.description})
+        
+        return result
+
+    async def process_complex_task(self, task_id: str) -> ComplexTask:
+        complex_task = self.complex_tasks.get(task_id)
+        if not complex_task:
+            raise ValueError(f"No complex task found with id: {task_id}")
+
+        for subtask in complex_task.subtasks:
+            if subtask.status == "pending":
+                subtask.result = await self.process_subtask(subtask)
+                subtask.status = "completed"
+
+        complex_task.result = await self.aggregate_results(complex_task)
+        complex_task.status = "completed"
+        return complex_task
+
+    async def aggregate_results(self, complex_task: ComplexTask) -> Any:
+        prompt = ChatPromptTemplate.from_template("""
+        You are tasked with aggregating the results of multiple subtasks into a coherent final result.
+        
+        Original task: {task_description}
+        
+        Subtask results:
+        {subtask_results}
+        
+        Please provide a comprehensive summary that combines all subtask results into a final, cohesive output for the original task.
+        """)
+
+        subtask_results = "\n".join([f"Subtask {i+1}: {subtask.result}" for i, subtask in enumerate(complex_task.subtasks)])
+
+        chain = prompt | self.llm | StrOutputParser()
+        result = await chain.ainvoke({
+            "task_description": complex_task.description,
+            "subtask_results": subtask_results
+        })
+        
+        return result
+
+    async def handle_complex_task(self, task: str) -> Any:
+        complex_task = self.decompose_task(task)
+        processed_task = await self.process_complex_task(complex_task.id)
+        return processed_task.result
+
+    def register_agent(self, agent_name: str, agent: Any):
+        self.agents[agent_name] = agent
+
+    async def allocate_task(self, task: str):
+        # Implement task allocation logic
+        for agent_name, agent in self.agents.items():
+            if agent.can_handle(task):
+                return await agent.process(task)
+        raise ValueError(f"No agent can handle task: {task}")
+
+    async def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        async def process_chunk(chunk: str):
+            parser = PydanticOutputParser(pydantic_object=CodexExtraction)
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['CodexExtractionLLM']))
+            
+            prompt = ChatPromptTemplate.from_template("""
+            You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
+
+            For each new codex item you find:
+            1. Provide its name
+            2. Write a brief description of the codex item based on information in the chapter
+            3. Determine the type of codex item (lore, worldbuilding, item, character)
+            4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
+
+            IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
+
+            If you truly find no new codex items after a thorough analysis, return an empty list.
+
+            Chapter:
+            {chapter}
+
+            Existing Codex Items:
+            {codex_items}
+
+            Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
+
+            {format_instructions}
+            """)
+
+            extraction_chain = prompt | self._initialize_llm(self.model_settings['CodexExtractionLLM']) | fixing_parser
+
+            result = await extraction_chain.ainvoke({
+                "chapter": chunk,
+                "codex_items": ", ".join([item['name'] for item in codex_items]),
                 "format_instructions": parser.get_format_instructions()
             })
 
-            if result is None or not isinstance(result, CodexExtraction):
-                self.logger.warning("Invalid result from extraction_chain.invoke. Returning an empty list.")
-                return []
+            return result.new_items if result and isinstance(result, CodexExtraction) else []
 
-            #self.logger.debug(f"check_and_extract_new_codex_items returned: {result}")
+        all_new_items = await self.process_large_content(chapter, "codex_extraction", process_chunk)
+        return [{"name": item.name, "description": item.description, "type": item.type, "subtype": item.subtype} for item in all_new_items]
 
-            new_codex_items = result.new_items
-            
-            if not new_codex_items:
-                self.logger.warning("No new codex items were extracted. This might be correct, or there might be an issue with codex item extraction.")
-            
-            # Convert CodexItem objects to dictionaries
-            new_codex_items_dicts = [{"name": item.name, "description": item.description, "type": item.type, "subtype": item.subtype} for item in new_codex_items]
-            
-            return new_codex_items_dicts
+    async def analyze_character_relationships(self, characters: List[str]) -> List[RelationshipAnalysis]:
+        async def process_chunk(chunk: str):
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the relationships between the following character pairs based on the given chapter content:
+            Character Pairs: {character_pairs}
 
-        except Exception as e:
-            self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
+            Chapter Content:
+            {chapter_content}
+
+            For each pair of characters, provide:
+            1. The nature of their relationship (e.g., friends, rivals, family, none)
+            2. A brief description of their relationship
+            3. Any significant interactions or events from the chapter that define their relationship
+
+            Use the following format for your response:
+            {format_instructions}
+            """)
+
+            parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
+            chain = prompt | self.check_llm | parser
+
+            result = await chain.ainvoke({
+                "character_pairs": ", ".join([f"{pair[0]} and {pair[1]}" for pair in characters_to_analyze]),
+                "chapter_content": chunk,
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            return result.relationships if result and isinstance(result, RelationshipAnalysisList) else []
+
+        chapter_content = db_instance.get_latest_unprocessed_chapter_content(self.project_id, "analyze_character_relationships")
+        if not chapter_content:
             return []
+
+        all_relationships = await self.process_large_content(chapter_content, "relationship_analysis", process_chunk)
+        
+        # Deduplicate and store relationships
+        unique_relationships = {}
+        for relationship in all_relationships:
+            key = frozenset([relationship.character1, relationship.character2])
+            if key not in unique_relationships:
+                unique_relationships[key] = relationship
+                try:
+                    db_instance.create_character_relationship(
+                        character_id=relationship.character1,
+                        related_character_id=relationship.character2,
+                        relationship_type=relationship.relationship_type,
+                        project_id=self.project_id
+                    )
+                except ValueError as ve:
+                    self.logger.warning(f"Skipping relationship creation: {str(ve)}")
+                except Exception as e:
+                    self.logger.error(f"Error creating relationship in database: {str(e)}")
+
+        db_instance.mark_latest_chapter_processed(self.project_id, "analyze_character_relationships")
+
+        return list(unique_relationships.values())
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
         #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
@@ -805,79 +996,6 @@ class AgentManager:
             return result
         except Exception as e:
             self.logger.error(f"Error extracting character backstory: {str(e)}")
-            raise
-
-    async def analyze_character_relationships(self, characters: List[str]) -> List[RelationshipAnalysis]:
-        #self.logger.debug(f"Analyzing relationships between {characters}")
-        try:
-            # Get existing relationships
-            existing_relationships = db_instance.get_character_relationships(self.project_id, self.user_id)
-            existing_pairs = set((r['character_id'], r['related_character_id']) for r in existing_relationships)
-
-            # Filter out character pairs that already have a relationship
-            characters_to_analyze = []
-            for i, char1 in enumerate(characters):
-                for char2 in characters[i+1:]:
-                    if (char1, char2) not in existing_pairs and (char2, char1) not in existing_pairs:
-                        characters_to_analyze.append((char1, char2))
-
-            if not characters_to_analyze:
-                self.logger.info("No new relationships to analyze")
-                return []
-
-            # Get the latest unprocessed chapter content
-            chapter_content = db_instance.get_latest_unprocessed_chapter_content(self.project_id, "analyze_character_relationships")
-            if not chapter_content:
-                return []  # No unprocessed chapters found
-
-            prompt = ChatPromptTemplate.from_template("""
-            Analyze the relationships between the following character pairs based on the given chapter content:
-            Character Pairs: {character_pairs}
-
-            Chapter Content:
-            {chapter_content}
-
-            For each pair of characters, provide:
-            1. The nature of their relationship (e.g., friends, rivals, family, none)
-            2. A brief description of their relationship
-            3. Any significant interactions or events from the chapter that define their relationship
-
-            Use the following format for your response:
-            {format_instructions}
-            """)
-
-            parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-            chain = prompt | self.check_llm | parser
-
-            result = await chain.ainvoke({
-                "character_pairs": ", ".join([f"{pair[0]} and {pair[1]}" for pair in characters_to_analyze]),
-                "chapter_content": chapter_content,
-                "format_instructions": parser.get_format_instructions()
-            })
-
-            #self.logger.debug(f"Generated relationship analyses: {result}")
-
-            # Create relationships in the database
-            for relationship in result.relationships:
-                try:
-                    db_instance.create_character_relationship(
-                        character_id=relationship.character1,
-                        related_character_id=relationship.character2,
-                        relationship_type=relationship.relationship_type,
-                        project_id=self.project_id
-                    )
-                except ValueError as ve:
-                    self.logger.warning(f"Skipping relationship creation: {str(ve)}")
-                except Exception as e:
-                    self.logger.error(f"Error creating relationship in database: {str(e)}")
-
-            # Mark the chapter as processed for this function
-            db_instance.mark_latest_chapter_processed(self.project_id, "analyze_character_relationships")
-
-            return result.relationships
-
-        except Exception as e:
-            self.logger.error(f"Error analyzing character relationships: {str(e)}")
             raise
 
     async def generate_event_description(self, event_title: str) -> EventDescription:
