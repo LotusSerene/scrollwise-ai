@@ -79,8 +79,9 @@ class _CharacterRelationshipsScreenState
             childCount: 1,
           ),
         ),
-        SliverToBoxAdapter(
+        Flexible(
           child: ListView.builder(
+            shrinkWrap: true,
             itemCount: relationshipProvider.relationships.length,
             itemBuilder: (context, index) {
               final relationship = relationshipProvider.relationships[index];
