@@ -99,15 +99,22 @@ class _CharacterRelationshipsScreenState
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.4,
-                  child: relationshipProvider.isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : relationshipProvider.relationships.isEmpty
-                          ? const Center(child: Text('No relationships found'))
-                          : graphData['nodes'].isNotEmpty
-                              ? RelationshipTree(graphData: graphData)
-                              : const Center(child: Text('Unable to generate graph')),
+                child: FutureBuilder(
+                  future: _initializeGraphData(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}'));
+                    } else if (snapshot.hasData) {
+                      final graphData = snapshot.data!;
+                      return graphData['nodes'].isNotEmpty
+                          ? RelationshipTree(graphData: graphData)
+                          : const Center(child: Text('Unable to generate graph'));
+                    } else {
+                      return const Center(child: Text('No relationships found'));
+                    }
+                  },
                 ),
               ),
               SliverList(
