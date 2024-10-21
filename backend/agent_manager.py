@@ -249,10 +249,6 @@ class AgentManager:
                            codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
         context = f"Plot: {plot}\n\n"
         context += f"Writing Style: {writing_style}\n\n"
-        context += "Instructions:\n"
-        for key, value in instructions.items():
-            context += f"{key}: {value}\n"
-        context += "\n"
         
         context += "Codex Items:\n"
         for name, description in codex_items.items():
