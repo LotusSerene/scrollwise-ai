@@ -19,11 +19,13 @@ class RelationshipTree extends StatelessWidget {
 
     // Create edges
     for (var edgeData in graphData['edges']) {
-      edges.add(Edge(
-        nodes.firstWhere((node) => node.key?.value == edgeData['from']),
-        nodes.firstWhere((node) => node.key?.value == edgeData['to']),
-        paint: Paint()..color = Colors.blue..strokeWidth = 2,
-      ));
+      if (edgeData['from'] != null && edgeData['to'] != null) {
+        edges.add(Edge(
+          nodes.firstWhere((node) => node.key?.value == edgeData['from']),
+          nodes.firstWhere((node) => node.key?.value == edgeData['to']),
+          paint: Paint()..color = Colors.blue..strokeWidth = 2,
+        ));
+      }
     }
 
     graph.addNodes(nodes);
