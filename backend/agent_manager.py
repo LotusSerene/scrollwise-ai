@@ -804,7 +804,7 @@ class AgentManager:
             if result.new_backstory:
                 # Mark the chapter as processed
                 if chapter_id == 'latest':
-                    db_instance.mark_latest_chapter_processed(self.project_id)
+                    db_instance.mark_latest_chapter_processed(self.project_id, "extract_character_backstory")
                 else:
                     db_instance.mark_chapter_processed(chapter_id, self.project_id, len(chapter_content))
 
