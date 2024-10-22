@@ -788,7 +788,7 @@ class Database:
             return project.id
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error creating project: {str(e)}")
+            #self.logger.error(f"Error creating project: {str(e)}")
             raise
         finally:
             session.close()
