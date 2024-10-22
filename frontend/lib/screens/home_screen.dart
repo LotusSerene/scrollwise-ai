@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../components/editor.dart';
 import '../components/codex_generation.dart';
+import './character_relationships_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -24,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+    _tabController = TabController(length: 10, vsync: this);
   }
 
   @override
@@ -51,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
           tabs: const <Widget>[
             Tab(text: 'Dashboard'),
             Tab(text: 'Editor'),
@@ -61,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Tab(text: 'Generate'),
             Tab(text: 'Codex Generation'),
             Tab(text: 'Project Settings'),
+            Tab(text: 'Character Relationships'),
           ],
         ),
       ),
@@ -75,8 +78,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   projectId: projectId,
                   onProgressChanged: (chapters, codexEntries, wordCount) {
                     // Update the app state with the new progress values.
-                    appState.updateProgress(
-                        chapters, codexEntries, wordCount);
+                    appState.updateProgress(chapters, codexEntries, wordCount);
                   },
                 ),
                 Editor(projectId: projectId),
@@ -87,6 +89,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 CreateChapter(projectId: projectId),
                 CodexGeneration(projectId: projectId),
                 ProjectSettings(projectId: projectId),
+                CharacterRelationshipsScreen(projectId: projectId),
               ],
             ),
     );

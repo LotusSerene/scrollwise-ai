@@ -928,7 +928,7 @@ class AgentManager:
                 "codex_type": codex_type,
                 "subtype": subtype or "N/A",
                 "description": description,
-                "existing_codex_items": json.dumps([item.to_dict() for item in existing_codex_items], indent=2),
+                "existing_codex_items": json.dumps(existing_codex_items, indent=2),
                 "format_instructions": parser.get_format_instructions()
             })
             
