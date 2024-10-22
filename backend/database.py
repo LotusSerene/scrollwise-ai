@@ -1298,7 +1298,6 @@ class Database:
             )
             session.add(analysis)
             session.commit()
-            self.logger.debug(f"Successfully saved relationship analysis with ID: {analysis.id}")
             return analysis.id
         except Exception as e:
             session.rollback()

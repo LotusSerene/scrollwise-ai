@@ -124,7 +124,7 @@ class AgentManager:
     def __init__(self, user_id: str, project_id: str):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        self.logger.info(f"Initializing AgentManager for user: {user_id} and project: {project_id}")
+        #self.logger.info(f"Initializing AgentManager for user: {user_id} and project: {project_id}")
         self.user_id = user_id
         self.project_id = project_id
         self.api_key = self._get_api_key()
@@ -132,7 +132,7 @@ class AgentManager:
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
         self.chat_history = db_instance.get_chat_history(user_id, project_id)
-        self.logger.info(f"AgentManager initialized for user: {user_id} and project: {project_id}")
+        #self.logger.info(f"AgentManager initialized for user: {user_id} and project: {project_id}")
 
         self.setup_caching()
         self.setup_rate_limiter()
@@ -188,7 +188,7 @@ class AgentManager:
                 # Remove or comment out the callback_manager parameter
                 # callback_manager=CallbackManager([StreamingStdOutCallbackHandler()])
             )
-            #self.logger.debug("LLM initialized successfully")
+            
             return llm
         except Exception as e:
             self.logger.error(f"Error initializing LLM: {str(e)}")
@@ -198,7 +198,7 @@ class AgentManager:
                                       instructions: Dict[str, Any],
                                       previous_chapters: List[Dict[str, Any]],
                                       codex_items: List[Dict[str, Any]]):
-        self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
+        #self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
         try:
             codex_items_dict = {item['name']: item['description'] for item in codex_items}
             
@@ -1166,7 +1166,7 @@ class AgentManager:
                 "locations": json.dumps(locations, indent=2)
             })
             
-            self.logger.debug(f"Generated project summary: {result}")
+            #self.logger.debug(f"Generated project summary: {result}")
             return result
         except Exception as e:
             self.logger.error(f"Error generating project summary: {str(e)}")
