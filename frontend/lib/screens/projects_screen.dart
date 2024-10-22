@@ -392,8 +392,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           return Text('Error: ${snapshot.error}');
                         } else {
                           final universes = snapshot.data ?? [];
+                          // Convert universe_id to String? explicitly
+                          String? currentUniverseId =
+                              project['universe_id']?.toString();
                           return DropdownButton<String?>(
-                            value: project['universe_id'],
+                            value: currentUniverseId,
                             onChanged: (String? newValue) {
                               _updateProjectUniverse(project['id'], newValue);
                             },
@@ -405,7 +408,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                               if (universes.isNotEmpty)
                                 ...universes.map((universe) {
                                   return DropdownMenuItem<String?>(
-                                    value: universe['id'],
+                                    value: universe['id'].toString(),
                                     child: Text(universe['name']),
                                   );
                                 }).toList(),

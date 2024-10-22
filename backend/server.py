@@ -491,13 +491,13 @@ async def generate_chapters(
                         chapter_id=str(new_chapter['id']),
                         chapter_title=str(chapter_title),
                         is_valid=bool(validity['is_valid']),
-                        feedback=str(validity['feedback']),
-                        review=str(validity.get('review', '')),
-                        style_guide_adherence=bool(validity['style_guide_adherence']),
-                        style_guide_feedback=str(validity.get('style_guide_feedback', '')),
-                        continuity=bool(validity['continuity']),
-                        continuity_feedback=str(validity.get('continuity_feedback', '')),
-                        test_results=str(validity.get('test_results', '')),
+                        overall_score=int(validity.get('overall_score', 5)),  # Add default score
+                        general_feedback=str(validity['feedback']),  # Changed from feedback
+                        style_guide_adherence_score=int(validity.get('style_guide_adherence_score', 5)),  # New field
+                        style_guide_adherence_explanation=str(validity.get('style_guide_feedback', '')),  # Changed from style_guide_feedback
+                        continuity_score=int(validity.get('continuity_score', 5)),  # New field
+                        continuity_explanation=str(validity.get('continuity_feedback', '')),  # Changed from continuity_feedback
+                        areas_for_improvement=json.loads(validity.get('test_results', '[]')),  # Changed from test_results
                         user_id=current_user.id,
                         project_id=project_id
                     )
@@ -1148,7 +1148,7 @@ async def create_relationship(
     project_id: str,
     related_character_id: str,
     relationship_type: str,
-    description: Optional[str] = None,  # Add this parameter
+    description: Optional[str] = None,  # Make sure this parameter is included
     current_user: User = Depends(get_current_active_user)
 ):
     try:
@@ -1161,7 +1161,7 @@ async def create_relationship(
             related_character_id, 
             relationship_type, 
             project_id,
-            description  # Add this parameter
+            description  # Pass the description parameter
         )
         return {"message": "Relationship created successfully", "id": relationship_id}
     except Exception as e:
@@ -1250,7 +1250,8 @@ async def analyze_relationships(
                 character_id=rel['character1_id'],
                 related_character_id=rel['character2_id'],
                 relationship_type=rel['relationship_type'],
-                project_id=project_id
+                project_id=project_id,
+                description=rel['description']  # Add this line
             )
             
         return {"relationships": relationships}
@@ -1282,6 +1283,42 @@ async def extract_character_backstory(
     except Exception as e:
         logger.error(f"Error extracting character backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error extracting character backstory: {str(e)}")
+
+@codex_router.put("/characters/{character_id}/backstory")
+async def update_character_backstory(
+    character_id: str,
+    project_id: str,
+    backstory: Dict[str, str],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        db_instance.update_character_backstory(
+            character_id,
+            backstory['backstory'],
+            current_user.id,
+            project_id
+        )
+        return {"message": "Backstory updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating character backstory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@codex_router.delete("/characters/{character_id}/backstory")
+async def delete_character_backstory(
+    character_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        db_instance.delete_character_backstory(
+            character_id,
+            current_user.id,
+            project_id
+        )
+        return {"message": "Backstory deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting character backstory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Include routers
 app.include_router(auth_router)

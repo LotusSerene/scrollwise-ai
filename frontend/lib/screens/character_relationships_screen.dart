@@ -103,6 +103,15 @@ class _CharacterRelationshipsScreenState
         .analyzeRelationships(characterIds, widget.projectId);
   }
 
+  void _handleEditRelationship(Relationship relationship) {
+    Provider.of<RelationshipProvider>(context, listen: false)
+        .updateRelationship(
+      relationship.id,
+      relationship.relationshipType,
+      widget.projectId,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -170,9 +179,7 @@ class _CharacterRelationshipsScreenState
                         relationshipProvider.deleteRelationship(
                             relationshipId, widget.projectId);
                       },
-                      onEditRelationship: (relationship) {
-                        // TODO: Implement edit relationship functionality
-                      },
+                      onEditRelationship: _handleEditRelationship,
                     );
                   },
                 );

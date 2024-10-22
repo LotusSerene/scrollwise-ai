@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
 import '../widgets/character_detail_dialog.dart'; // Make sure to create this file
+import 'package:expandable/expandable.dart'; // Add this package to pubspec.yaml
 
 class CharacterJourneyScreen extends StatefulWidget {
   final String projectId;
@@ -117,6 +118,85 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     }
   }
 
+  Future<void> _deleteBackstory(String characterId) async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse(
+            '$apiUrl/codex/characters/$characterId/backstory?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        await _loadCharacters(); // Reload characters after deletion
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Backstory deleted successfully')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting backstory: $e')),
+      );
+    }
+  }
+
+  Future<void> _editBackstory(Character character) async {
+    final TextEditingController _backstoryController =
+        TextEditingController(text: character.backstory);
+
+    final String? result = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Edit Backstory for ${character.name}'),
+          content: TextField(
+            controller: _backstoryController,
+            maxLines: null,
+            decoration: const InputDecoration(
+              hintText: 'Enter backstory...',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context, _backstoryController.text),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null) {
+      try {
+        final headers = await getAuthHeaders();
+        headers['Content-Type'] = 'application/json';
+
+        final response = await http.put(
+          Uri.parse(
+              '$apiUrl/codex/characters/${character.id}/backstory?project_id=${widget.projectId}'),
+          headers: headers,
+          body: json.encode({'backstory': result}),
+        );
+
+        if (response.statusCode == 200) {
+          await _loadCharacters(); // Reload characters after update
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Backstory updated successfully')),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating backstory: $e')),
+        );
+      }
+    }
+  }
+
   void _showCharacterDetails(Character character) {
     showDialog(
       context: context,
@@ -148,44 +228,68 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
                   opacity: ignoredCharacters.contains(character.id) ? 0.5 : 1.0,
                   child: Card(
                     margin: const EdgeInsets.all(8.0),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(character.name,
-                              style: Theme.of(context).textTheme.titleLarge),
-                          const SizedBox(height: 8),
-                          Text(character.description),
-                          const SizedBox(height: 16),
-                          Text('Backstory:',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          Text(character.backstory ?? 'No backstory available'),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              ElevatedButton(
-                                onPressed: () =>
-                                    _showCharacterDetails(character),
-                                child: const Text('View Details'),
-                              ),
-                              Switch(
-                                value:
-                                    !ignoredCharacters.contains(character.id),
-                                onChanged: (value) {
-                                  setState(() {
-                                    if (value) {
-                                      ignoredCharacters.remove(character.id);
-                                    } else {
-                                      ignoredCharacters.add(character.id);
-                                    }
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-                        ],
+                    child: ExpandablePanel(
+                      header: ListTile(
+                        title: Text(character.name,
+                            style: Theme.of(context).textTheme.titleLarge),
+                        trailing: Switch(
+                          value: !ignoredCharacters.contains(character.id),
+                          onChanged: (value) {
+                            setState(() {
+                              if (value) {
+                                ignoredCharacters.remove(character.id);
+                              } else {
+                                ignoredCharacters.add(character.id);
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                      collapsed: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Text(
+                          character.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      expanded: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Description:',
+                                style: Theme.of(context).textTheme.titleMedium),
+                            Text(character.description),
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Backstory:',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.edit),
+                                      onPressed: () =>
+                                          _editBackstory(character),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete),
+                                      onPressed: () =>
+                                          _deleteBackstory(character.id),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            Text(character.backstory.isNotEmpty
+                                ? character.backstory
+                                : 'No backstory available'),
+                          ],
+                        ),
                       ),
                     ),
                   ),

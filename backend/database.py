@@ -1362,13 +1362,47 @@ class Database:
                         'character1_name': character1.name,
                         'character2_name': character2.name,
                         'relationship_type': rel.relationship_type,
-                        'description': rel.description  # Make sure this is included
+                        'description': rel.description or ''  # Add this line
                     })
 
             return result
         except Exception as e:
             self.logger.error(f"Error getting character relationships: {str(e)}")
             raise
+        finally:
+            session.close()
+
+    def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.user_id == user_id,
+                CodexItem.project_id == project_id
+            ).first()
+            
+            if character:
+                character.backstory = backstory
+                session.commit()
+            else:
+                raise ValueError("Character not found")
+        finally:
+            session.close()
+
+    def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.user_id == user_id,
+                CodexItem.project_id == project_id
+            ).first()
+            
+            if character:
+                character.backstory = None
+                session.commit()
+            else:
+                raise ValueError("Character not found")
         finally:
             session.close()
 

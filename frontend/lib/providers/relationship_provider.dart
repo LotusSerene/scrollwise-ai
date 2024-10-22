@@ -68,7 +68,9 @@ class RelationshipProvider extends ChangeNotifier {
   }
 
   Future<void> createRelationship(String characterId, String relatedCharacterId,
-      String relationshipType, String projectId) async {
+      String relationshipType, String projectId,
+      {String? description} // Add description parameter
+      ) async {
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
@@ -80,11 +82,12 @@ class RelationshipProvider extends ChangeNotifier {
           'related_character_id': relatedCharacterId,
           'relationship_type': relationshipType,
           'project_id': projectId,
+          'description': description, // Include description in request
         }),
       );
 
       if (response.statusCode == 200) {
-        await getRelationships(projectId); // Refresh the relationships list
+        await getRelationships(projectId);
       } else {
         throw Exception('Failed to create relationship');
       }
