@@ -194,9 +194,10 @@ class ProcessedChapter(Base):
 class CharacterRelationship(Base):
     __tablename__ = 'character_relationships'
     id = Column(String, primary_key=True)
-    character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)  # Change this
-    related_character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)  # Change this
+    character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
+    related_character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
     relationship_type = Column(String, nullable=False)
+    description = Column(Text, nullable=True)  # Add this line
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
     # Update these relationship definitions
@@ -212,7 +213,8 @@ class CharacterRelationship(Base):
             'id': self.id,
             'character_id': self.character_id,
             'related_character_id': self.related_character_id,
-            'relationship_type': self.relationship_type
+            'relationship_type': self.relationship_type,
+            'description': self.description or ''  # Add this line
         }
 
 class Event(Base):
@@ -280,6 +282,30 @@ class CharacterBackstory(Base):
             'content': self.content,
             'chapter_id': self.chapter_id,
             'created_at': self.created_at.isoformat()
+        }
+
+# Add this with the other model definitions (around line 31)
+class CharacterRelationshipAnalysis(Base):
+    __tablename__ = 'character_relationship_analyses'
+    id = Column(String, primary_key=True)
+    character1_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
+    character2_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
+    relationship_type = Column(String, nullable=False)
+    description = Column(Text)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'character1_id': self.character1_id,
+            'character2_id': self.character2_id,
+            'relationship_type': self.relationship_type,
+            'description': self.description,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 class Database:
@@ -1175,7 +1201,9 @@ class Database:
         finally:
             session.close()
 
-    def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str) -> str:
+    def create_character_relationship(self, character_id: str, related_character_id: str, 
+                                    relationship_type: str, project_id: str, 
+                                    description: Optional[str] = None) -> str:
         session = self.get_session()
         try:
             # Ensure character IDs are not None before querying
@@ -1183,7 +1211,7 @@ class Database:
                 raise ValueError("Character IDs cannot be None")
             
             # Check if both characters exist in the codex_items table
-            character = session.query(CodexItem).filter_by(id=character_id, project_id=project_id, type='character', name='Specter').first()
+            character = session.query(CodexItem).filter_by(id=character_id, project_id=project_id, type='character').first()
             related_character = session.query(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character').first()
             
             if not character:
@@ -1199,6 +1227,7 @@ class Database:
                 character_id=character.id,
                 related_character_id=related_character.id,
                 relationship_type=relationship_type,
+                description=description,  # Add this line
                 project_id=project_id
             )
             session.add(relationship)
@@ -1207,43 +1236,10 @@ class Database:
         except Exception as e:
             session.rollback()
             self.logger.error(f"Error creating character relationship: {str(e)}")
-            if 'Specter' in str(e):
-                self.logger.error("Error specifically related to character 'Specter'")
             raise
         finally:
             session.close()
 
-    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            Character = alias(CodexItem)
-            RelatedCharacter = alias(CodexItem)
-            
-            relationships = session.query(
-                CharacterRelationship,
-                Character.c.name.label('character_name'),
-                RelatedCharacter.c.name.label('related_character_name')
-            ).join(
-                Character, CharacterRelationship.character_id == Character.c.id
-            ).join(
-                RelatedCharacter, CharacterRelationship.related_character_id == RelatedCharacter.c.id
-            ).filter(
-                Character.c.project_id == project_id,
-                Character.c.user_id == user_id,
-                Character.c.type == 'character',
-                RelatedCharacter.c.type == 'character'
-            ).all()
-            
-            return [{
-                'id': relationship.CharacterRelationship.id,
-                'character_id': relationship.CharacterRelationship.character_id,
-                'character_name': relationship.character_name,
-                'related_character_id': relationship.CharacterRelationship.related_character_id,
-                'related_character_name': relationship.related_character_name,
-                'relationship_type': relationship.CharacterRelationship.relationship_type
-            } for relationship in relationships]
-        finally:
-            session.close()
 
     def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         session = self.get_session()
@@ -1281,6 +1277,100 @@ class Database:
         except Exception as e:
             session.rollback()
             self.logger.error(f"Error deleting character relationship: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
+                                 description: str, user_id: str, project_id: str) -> str:
+        session = self.get_session()
+        try:
+            self.logger.debug(f"Saving relationship analysis: {character1_id} -> {character2_id}")
+            
+            analysis = CharacterRelationshipAnalysis(
+                id=str(uuid.uuid4()),
+                character1_id=character1_id,
+                character2_id=character2_id,
+                relationship_type=relationship_type,
+                description=description,
+                user_id=user_id,
+                project_id=project_id
+            )
+            session.add(analysis)
+            session.commit()
+            self.logger.debug(f"Successfully saved relationship analysis with ID: {analysis.id}")
+            return analysis.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving relationship analysis: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+
+    def get_character_by_id(self, character_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.project_id == project_id,
+                CodexItem.type == 'character'
+            ).first()
+            
+            if character:
+                return character.to_dict()
+            return None
+        finally:
+            session.close()
+
+    def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
+        session = self.get_session()
+        try:
+            latest_chapter = session.query(Chapter).filter(
+                Chapter.project_id == project_id
+            ).order_by(Chapter.chapter_number.desc()).first()
+            
+            if latest_chapter:
+                return latest_chapter.content
+            return None
+        finally:
+            session.close()
+
+    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            relationships = (
+                session.query(CharacterRelationship)
+                .join(
+                    CodexItem,
+                    CharacterRelationship.character_id == CodexItem.id
+                )
+                .filter(
+                    CodexItem.project_id == project_id,
+                    CodexItem.user_id == user_id
+                )
+                .all()
+            )
+
+            result = []
+            for rel in relationships:
+                character1 = session.query(CodexItem).filter_by(id=rel.character_id).first()
+                character2 = session.query(CodexItem).filter_by(id=rel.related_character_id).first()
+                
+                if character1 and character2:
+                    result.append({
+                        'id': rel.id,
+                        'character1_id': rel.character_id,
+                        'character2_id': rel.related_character_id,
+                        'character1_name': character1.name,
+                        'character2_name': character2.name,
+                        'relationship_type': rel.relationship_type,
+                        'description': rel.description  # Make sure this is included
+                    })
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting character relationships: {str(e)}")
             raise
         finally:
             session.close()

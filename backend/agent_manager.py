@@ -74,7 +74,10 @@ class RelationshipAnalysis(BaseModel):
     character1: str = Field(..., description="Name of the first character")
     character2: str = Field(..., description="Name of the second character")
     relationship_type: str = Field(..., description="Type of relationship between the characters")
-    description: str = Field(..., description="Brief description of the relationship")
+    description: str = Field(..., description="Detailed description of the relationship")
+
+class RelationshipAnalysisList(BaseModel):
+    relationships: List[RelationshipAnalysis]
 
 class EventDescription(BaseModel):
     title: str = Field(..., description="Title of the event")
@@ -239,23 +242,26 @@ class AgentManager:
                 chapter_content = await self.check_and_extend_chapter(chapter_content, instructions, context, expected_word_count)
 
             # Extract new codex items after the chapter is generated
-            new_codex_items = self.check_and_extract_new_codex_items(chapter_content, codex_items)
+            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content, codex_items)
             
             # Add new codex items to the knowledge base
             added_codex_items = []
             for item in new_codex_items:
                 try:
-                    embedding_id = self.add_to_knowledge_base("codex_item", item['description'], {
-                        "name": item['name'],
-                        "type": item['type'],
-                        "subtype": item['subtype'] or "None"  # Use "None" as a string if subtype is None
-                    })
-                    #self.logger.info(f"Added new codex item to knowledge base: {item['name']}")
+                    embedding_id = await asyncio.to_thread(
+                        self.add_to_knowledge_base,
+                        "codex_item",
+                        item['description'],
+                        {
+                            "name": item['name'],
+                            "type": item['type'],
+                            "subtype": item['subtype'] or "None"  # Use "None" as a string if subtype is None
+                        }
+                    )
                     added_codex_items.append(item)
                 except Exception as e:
                     self.logger.error(f"Error adding codex item to knowledge base: {str(e)}")
             
-            #self.logger.info(f"Yielding complete chapter. Content length: {len(chapter_content)}")
             yield {"type": "complete", "content": chapter_content, "new_codex_items": added_codex_items}
 
         except Exception as e:
@@ -811,71 +817,123 @@ class AgentManager:
         all_new_items = await self.process_large_content(chapter, "codex_extraction", process_chunk)
         return [{"name": item.name, "description": item.description, "type": item.type, "subtype": item.subtype} for item in all_new_items]
 
-    async def analyze_character_relationships(self, characters: List[str]) -> List[RelationshipAnalysis]:
-        async def process_chunk(chunk: str):
+    async def analyze_character_relationships(self, character_ids: List[str]) -> List[Dict[str, Any]]:
+        try:
+            # Get character data from the database
+            self.logger.debug(f"Getting character data for IDs: {character_ids}")
+            character_data = {}
+            for char_id in character_ids:
+                char = db_instance.get_character_by_id(char_id, self.project_id)
+                if char:
+                    character_data[char_id] = char['name']
+                    self.logger.debug(f"Found character: {char['name']} for ID: {char_id}")
+                else:
+                    self.logger.warning(f"Character not found for ID: {char_id}")
+
+            if not character_data:
+                self.logger.warning("No valid characters found")
+                return []
+
+            # Create pairs of characters for analysis
+            character_pairs = [(a, b) for i, a in enumerate(character_ids) for b in character_ids[i+1:]]
+            self.logger.debug(f"Created character pairs: {character_pairs}")
+
+            # Get the latest chapter content
+            chapter_content = db_instance.get_latest_unprocessed_chapter_content(
+                self.project_id, 
+                "analyze_character_relationships"
+            )
+            
+            if not chapter_content:
+                # If no unprocessed chapter, get the latest chapter regardless of processing status
+                chapter_content = db_instance.get_latest_chapter_content(self.project_id)
+                
+            if not chapter_content:
+                self.logger.warning("No chapter content found for analysis")
+                return []
+
+            self.logger.debug("Preparing to analyze relationships with chapter content")
+            
+            # Format character pairs using names instead of IDs for the prompt
+            formatted_pairs = [
+                f"{character_data[pair[0]]} and {character_data[pair[1]]}"
+                for pair in character_pairs
+            ]
+            
+            # Create a list of valid character names for the prompt
+            valid_characters = list(character_data.values())
+
             prompt = ChatPromptTemplate.from_template("""
-            Analyze the relationships between the following character pairs based on the given chapter content:
-            Character Pairs: {character_pairs}
+                Analyze the relationships between the following character pairs based on the given chapter content.
+                
+                IMPORTANT: Only analyze relationships between these specific characters:
+                {valid_characters}
+                Do not include any other characters in your analysis.
 
-            Chapter Content:
-            {chapter_content}
+                Character Pairs to Analyze:
+                {character_pairs}
 
-            For each pair of characters, provide:
-            1. The nature of their relationship (e.g., friends, rivals, family, none)
-            2. A brief description of their relationship
-            3. Any significant interactions or events from the chapter that define their relationship
+                Chapter Content:
+                {chapter_content}
 
-            Use the following format for your response:
-            {format_instructions}
-            """)
+                For each pair of characters, provide:
+                1. The nature of their relationship (e.g., friends, rivals, family, none)
+                2. A brief description of their relationship
+                3. Any significant interactions or events from the chapter that define their relationship
+
+                RULES:
+                - Only analyze relationships between the characters listed above
+                - Do not introduce or mention any characters not in the provided list
+                - If you can't determine a relationship between characters, use "unknown" as the relationship type
+                
+                Format each relationship analysis as a list of dictionaries with these exact keys:
+                {format_instructions}
+                """)
 
             parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
             chain = prompt | self.check_llm | parser
 
             result = await chain.ainvoke({
-                "character_pairs": ", ".join([f"{pair[0]} and {pair[1]}" for pair in characters_to_analyze]),
-                "chapter_content": chunk,
+                "valid_characters": ", ".join(valid_characters),
+                "character_pairs": ", ".join(formatted_pairs),
+                "chapter_content": chapter_content,
                 "format_instructions": parser.get_format_instructions()
             })
 
-            return result.relationships if result and isinstance(result, RelationshipAnalysisList) else []
+            # Convert the Pydantic models to dictionaries and map IDs
+            name_to_id = {v: k for k, v in character_data.items()}
+            relationships = []
+            
+            for rel in result.relationships:
+                # Skip any relationships that include characters not in our valid set
+                if rel.character1 not in valid_characters or rel.character2 not in valid_characters:
+                    self.logger.warning(f"Skipping invalid relationship with characters: {rel.character1}, {rel.character2}")
+                    continue
+                
+                # Convert Pydantic model to dict and add IDs
+                relationship_dict = {
+                    'character1_id': name_to_id[rel.character1],
+                    'character2_id': name_to_id[rel.character2],
+                    'relationship_type': rel.relationship_type,
+                    'description': rel.description
+                }
+                relationships.append(relationship_dict)
+                
+                # Save to database
+                db_instance.save_relationship_analysis(
+                    character1_id=relationship_dict['character1_id'],
+                    character2_id=relationship_dict['character2_id'],
+                    relationship_type=relationship_dict['relationship_type'],
+                    description=relationship_dict['description'],
+                    user_id=self.user_id,
+                    project_id=self.project_id
+                )
 
-        chapter_content = db_instance.get_latest_unprocessed_chapter_content(self.project_id, "analyze_character_relationships")
-        if not chapter_content:
+            self.logger.debug(f"Generated and saved relationships: {relationships}")
+            return relationships
+        except Exception as e:
+            self.logger.error(f"Error analyzing relationships: {str(e)}", exc_info=True)
             return []
-
-        # Create a list of character pairs to analyze
-        characters_to_analyze = [(characters[i], characters[j]) for i in range(len(characters)) for j in range(i+1, len(characters))]
-
-        all_relationships = await self.process_large_content(chapter_content, "relationship_analysis", process_chunk)
-        
-        # Deduplicate and store relationships
-        unique_relationships = {}
-        character_ids = {}
-        for character_name in characters:
-            character = db_instance.get_character_by_name(character_name, self.user_id, self.project_id)
-            if character:
-                character_ids[character_name] = character['id']
-        
-        for relationship in all_relationships:
-            key = frozenset([relationship.character1, relationship.character2])
-            if key not in unique_relationships:
-                unique_relationships[key] = relationship
-                try:
-                    db_instance.create_character_relationship(
-                        character_id=character_ids[relationship.character1],
-                        related_character_id=character_ids[relationship.character2],
-                        relationship_type=relationship.relationship_type,
-                        project_id=self.project_id
-                    )
-                except ValueError as ve:
-                    self.logger.warning(f"Skipping relationship creation: {str(ve)}")
-                except Exception as e:
-                    self.logger.error(f"Error creating relationship in database: {str(e)}")
-
-        db_instance.mark_latest_chapter_processed(self.project_id, "analyze_character_relationships")
-
-        return list(unique_relationships.values())
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
         #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
@@ -1143,20 +1201,28 @@ class AgentManager:
 
         """)
 
-        words_to_add = expected_word_count - current_word_count
-
         chain = prompt | self.llm | StrOutputParser()
 
-        extended_content = await chain.ainvoke({
-            "chapter_content": chapter_content,
-            "context": context,
-            "instructions": json.dumps(instructions),
-            "current_word_count": current_word_count,
-            "expected_word_count": expected_word_count,
-            "words_to_add": words_to_add
-        })
+        while current_word_count < expected_word_count:
+            words_to_add = expected_word_count - current_word_count
 
-        return  "\n" + extended_content
+            extended_content = await chain.ainvoke({
+                "chapter_content": chapter_content,
+                "context": context,
+                "instructions": json.dumps(instructions),
+                "current_word_count": current_word_count,
+                "expected_word_count": expected_word_count,
+                "words_to_add": words_to_add
+            })
+
+            chapter_content += "\n" + extended_content
+            current_word_count = len(re.findall(r'\w+', chapter_content))
+
+            # Add a safety check to prevent infinite loops
+            if len(extended_content.split()) < 10:  # If less than 10 words were added
+                break
+
+        return chapter_content
 
 
 
