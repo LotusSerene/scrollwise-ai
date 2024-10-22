@@ -126,9 +126,6 @@ class ChapterGenerationRequest(BaseModel):
     numChapters: int
     plot: str
     writingStyle: str
-    styleGuide: str
-    minWordCount: int
-    additionalInstructions: str
     instructions: Dict[str, Any]
 
 class PresetCreate(BaseModel):
@@ -171,6 +168,11 @@ class ChatHistoryRequest(BaseModel):
 
 class UpdateTargetWordCountRequest(BaseModel):
     targetWordCount: int
+
+# Add this new model
+class BackstoryExtractionRequest(BaseModel):
+    character_id: str
+    chapter_id: str
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -249,7 +251,7 @@ preset_router = APIRouter(prefix="/presets", tags=["Presets"])  # New router for
 project_router = APIRouter(prefix="/projects", tags=["Projects"])
 universe_router = APIRouter(prefix="/universes", tags=["Universes"])
 codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for codex
-
+relationship_router = APIRouter(prefix="/relationships", tags=["Relationships"])
 # Project routes with target word count update
 @project_router.put("/{project_id}/target-word-count")
 async def update_project_target_word_count(
@@ -341,10 +343,8 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
 @auth_router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
-        logging.debug(f"Login attempt with username: {form_data.username}")
         user = authenticate_user(form_data.username, form_data.password)
         if not user:
-            logging.debug("User authentication failed")
             raise HTTPException(
                 status_code=401,
                 detail="Incorrect username or password",
@@ -352,12 +352,11 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             )
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires  # Include user_id in JWT payload
+            data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires
         )
-        logging.debug(f"Access token created for user: {user.username}")
         return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
-        logging.error(f"Error in login_for_access_token: {str(e)}")
+        logger.error(f"Error in login_for_access_token: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -393,11 +392,7 @@ async def generate_chapters(
         previous_chapters = db_instance.get_all_chapters(current_user.id, project_id)
         codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
 
-        instructions = {
-            "styleGuide": request.styleGuide,
-            "minWordCount": request.minWordCount,
-            "additionalInstructions": request.additionalInstructions
-        }
+        instructions = request.instructions
 
         async def generate():
             chunks = []
@@ -419,21 +414,21 @@ async def generate_chapters(
                             chapter_content += chunk['content']
                         chunks.append(json.dumps(chunk))
 
-                    logging.debug(f"Chapter {chapter_number} content generated")
+                    #logging.debug(f"Chapter {chapter_number} content generated")
 
-                    logging.debug("Generating title")
+                    #logging.debug("Generating title")
                     chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                    logging.debug(f"Title generated: {chapter_title}")
+                    #logging.debug(f"Title generated: {chapter_title}")
 
-                    logging.debug("Checking chapter")
+                    #logging.debug("Checking chapter")
                     validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                    logging.debug("Chapter checked")
+                    #logging.debug("Chapter checked")
 
-                    logging.debug("Extracting new codex items")
-                    new_codex_items = agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
-                    logging.debug(f"New codex items extracted: {new_codex_items}")
+                    #logging.debug("Extracting new codex items")
+                    new_codex_items = await agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
+                    #logging.debug(f"New codex items extracted: {new_codex_items}")
 
-                    logging.debug("Saving new codex items")
+                    #logging.debug("Saving new codex items")
                     for item in new_codex_items:
                         item_id = await db_instance.create_codex_item(
                             item['name'],
@@ -466,16 +461,16 @@ async def generate_chapters(
                             "embedding_id": embedding_id
                         })
 
-                    logging.debug("New codex items saved and added to knowledge base")
+                    #logging.debug("New codex items saved and added to knowledge base")
 
-                    logging.debug("Saving chapter")
+                    #logging.debug("Saving chapter")
                     new_chapter = await db_instance.create_chapter(
                         chapter_title,  # No encoding/decoding
                         chapter_content,  # No encoding/decoding
                         current_user.id,
                         project_id
                     )
-                    logging.debug(f"Chapter saved with id: {new_chapter['id']}")
+                    #logging.debug(f"Chapter saved with id: {new_chapter['id']}")
 
                     # Add generated chapter to knowledge base
                     embedding_id = agent_manager.add_to_knowledge_base(
@@ -491,7 +486,7 @@ async def generate_chapters(
                     # Update the chapter with the embedding_id
                     db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
-                    logging.debug("Saving validity check")
+                    #logging.debug("Saving validity check")
                     await db_instance.save_validity_check(
                         chapter_id=str(new_chapter['id']),
                         chapter_title=str(chapter_title),
@@ -506,9 +501,9 @@ async def generate_chapters(
                         user_id=current_user.id,
                         project_id=project_id
                     )
-                    logging.debug("Validity check saved")
+                    #logging.debug("Validity check saved")
 
-                    logging.debug("Preparing final chunk")
+                    #logging.debug("Preparing final chunk")
                     chunks.append(json.dumps({
                         'type': 'final', 
                         'chapterId': new_chapter['id'], 
@@ -523,7 +518,7 @@ async def generate_chapters(
                 logging.error(f"Error in generate function: {str(e)}")
                 chunks.append(json.dumps({'type': 'error', 'message': str(e)}))
             finally:
-                logging.debug(f"Generate function completed for user {user_id}, project {project_id}")
+                #logging.debug(f"Generate function completed for user {user_id}, project {project_id}")
                 if project_id in generation_tasks[user_id]:
                     del generation_tasks[user_id][project_id]
             
@@ -721,6 +716,15 @@ async def generate_codex_item(
         logger.error(f"Error generating codex item: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating codex item: {str(e)}")
 
+@codex_router.get("/characters")
+async def get_characters(project_id: str, current_user: User = Depends(get_current_active_user)):
+    try:
+        characters = db_instance.get_characters_from_codex(current_user.id, project_id)
+        return {"characters": characters}
+    except Exception as e:
+        logger.error(f"Error fetching characters: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @codex_item_router.get("/")
 async def get_codex_items(project_id: str, current_user: User = Depends(get_current_active_user)):
     codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
@@ -837,21 +841,21 @@ async def add_to_knowledge_base(
     project_id: str = Form(...),
     current_user: User = Depends(get_current_active_user)
 ):
-    logger.info(f"Received request to add to knowledge base. Documents: {documents}, File: {file}")
+    #logger.info(f"Received request to add to knowledge base. Documents: {documents}, File: {file}")
     
     agent_manager = AgentManager(current_user.id, project_id)
     
     if documents:
-        logger.info(f"Adding document: {documents}")
+        #logger.info(f"Adding document: {documents}")
         metadata = json.loads(metadata_str) if metadata_str else {}
         agent_manager.add_to_knowledge_base("doc", documents, metadata)
         return {"message": "Document added to the knowledge base successfully"}
     
     elif file:
-        logger.info(f"Adding file: {file.filename}")
+        #logger.info(f"Adding file: {file.filename}")
         content = await file.read()
         metadata = json.loads(metadata_str) if metadata_str else {}
-        text_content = content.decode("utf-8") # Decode content
+        text_content = content.decode("utf-8")
         metadata['filename'] = file.filename
         agent_manager.add_to_knowledge_base("file", text_content, metadata)
         return {"message": "File added to the knowledge base successfully"}
@@ -862,10 +866,10 @@ async def add_to_knowledge_base(
 
 @knowledge_base_router.get("/")
 async def get_knowledge_base_content(project_id: str, current_user: User = Depends(get_current_active_user)):
-    logging.debug(f"Fetching knowledge base content for user: {current_user.id}")
+    #logging.debug(f"Fetching knowledge base content for user: {current_user.id}")
     agent_manager = AgentManager(current_user.id, project_id)
     content = agent_manager.get_knowledge_base_content()
-    logging.debug(f"Knowledge base content fetched for user: {current_user.id}")
+    #logging.debug(f"Knowledge base content fetched for user: {current_user.id}")
     formatted_content = [
         {
             'type': item['metadata'].get('type', 'Unknown'),
@@ -877,7 +881,7 @@ async def get_knowledge_base_content(project_id: str, current_user: User = Depen
         }
         for item in content
     ]
-    logging.debug(f"Formatted content: {formatted_content}")
+    #logging.debug(f"Formatted content: {formatted_content}")
     return {"content": formatted_content}
 
 @knowledge_base_router.put("/{embedding_id}")
@@ -1057,22 +1061,16 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
         return {"message": "Project deleted successfully"}
     raise HTTPException(status_code=404, detail="Project not found")
 
-# Include routers
-app.include_router(auth_router)
-app.include_router(chapter_router)
-app.include_router(codex_item_router)
-app.include_router(knowledge_base_router)
-app.include_router(settings_router)
-app.include_router(preset_router)
-app.include_router(project_router)
-app.include_router(universe_router)
-app.include_router(codex_router)
-
 @app.get("/chat-history")
 async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
     agent_manager = AgentManager(current_user.id, project_id)
     chat_history = agent_manager.get_chat_history()
     return {"chatHistory": chat_history}
+
+@app.delete("/chat-history")
+async def delete_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
+    db_instance.delete_chat_history(current_user.id, project_id)
+    return {"message": "Chat history deleted successfully"}
 
 @app.post("/chat-history")
 async def save_chat_history(chat_history: ChatHistoryRequest, project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -1141,6 +1139,161 @@ async def delete_validity_check(check_id: str, project_id: str, current_user: Us
     except Exception as e:
         logging.error(f"Error deleting validity check: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+    
+
+@relationship_router.post("/")
+async def create_relationship(
+    character_id: str,
+    project_id: str,
+    related_character_id: str,
+    relationship_type: str,
+    description: Optional[str] = None,  # Add this parameter
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        project = db_instance.get_project(project_id, current_user.id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        relationship_id = db_instance.create_character_relationship(
+            character_id, 
+            related_character_id, 
+            relationship_type, 
+            project_id,
+            description  # Add this parameter
+        )
+        return {"message": "Relationship created successfully", "id": relationship_id}
+    except Exception as e:
+        logger.error(f"Error creating relationship: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@relationship_router.get("/")
+async def get_relationships(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        relationships = db_instance.get_character_relationships(project_id, current_user.id)
+        return {"relationships": relationships}
+    except Exception as e:
+        logger.error(f"Error fetching relationships: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@relationship_router.put("/{relationship_id}")
+async def update_relationship(
+    relationship_id: str,
+    relationship_type: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        updated_relationship = db_instance.update_character_relationship(
+            relationship_id, relationship_type, current_user.id, project_id
+        )
+        if updated_relationship:
+            return {"message": "Relationship updated successfully", "relationship": updated_relationship}
+        else:
+            raise HTTPException(status_code=404, detail="Relationship not found")
+    except Exception as e:
+        logger.error(f"Error updating relationship: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@relationship_router.delete("/{relationship_id}")
+async def delete_relationship(
+    relationship_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        success = db_instance.delete_character_relationship(relationship_id, current_user.id, project_id)
+        if success:
+            return {"message": "Relationship deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Relationship not found")
+    except Exception as e:
+        logger.error(f"Error deleting relationship: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@relationship_router.post("/analyze")
+async def analyze_relationships(
+    request: Request,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Parse the JSON body
+        characters = await request.json()
+        if not isinstance(characters, list):
+            raise HTTPException(status_code=400, detail="Expected a list of character IDs")
+            
+        #logger.debug(f"Analyzing relationships for characters: {characters} in project: {project_id}")
+        agent_manager = AgentManager(current_user.id, project_id)
+        relationships = await agent_manager.analyze_character_relationships(characters)
+        
+        #logger.debug(f"Generated relationships: {relationships}")
+        
+        # Save each relationship analysis to the database
+        for rel in relationships:
+            # Save the relationship analysis
+            db_instance.save_relationship_analysis(
+                character1_id=rel['character1_id'],
+                character2_id=rel['character2_id'],
+                relationship_type=rel['relationship_type'],
+                description=rel['description'],
+                user_id=current_user.id,
+                project_id=project_id
+            )
+            
+            # Also create the actual relationship in the character_relationships table
+            db_instance.create_character_relationship(
+                character_id=rel['character1_id'],
+                related_character_id=rel['character2_id'],
+                relationship_type=rel['relationship_type'],
+                project_id=project_id
+            )
+            
+        return {"relationships": relationships}
+    except Exception as e:
+        logger.error(f"Error analyzing relationships: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add this new endpoint
+@codex_router.post("/characters/{character_id}/extract-backstory", response_model=Dict[str, Any])
+async def extract_character_backstory(
+    request: BackstoryExtractionRequest,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        agent_manager = AgentManager(current_user.id, project_id)
+        backstory = await agent_manager.extract_character_backstory(request.character_id, request.chapter_id)
+        
+        if backstory and backstory.new_backstory:
+            # Save the extracted backstory to the database
+            db_instance.save_character_backstory(
+                request.character_id,
+                backstory.new_backstory,
+                current_user.id,
+                project_id
+            )
+        
+        return {"message": "Backstory extracted successfully", "backstory": backstory.dict() if backstory else None}
+    except Exception as e:
+        logger.error(f"Error extracting character backstory: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error extracting character backstory: {str(e)}")
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(chapter_router)
+app.include_router(codex_item_router)
+app.include_router(knowledge_base_router)
+app.include_router(settings_router)
+app.include_router(preset_router)
+app.include_router(project_router)
+app.include_router(universe_router)
+app.include_router(codex_router)
+app.include_router(relationship_router)
 
 if __name__ == "__main__":
     import uvicorn

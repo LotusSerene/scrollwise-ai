@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class CreateRelationshipDialog extends StatefulWidget {
-  final List<Map<String, String>> characters;
+  final List<Map<String, dynamic>> characters;
   final Function(String, String, String) onCreateRelationship;
 
   const CreateRelationshipDialog({
@@ -30,8 +30,9 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
           DropdownButtonFormField<String>(
             value: _character1,
             items: widget.characters
-                .map((c) =>
-                    DropdownMenuItem(value: c['id'], child: Text(c['name']!)))
+                .map((c) => DropdownMenuItem<String>(
+                    value: c['id'].toString(),
+                    child: Text(c['name'].toString())))
                 .toList(),
             onChanged: (value) => setState(() => _character1 = value),
             decoration: InputDecoration(labelText: 'Character 1'),
@@ -39,8 +40,9 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
           DropdownButtonFormField<String>(
             value: _character2,
             items: widget.characters
-                .map((c) =>
-                    DropdownMenuItem(value: c['id'], child: Text(c['name']!)))
+                .map((c) => DropdownMenuItem<String>(
+                    value: c['id'].toString(),
+                    child: Text(c['name'].toString())))
                 .toList(),
             onChanged: (value) => setState(() => _character2 = value),
             decoration: InputDecoration(labelText: 'Character 2'),

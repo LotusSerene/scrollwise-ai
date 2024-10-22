@@ -16,6 +16,7 @@ import 'utils/auth.dart';
 import 'utils/theme.dart';
 import 'package:flutter/services.dart';
 import 'providers/preset_provider.dart';
+import 'providers/relationship_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,7 +30,8 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (context) => AppState()),
+        ChangeNotifierProvider(create: (_) => AppState()),
+        ChangeNotifierProvider(create: (_) => RelationshipProvider()),
         ChangeNotifierProvider(create: (context) => PresetProvider()),
       ],
       child: MyApp(),
@@ -65,7 +67,8 @@ class MyApp extends StatelessWidget {
         '/query': (context) => QueryScreen(
             projectId: ModalRoute.of(context)!.settings.arguments as String),
         '/chapters': (context) => ChaptersScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String), // Added ChaptersScreen route
+            projectId: ModalRoute.of(context)!.settings.arguments
+                as String), // Added ChaptersScreen route
       },
     );
   }

@@ -788,7 +788,7 @@ class Database:
             return project.id
         except Exception as e:
             session.rollback()
-            #self.logger.error(f"Error creating project: {str(e)}")
+            self.logger.error(f"Error creating project: {str(e)}")
             raise
         finally:
             session.close()
@@ -1285,8 +1285,6 @@ class Database:
                                  description: str, user_id: str, project_id: str) -> str:
         session = self.get_session()
         try:
-            self.logger.debug(f"Saving relationship analysis: {character1_id} -> {character2_id}")
-            
             analysis = CharacterRelationshipAnalysis(
                 id=str(uuid.uuid4()),
                 character1_id=character1_id,

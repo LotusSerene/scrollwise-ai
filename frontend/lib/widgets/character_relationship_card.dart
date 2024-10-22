@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/relationship.dart';
 
 class CharacterRelationshipCard extends StatelessWidget {
+  final String characterId;
   final String characterName;
   final List<Relationship> relationships;
   final Function(String) onDeleteRelationship;
@@ -9,6 +10,7 @@ class CharacterRelationshipCard extends StatelessWidget {
 
   const CharacterRelationshipCard({
     Key? key,
+    required this.characterId,
     required this.characterName,
     required this.relationships,
     required this.onDeleteRelationship,
@@ -17,20 +19,35 @@ class CharacterRelationshipCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final characterRelationships = relationships
+        .where((relationship) =>
+            relationship.character1_id == characterId ||
+            relationship.character2_id == characterId)
+        .toList();
+
+    if (characterRelationships.isEmpty) {
+      return SizedBox.shrink();
+    }
+
     return Card(
       margin: EdgeInsets.all(8),
       child: ExpansionTile(
         title:
             Text(characterName, style: TextStyle(fontWeight: FontWeight.bold)),
-        children: relationships.map((relationship) {
-          final isCharacter1 = relationship.characterId == characterName;
-          final otherCharacterName = isCharacter1
-              ? relationship.relatedCharacterName
-              : relationship.characterName;
-
+        children: characterRelationships.map((relationship) {
+          final otherCharacterName =
+              relationship.getOtherCharacterName(characterId);
           return ListTile(
-            title: Text('$otherCharacterName'),
-            subtitle: Text(relationship.relationshipType ?? 'Unknown'),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text('With: $otherCharacterName'),
+                ),
+                Text(relationship.relationshipType,
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            subtitle: Text(relationship.description),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [

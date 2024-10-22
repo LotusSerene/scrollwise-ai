@@ -11,6 +11,7 @@ import '../providers/app_state.dart';
 import '../components/editor.dart';
 import '../components/codex_generation.dart';
 import './character_relationships_screen.dart';
+import './character_journey_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -25,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 10, vsync: this);
+    _tabController = TabController(length: 11, vsync: this);
   }
 
   @override
@@ -64,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Tab(text: 'Codex Generation'),
             Tab(text: 'Project Settings'),
             Tab(text: 'Character Relationships'),
+            Tab(text: 'Character Journey'),
           ],
         ),
       ),
@@ -90,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 CodexGeneration(projectId: projectId),
                 ProjectSettings(projectId: projectId),
                 CharacterRelationshipsScreen(projectId: projectId),
+                CharacterJourneyScreen(projectId: projectId),
               ],
             ),
     );

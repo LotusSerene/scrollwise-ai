@@ -28,42 +28,42 @@ class VectorStore:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
-        self.logger.debug(f"Initializing VectorStore for user: {user_id}")
+        #self.logger.debug(f"Initializing VectorStore for user: {user_id}")
         
         try:
-            self.logger.debug("Initializing GoogleGenerativeAIEmbeddings")
+            #self.logger.debug("Initializing GoogleGenerativeAIEmbeddings")
             self.embeddings = GoogleGenerativeAIEmbeddings(
                 model=embeddings_model, google_api_key=self.api_key
             )
-            self.logger.debug("GoogleGenerativeAIEmbeddings initialized successfully")
+            #self.logger.debug("GoogleGenerativeAIEmbeddings initialized successfully")
         except Exception as e:
             self.logger.error(f"Error initializing GoogleGenerativeAIEmbeddings: {str(e)}")
             raise
 
         try:
-            self.logger.debug("Initializing Chroma client")
-            chroma_client = chromadb.HttpClient(host=self.chroma_url, port=self.chroma_port)
-            self.logger.debug("Chroma client initialized successfully")
+            #self.logger.debug("Initializing Chroma client")
+            chroma_client = chromadb.HttpClient(host=self.chroma_url, port=self.chroma_port, settings=Settings(anonymized_telemetry=False))
+            #self.logger.debug("Chroma client initialized successfully")
             
-            self.logger.debug("Initializing Chroma vector store")
+            #self.logger.debug("Initializing Chroma vector store")
             collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
             self.vector_store = Chroma(
                 client=chroma_client,
                 collection_name=collection_name,
                 embedding_function=self.embeddings,
             )
-            self.logger.debug("Chroma vector store initialized successfully")
-            self.logger.info(f"Vector store initialized for user: {user_id} and project: {project_id}")
+            #self.logger.debug("Chroma vector store initialized successfully")
+            #self.logger.info(f"Vector store initialized for user: {user_id} and project: {project_id}")
         except Exception as e:
             self.logger.error(f"Error initializing Chroma vector store: {str(e)}")
             raise
 
-        self.logger.info(
-            f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
-        )
+        #self.logger.info(
+        #    f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
+        #)
 
     def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None) -> str:
-        self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
+        #self.logger.debug(f"Adding to knowledge base for user {self.user_id}")
         if metadata is None:
             metadata = {}
         metadata["user_id"] = self.user_id
@@ -74,34 +74,24 @@ class VectorStore:
         filtered_metadata = {k: v for k, v in flattened_metadata.items() if v is not None}
         
         try:
-            # Add the text and get the IDs
             ids = self.vector_store.add_texts([text], metadatas=[filtered_metadata])
-            
-            # The add_texts method returns a list of IDs, but we're only adding one document,
-            # so we can safely take the first (and only) ID
             embedding_id = ids[0]
-            
-            self.logger.info(f"Added content to knowledge base for user {self.user_id}. Embedding ID: {embedding_id}")
             return embedding_id
         except Exception as e:
             self.logger.error(f"Error adding content to knowledge base: {str(e)}")
             raise
-            self.logger.error(
-                f"Error adding to knowledge base for user {self.user_id}. Error: {str(e)}"
-            )
-            raise
 
     def delete_from_knowledge_base(self, embedding_id: str):
-        self.logger.debug(f"Deleting from knowledge base..., embedding ID: {embedding_id}")
+        #self.logger.debug(f"Deleting from knowledge base..., embedding ID: {embedding_id}")
         try:
             self.vector_store._collection.delete(ids=[embedding_id])
-            self.logger.info(f"Deleted content... Embedding ID: {embedding_id}")
+            #self.logger.info(f"Deleted content... Embedding ID: {embedding_id}")
         except Exception as e:
             self.logger.error(f"Error deleting embedding ID: {embedding_id}. Error: {str(e)}")
             raise
 
     def update_in_knowledge_base(self, embedding_id: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
-        self.logger.debug(f"Updating in knowledge base..., embedding ID: {embedding_id}")
+        #self.logger.debug(f"Updating in knowledge base..., embedding ID: {embedding_id}")
         try:
             if new_content or new_metadata:
                 # Fetch the current metadata
@@ -133,7 +123,7 @@ class VectorStore:
                     metadatas=[current_metadata]
                 )
 
-                self.logger.info(f"Updated content... Embedding ID: {embedding_id}")
+                #self.logger.info(f"Updated content... Embedding ID: {embedding_id}")
             else:
                 self.logger.warning(f"No new content or metadata provided for update. Embedding ID: {embedding_id}")
         except Exception as e:
@@ -141,18 +131,12 @@ class VectorStore:
             raise
 
     def similarity_search(self, query: str, k: int = 5) -> List[Document]:
-        self.logger.info(f"Starting similarity search for query: {query}")
         results = self.vector_store.similarity_search(
             query, k=k, filter={"user_id": self.user_id, "project_id": self.project_id}
         )
-        self.logger.info(f"Similarity search completed, found {len(results)} results")
-        return results
         return results
 
     def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
-        self.logger.debug(
-            f"Retrieving all knowledge base content for user {self.user_id}"
-        )
         collection = self.vector_store._collection
         if collection is None:
             self.logger.warning(f"No collection found for user {self.user_id}")
@@ -171,9 +155,9 @@ class VectorStore:
                 }
             )
 
-        self.logger.info(
-            f"Retrieved {len(content)} items from knowledge base for user {self.user_id}"
-        )
+        #self.logger.info(
+        #    f"Retrieved {len(content)} items from knowledge base for user {self.user_id}"
+        #)
         return content if content else []
 
     def _get_type(self, doc: Any) -> str:

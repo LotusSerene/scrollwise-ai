@@ -19,7 +19,7 @@ class RelationshipProvider extends ChangeNotifier {
   List<Relationship> get relationships => _relationships;
 
   Future<void> analyzeRelationships(
-      List<String> characterIds, String projectId) async {
+      List<String> characters, String projectId) async {
     _isLoading = true;
     _error = null;
     _message = null;
@@ -28,30 +28,38 @@ class RelationshipProvider extends ChangeNotifier {
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
+
+      print('Analyzing relationships for characters: $characters'); // Debug log
+
       final response = await http.post(
-        Uri.parse('$apiUrl/codex/analyze-relationship'),
+        Uri.parse('$apiUrl/relationships/analyze?project_id=$projectId'),
         headers: headers,
-        body: json.encode({
-          'characters': characterIds,
-          'project_id': projectId,
-        }),
+        body: json.encode(characters),
       );
+
+      print('Response status: ${response.statusCode}'); // Debug log
+      print('Response body: ${response.body}'); // Debug log
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        _graphData = data['graph_data'];
-        // Only update relationships if new ones were found
-        if (data['relationships'].isNotEmpty) {
+        if (data['relationships'] != null) {
+          print(
+              'Received relationships: ${data['relationships']}'); // Debug log
           _relationships = (data['relationships'] as List)
-              .map((json) => Relationship.fromJson(json))
+              .map((json) =>
+                  Relationship.fromJson(Map<String, dynamic>.from(json)))
               .toList();
+          print('Parsed relationships: $_relationships'); // Debug log
+          _message = 'Relationships analyzed successfully';
+        } else {
+          _message = 'No relationships found';
         }
-        _message = data['message'];
       } else {
-        _error =
-            'Failed to analyze relationships: ${response.statusCode} ${response.body}';
+        final errorBody = json.decode(response.body);
+        _error = errorBody['detail'] ?? 'Failed to analyze relationships';
       }
     } catch (e) {
+      print('Error in analyzeRelationships: $e'); // Debug log
       _error = 'An error occurred: $e';
     } finally {
       _isLoading = false;
@@ -87,28 +95,52 @@ class RelationshipProvider extends ChangeNotifier {
   }
 
   Future<void> getRelationships(String projectId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
       final headers = await getAuthHeaders();
+      print('Fetching relationships for project: $projectId');
+
       final response = await http.get(
         Uri.parse('$apiUrl/relationships?project_id=$projectId'),
         headers: headers,
       );
 
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        _relationships = (data['relationships'] as List)
-            .map((json) => Relationship.fromJson(json))
-            .where((relationship) =>
-                relationship.characterId != null &&
-                relationship.relatedCharacterId != null &&
-                relationship.relationshipType != null)
-            .toList();
-        notifyListeners();
+        if (data['relationships'] == null) {
+          _relationships = [];
+          print('No relationships found in response');
+        } else {
+          _relationships = (data['relationships'] as List)
+              .map((json) {
+                print('Processing relationship: $json');
+                try {
+                  return Relationship.fromJson(json);
+                } catch (e) {
+                  print('Error parsing relationship: $e');
+                  return null;
+                }
+              })
+              .where((relationship) => relationship != null)
+              .cast<Relationship>()
+              .toList();
+          print('Successfully parsed ${_relationships.length} relationships');
+        }
       } else {
-        throw Exception('Failed to load relationships');
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['detail'] ?? 'Failed to load relationships');
       }
     } catch (e) {
+      print('Error in getRelationships: $e');
       _error = 'An error occurred: $e';
+    } finally {
+      _isLoading = false;
       notifyListeners();
     }
   }

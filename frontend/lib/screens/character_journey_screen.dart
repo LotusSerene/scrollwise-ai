@@ -62,30 +62,26 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
 
       for (var character in characters) {
         if (!ignoredCharacters.contains(character.id)) {
-          // Ensure we're using the character's ID, not name
           final response = await http.post(
             Uri.parse(
-                    '$apiUrl/codex/characters/${character.id}/extract-backstory')
-                .replace(
-              queryParameters: {
-                'project_id': widget.projectId,
-                'chapter_id':
-                    'latest', // Or use a specific chapter ID if available
-              },
-            ),
+                '$apiUrl/codex/characters/${character.id}/extract-backstory?project_id=${widget.projectId}'),
             headers: headers,
+            body: json.encode({
+              'character_id': character.id,
+              'chapter_id': 'latest',
+            }),
           );
 
           if (response.statusCode == 200) {
             final responseBody = json.decode(response.body);
-            if (responseBody != null && responseBody['character'] != null) {
-              final updatedCharacter =
-                  Character.fromJson(responseBody['character']);
+            if (responseBody != null && responseBody['backstory'] != null) {
               setState(() {
                 final index =
-                    characters.indexWhere((c) => c.id == updatedCharacter.id);
+                    characters.indexWhere((c) => c.id == character.id);
                 if (index != -1) {
-                  characters[index] = updatedCharacter;
+                  characters[index] = characters[index].copyWith(
+                    backstory: responseBody['backstory']['new_backstory'],
+                  );
                 }
               });
               anyUpdates = true;
@@ -133,7 +129,6 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Character Journeys')),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(

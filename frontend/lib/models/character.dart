@@ -25,4 +25,22 @@ class Character {
       updatedAt: DateTime.parse(json['updated_at']),
     );
   }
+
+  Character copyWith({
+    String? id,
+    String? name,
+    String? description,
+    String? backstory,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Character(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      backstory: backstory ?? this.backstory,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 }

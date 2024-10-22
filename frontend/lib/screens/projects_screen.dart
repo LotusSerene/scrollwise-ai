@@ -319,25 +319,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             ],
           ),
         ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                children: [
-                  _buildProjectsTab(),
-                  Builder(
-                    builder: (BuildContext context) {
-                      try {
-                        return UniverseListScreen();
-                      } catch (e, stackTrace) {
-                        print(
-                            'Error building UniverseListScreen: $e\n$stackTrace');
-                        return const Center(
-                            child: Text('Error loading Universe List'));
-                      }
-                    },
-                  ),
-                ],
-              ),
+        body: Builder(
+          builder: (BuildContext context) {
+            return _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : TabBarView(
+                    children: [
+                      _buildProjectsTab(),
+                      UniverseListScreen(),
+                    ],
+                  );
+          },
+        ),
         floatingActionButton: Builder(
           builder: (BuildContext context) => FloatingActionButton(
             onPressed: () {
@@ -399,19 +392,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           return Text('Error: ${snapshot.error}');
                         } else {
                           final universes = snapshot.data ?? [];
-                          return DropdownButton<String>(
+                          return DropdownButton<String?>(
                             value: project['universe_id'],
                             onChanged: (String? newValue) {
                               _updateProjectUniverse(project['id'], newValue);
                             },
                             items: [
-                              const DropdownMenuItem<String>(
+                              const DropdownMenuItem<String?>(
                                 value: null,
                                 child: Text('No Universe'),
                               ),
                               if (universes.isNotEmpty)
                                 ...universes.map((universe) {
-                                  return DropdownMenuItem<String>(
+                                  return DropdownMenuItem<String?>(
                                     value: universe['id'],
                                     child: Text(universe['name']),
                                   );
@@ -505,8 +498,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 FutureBuilder<List<dynamic>>(
                   future: _fetchUniverses(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const CircularProgressIndicator();
                     } else if (snapshot.hasError) {
                       return Text('Error: ${snapshot.error}');
@@ -526,8 +518,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           ),
                           ...universes.map((universe) {
                             return DropdownMenuItem<String?>(
-                              value: universe['id'],
-                              child: Text(universe['name']),
+                              value: universe['id'] as String?,
+                              child: Text(universe['name'] as String),
                             );
                           }).toList(),
                         ],

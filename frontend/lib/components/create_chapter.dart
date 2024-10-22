@@ -104,8 +104,7 @@ class _CreateChapterState extends State<CreateChapter> {
           newPresetName, presetData, widget.projectId);
       Fluttertoast.showToast(msg: 'Preset saved successfully');
       _newPresetNameController.clear();
-    }
-    catch (e) {
+    } catch (e) {
       Fluttertoast.showToast(msg: 'Error saving preset: $e');
     }
   }
@@ -130,9 +129,6 @@ class _CreateChapterState extends State<CreateChapter> {
           'numChapters': _numChapters,
           'plot': _plotController.text,
           'writingStyle': _writingStyleController.text,
-          'styleGuide': _styleGuideController.text,
-          'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
-          'additionalInstructions': _additionalInstructionsController.text,
           'instructions': {
             'styleGuide': _styleGuideController.text,
             'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,

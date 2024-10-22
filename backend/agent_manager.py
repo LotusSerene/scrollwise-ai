@@ -124,7 +124,6 @@ class AgentManager:
     def __init__(self, user_id: str, project_id: str):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        #self.logger.info(f"Initializing AgentManager for user: {user_id} and project: {project_id}")
         self.user_id = user_id
         self.project_id = project_id
         self.api_key = self._get_api_key()
@@ -132,16 +131,15 @@ class AgentManager:
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
         self.chat_history = db_instance.get_chat_history(user_id, project_id)
-        #self.logger.info(f"AgentManager initialized for user: {user_id} and project: {project_id}")
 
         self.setup_caching()
         self.setup_rate_limiter()
         self.llm = self._initialize_llm(self.model_settings['mainLLM'])
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
-        #self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
+        self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
         self.task_states: Dict[str, TaskState] = {}
-        self.agents: Dict[str, Any] = {}  # For multi-agent collaboration
+        self.agents: Dict[str, Any] = {}
         self.complex_tasks: Dict[str, ComplexTask] = {}
 
     def _get_api_key(self) -> str:
@@ -174,7 +172,6 @@ class AgentManager:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        #self.logger.debug(f"Initializing LLM with model: {model}")
         try:
             llm = ChatGoogleGenerativeAI(
                 model=model,
@@ -185,8 +182,6 @@ class AgentManager:
                 caching=True,
                 rate_limiter=self.rate_limiter,
                 streaming=True,
-                # Remove or comment out the callback_manager parameter
-                # callback_manager=CallbackManager([StreamingStdOutCallbackHandler()])
             )
             
             return llm
@@ -198,7 +193,6 @@ class AgentManager:
                                       instructions: Dict[str, Any],
                                       previous_chapters: List[Dict[str, Any]],
                                       codex_items: List[Dict[str, Any]]):
-        #self.logger.info(f"Starting chapter generation for chapter {chapter_number}")
         try:
             codex_items_dict = {item['name']: item['description'] for item in codex_items}
             
@@ -319,7 +313,6 @@ class AgentManager:
 
     async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
                         previous_chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
-        #self.logger.info("Starting chapter validity check")
         try:
             truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
             
@@ -379,9 +372,6 @@ class AgentManager:
                 "format_instructions": parser.get_format_instructions()
             })
 
-            #self.logger.info("Chapter validity check completed")
-            #self.logger.debug(f"Validity check result: {result}")
-
             # Post-process the results for backward compatibility
             validity_dict = {
                 "is_valid": result.is_valid,
@@ -426,16 +416,13 @@ class AgentManager:
     def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
         chapter_id = db_instance.create_chapter(chapter_title, chapter, self.user_id, self.project_id)
         self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number, "project_id": self.project_id})
-        #self.logger.info(f"Chapter {chapter_number} saved to the knowledge base with ID: {chapter_id}")
         return chapter_id
 
     def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
         chapter_title = f'Chapter {chapter_number}'
         db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id, self.project_id)
-        #self.logger.info(f"Validity feedback for Chapter {chapter_number} saved to the database with ID: {chapter_id}")
 
     def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
-        #self.logger.info(f"Adding {content_type} to knowledge base")
         try:
             # Ensure metadata includes the content type
             metadata['type'] = content_type
@@ -443,15 +430,12 @@ class AgentManager:
             # Add the content to the vector store and get the embedding ID
             embedding_id = self.vector_store.add_to_knowledge_base(content, metadata=metadata)
 
-            #self.logger.info(f"Successfully added {content_type} to knowledge base. Embedding ID: {embedding_id}")
             return embedding_id
         except Exception as e:
-            #self.logger.error(f"Error adding {content_type} to knowledge base: {str(e)}")
             raise
     
 
     def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
-        #self.logger.info(f"Performing {action} operation on knowledge base")
         try:
             if isinstance(identifier, str):
                 embedding_id = identifier
@@ -469,7 +453,6 @@ class AgentManager:
             else:
                 raise ValueError("Invalid action. Must be 'delete' or 'update'")
             
-            #self.logger.info(f"Successfully performed {action} operation on embedding ID {embedding_id}")
         except Exception as e:
             self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}", exc_info=True)
             raise
@@ -828,7 +811,7 @@ class AgentManager:
                     character_data[char_id] = char['name']
                     #self.logger.debug(f"Found character: {char['name']} for ID: {char_id}")
                 else:
-                    #self.logger.warning(f"Character not found for ID: {char_id}")
+                    self.logger.warning(f"Character not found for ID: {char_id}")
 
             if not character_data:
                 self.logger.warning("No valid characters found")
