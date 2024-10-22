@@ -139,7 +139,7 @@ class AgentManager:
         self.llm = self._initialize_llm(self.model_settings['mainLLM'])
         self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
-        self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
+        #self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
         self.task_states: Dict[str, TaskState] = {}
         self.agents: Dict[str, Any] = {}  # For multi-agent collaboration
         self.complex_tasks: Dict[str, ComplexTask] = {}
@@ -443,7 +443,7 @@ class AgentManager:
             # Add the content to the vector store and get the embedding ID
             embedding_id = self.vector_store.add_to_knowledge_base(content, metadata=metadata)
 
-            self.logger.info(f"Successfully added {content_type} to knowledge base. Embedding ID: {embedding_id}")
+            #self.logger.info(f"Successfully added {content_type} to knowledge base. Embedding ID: {embedding_id}")
             return embedding_id
         except Exception as e:
             #self.logger.error(f"Error adding {content_type} to knowledge base: {str(e)}")
@@ -451,7 +451,7 @@ class AgentManager:
     
 
     def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
-        self.logger.info(f"Performing {action} operation on knowledge base")
+        #self.logger.info(f"Performing {action} operation on knowledge base")
         try:
             if isinstance(identifier, str):
                 embedding_id = identifier
@@ -469,7 +469,7 @@ class AgentManager:
             else:
                 raise ValueError("Invalid action. Must be 'delete' or 'update'")
             
-            self.logger.info(f"Successfully performed {action} operation on embedding ID {embedding_id}")
+            #self.logger.info(f"Successfully performed {action} operation on embedding ID {embedding_id}")
         except Exception as e:
             self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}", exc_info=True)
             raise
@@ -613,7 +613,7 @@ class AgentManager:
         return truncated
 
     async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
-        self.logger.debug(f"Generating title for chapter {chapter_number}")
+        #self.logger.debug(f"Generating title for chapter {chapter_number}")
         try:
             title_llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
             prompt = ChatPromptTemplate.from_template("""
@@ -628,7 +628,7 @@ class AgentManager:
             
             chain = prompt | title_llm | StrOutputParser()
             title = await chain.ainvoke({"chapter": chapter_content[:1000], "chapter_number": chapter_number})
-            self.logger.debug(f"Generated title: {title}")
+            #self.logger.debug(f"Generated title: {title}")
             return title
         except Exception as e:
             self.logger.error(f"Error generating title: {str(e)}")
@@ -820,15 +820,15 @@ class AgentManager:
     async def analyze_character_relationships(self, character_ids: List[str]) -> List[Dict[str, Any]]:
         try:
             # Get character data from the database
-            self.logger.debug(f"Getting character data for IDs: {character_ids}")
+            #self.logger.debug(f"Getting character data for IDs: {character_ids}")
             character_data = {}
             for char_id in character_ids:
                 char = db_instance.get_character_by_id(char_id, self.project_id)
                 if char:
                     character_data[char_id] = char['name']
-                    self.logger.debug(f"Found character: {char['name']} for ID: {char_id}")
+                    #self.logger.debug(f"Found character: {char['name']} for ID: {char_id}")
                 else:
-                    self.logger.warning(f"Character not found for ID: {char_id}")
+                    #self.logger.warning(f"Character not found for ID: {char_id}")
 
             if not character_data:
                 self.logger.warning("No valid characters found")
@@ -836,7 +836,7 @@ class AgentManager:
 
             # Create pairs of characters for analysis
             character_pairs = [(a, b) for i, a in enumerate(character_ids) for b in character_ids[i+1:]]
-            self.logger.debug(f"Created character pairs: {character_pairs}")
+            #self.logger.debug(f"Created character pairs: {character_pairs}")
 
             # Get the latest chapter content
             chapter_content = db_instance.get_latest_unprocessed_chapter_content(
@@ -852,7 +852,7 @@ class AgentManager:
                 self.logger.warning("No chapter content found for analysis")
                 return []
 
-            self.logger.debug("Preparing to analyze relationships with chapter content")
+            #self.logger.debug("Preparing to analyze relationships with chapter content")
             
             # Format character pairs using names instead of IDs for the prompt
             formatted_pairs = [
@@ -929,14 +929,14 @@ class AgentManager:
                     project_id=self.project_id
                 )
 
-            self.logger.debug(f"Generated and saved relationships: {relationships}")
+            #self.logger.debug(f"Generated and saved relationships: {relationships}")
             return relationships
         except Exception as e:
             self.logger.error(f"Error analyzing relationships: {str(e)}", exc_info=True)
             return []
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
-        self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
+        #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
         try:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['mainLLM']))
@@ -990,7 +990,7 @@ class AgentManager:
                 "format_instructions": parser.get_format_instructions()
             })
             
-            self.logger.debug(f"Generated codex item: {result}")
+            #self.logger.debug(f"Generated codex item: {result}")
             
             if not isinstance(result, GeneratedCodexItem):
                 raise ValueError("Invalid result type from chain.invoke")
@@ -1178,7 +1178,7 @@ class AgentManager:
         if current_word_count >= expected_word_count:
             return chapter_content
 
-        self.logger.info(f"Chapter word count ({current_word_count}) is below expected ({expected_word_count}). Extending chapter.")
+        #self.logger.info(f"Chapter word count ({current_word_count}) is below expected ({expected_word_count}). Extending chapter.")
         
         return await self.extend_chapter(chapter_content, instructions, context, expected_word_count, current_word_count)
 
