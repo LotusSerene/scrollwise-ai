@@ -154,6 +154,19 @@ class AgentManager:
         self.complex_tasks: Dict[str, ComplexTask] = {}
         self.lock = asyncio.Lock()  # Add an asyncio lock for thread-safe operations
 
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        # Clean up resources
+        self._llm_cache.clear()
+        self.vector_store.close()
+        self.chat_history = []
+        self.task_states.clear()
+        self.agents.clear()
+        self.complex_tasks.clear()
+        self.lock = None
+
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
         async with self.lock:
             if model in self._llm_cache:
