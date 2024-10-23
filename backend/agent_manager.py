@@ -38,6 +38,9 @@ from langchain.docstore.document import Document
 import asyncio
 from models import ChapterValidation, CodexItem, CriterionScore
 
+# Add asyncio for thread-safe operations
+import asyncio
+
 # Add at the top with other imports
 PROCESS_TYPES = {
     'LOCATIONS': 'analyze_locations',
@@ -149,6 +152,7 @@ class AgentManager:
         self.task_states: Dict[str, TaskState] = {}
         self.agents: Dict[str, Any] = {}
         self.complex_tasks: Dict[str, ComplexTask] = {}
+        self.lock = asyncio.Lock()  # Add an asyncio lock for thread-safe operations
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -179,27 +183,28 @@ class AgentManager:
             )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        try:
-            if model in self._llm_cache:
-                return self._llm_cache[model]
+    async def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
+        async with self.lock:
+            try:
+                if model in self._llm_cache:
+                    return self._llm_cache[model]
 
-            llm = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=self.api_key,
-                temperature=0.7,
-                max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                max_input_tokens=self.MAX_INPUT_TOKENS,
-                caching=True,
-                rate_limiter=self.rate_limiter,
-                streaming=True,
-            )
-            
-            self._llm_cache[model] = llm
-            return llm
-        except Exception as e:
-            self.logger.error(f"Error initializing LLM: {str(e)}")
-            raise
+                llm = ChatGoogleGenerativeAI(
+                    model=model,
+                    google_api_key=self.api_key,
+                    temperature=0.7,
+                    max_output_tokens=self.MAX_OUTPUT_TOKENS,
+                    max_input_tokens=self.MAX_INPUT_TOKENS,
+                    caching=True,
+                    rate_limiter=self.rate_limiter,
+                    streaming=True,
+                )
+                
+                self._llm_cache[model] = llm
+                return llm
+            except Exception as e:
+                self.logger.error(f"Error initializing LLM: {str(e)}")
+                raise
 
     async def generate_chapter_stream(
         self,
