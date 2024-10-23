@@ -1,8 +1,8 @@
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
-from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func
+from sqlalchemy.orm import relationship, select, delete
+from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
 import os
@@ -12,8 +12,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 import datetime
 from datetime import timezone
-from sqlalchemy import exists
-from sqlalchemy import alias
+from sqlalchemy import exists, alias
 from models import ChapterValidation
 
 
