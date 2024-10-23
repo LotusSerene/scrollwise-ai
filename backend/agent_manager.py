@@ -127,6 +127,8 @@ class LocationConnection(BaseModel):
     cultural_influences: Optional[str] = None
 
 class AgentManager:
+    _llm_cache = TTLCache(maxsize=100, ttl=3600)  # Class-level cache for LLM instances
+
     def __init__(self, user_id: str, project_id: str):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
@@ -179,6 +181,9 @@ class AgentManager:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
         try:
+            if model in self._llm_cache:
+                return self._llm_cache[model]
+
             llm = ChatGoogleGenerativeAI(
                 model=model,
                 google_api_key=self.api_key,
@@ -190,6 +195,7 @@ class AgentManager:
                 streaming=True,
             )
             
+            self._llm_cache[model] = llm
             return llm
         except Exception as e:
             self.logger.error(f"Error initializing LLM: {str(e)}")
