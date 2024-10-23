@@ -29,27 +29,19 @@ class RelationshipProvider extends ChangeNotifier {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
 
-      print('Analyzing relationships for characters: $characters'); // Debug log
-
       final response = await http.post(
         Uri.parse('$apiUrl/relationships/analyze?project_id=$projectId'),
         headers: headers,
         body: json.encode(characters),
       );
 
-      print('Response status: ${response.statusCode}'); // Debug log
-      print('Response body: ${response.body}'); // Debug log
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['relationships'] != null) {
-          print(
-              'Received relationships: ${data['relationships']}'); // Debug log
           _relationships = (data['relationships'] as List)
               .map((json) =>
                   Relationship.fromJson(Map<String, dynamic>.from(json)))
               .toList();
-          print('Parsed relationships: $_relationships'); // Debug log
           _message = 'Relationships analyzed successfully';
         } else {
           _message = 'No relationships found';
@@ -59,7 +51,6 @@ class RelationshipProvider extends ChangeNotifier {
         _error = errorBody['detail'] ?? 'Failed to analyze relationships';
       }
     } catch (e) {
-      print('Error in analyzeRelationships: $e'); // Debug log
       _error = 'An error occurred: $e';
     } finally {
       _isLoading = false;
@@ -104,25 +95,19 @@ class RelationshipProvider extends ChangeNotifier {
 
     try {
       final headers = await getAuthHeaders();
-      print('Fetching relationships for project: $projectId');
 
       final response = await http.get(
         Uri.parse('$apiUrl/relationships?project_id=$projectId'),
         headers: headers,
       );
 
-      print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['relationships'] == null) {
           _relationships = [];
-          print('No relationships found in response');
         } else {
           _relationships = (data['relationships'] as List)
               .map((json) {
-                print('Processing relationship: $json');
                 try {
                   return Relationship.fromJson(json);
                 } catch (e) {
@@ -133,7 +118,6 @@ class RelationshipProvider extends ChangeNotifier {
               .where((relationship) => relationship != null)
               .cast<Relationship>()
               .toList();
-          print('Successfully parsed ${_relationships.length} relationships');
         }
       } else {
         final errorBody = json.decode(response.body);

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from database import db_instance
-from agent_manager import AgentManager
+from agent_manager import AgentManager, PROCESS_TYPES
 from vector_store import VectorStore
 import uuid
 import json
@@ -252,7 +252,10 @@ project_router = APIRouter(prefix="/projects", tags=["Projects"])
 universe_router = APIRouter(prefix="/universes", tags=["Universes"])
 codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for codex
 relationship_router = APIRouter(prefix="/relationships", tags=["Relationships"])
-# Project routes with target word count update
+event_router = APIRouter(prefix="/events", tags=["Events"])
+location_router = APIRouter(prefix="/locations", tags=["Locations"])
+
+# Project routes
 @project_router.put("/{project_id}/target-word-count")
 async def update_project_target_word_count(
     project_id: str,
@@ -377,12 +380,35 @@ generation_tasks = defaultdict(dict)
 
 @chapter_router.post("/generate")
 async def generate_chapters(
-    request: ChapterGenerationRequest,
+    request: Request,
     project_id: str,
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     try:
+        # Parse and validate the request body
+        body = await request.json()
+        
+        # Log the received request for debugging
+        logger.debug(f"Received chapter generation request: {body}")
+        
+        # Validate required fields
+        required_fields = ['numChapters', 'plot', 'writingStyle', 'instructions']
+        for field in required_fields:
+            if field not in body:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Validate instructions object
+        instructions = body.get('instructions', {})
+        if not isinstance(instructions, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Instructions must be an object"
+            )
+
         user_id = current_user.id
 
         if project_id in generation_tasks[user_id] and not generation_tasks[user_id][project_id].done():
@@ -392,20 +418,18 @@ async def generate_chapters(
         previous_chapters = db_instance.get_all_chapters(current_user.id, project_id)
         codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
 
-        instructions = request.instructions
-
         async def generate():
             chunks = []
             try:
-                for i in range(request.numChapters):
+                for i in range(body['numChapters']):
                     chapter_number = len(previous_chapters) + i + 1
                     chunks.append(json.dumps({'type': 'start', 'chapterNumber': chapter_number}))
 
                     chapter_content = ""
                     async for chunk in agent_manager.generate_chapter_stream(
                         chapter_number=chapter_number,
-                        plot=request.plot,
-                        writing_style=request.writingStyle,
+                        plot=body['plot'],
+                        writing_style=body['writingStyle'],
                         instructions=instructions,
                         previous_chapters=previous_chapters,
                         codex_items=codex_items
@@ -414,21 +438,12 @@ async def generate_chapters(
                             chapter_content += chunk['content']
                         chunks.append(json.dumps(chunk))
 
-                    #logging.debug(f"Chapter {chapter_number} content generated")
-
-                    #logging.debug("Generating title")
                     chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
-                    #logging.debug(f"Title generated: {chapter_title}")
 
-                    #logging.debug("Checking chapter")
                     validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
-                    #logging.debug("Chapter checked")
 
-                    #logging.debug("Extracting new codex items")
                     new_codex_items = await agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
-                    #logging.debug(f"New codex items extracted: {new_codex_items}")
 
-                    #logging.debug("Saving new codex items")
                     for item in new_codex_items:
                         item_id = await db_instance.create_codex_item(
                             item['name'],
@@ -438,7 +453,6 @@ async def generate_chapters(
                             current_user.id,
                             project_id
                         )
-                        # Add new codex item to knowledge base
                         embedding_id = agent_manager.add_to_knowledge_base(
                             "codex_item",
                             item['description'],
@@ -449,9 +463,7 @@ async def generate_chapters(
                                 "subtype": item['subtype']
                             }
                         )
-                        # Update the codex item with the embedding_id
                         db_instance.update_codex_item_embedding_id(item_id, embedding_id)
-                        # Add the new codex item to the codex_items list
                         codex_items.append({
                             "id": item_id,
                             "name": item['name'],
@@ -461,52 +473,63 @@ async def generate_chapters(
                             "embedding_id": embedding_id
                         })
 
-                    #logging.debug("New codex items saved and added to knowledge base")
+                    chapter_id = await db_instance.create_chapter(chapter_content, chapter_number, f"Chapter {chapter_number}")
 
-                    #logging.debug("Saving chapter")
-                    new_chapter = await db_instance.create_chapter(
-                        chapter_title,  # No encoding/decoding
-                        chapter_content,  # No encoding/decoding
-                        current_user.id,
-                        project_id
-                    )
-                    #logging.debug(f"Chapter saved with id: {new_chapter['id']}")
-
-                    # Add generated chapter to knowledge base
                     embedding_id = agent_manager.add_to_knowledge_base(
                         "chapter",
                         chapter_content,
                         {
                             "title": chapter_title,
-                            "id": new_chapter['id'],
+                            "id": chapter_id,
                             "type": "chapter"
                         }
                     )
 
-                    # Update the chapter with the embedding_id
-                    db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+                    db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
 
-                    #logging.debug("Saving validity check")
+                    # Log the validity check response
+                    #logger.info(f"Validity check response: {json.dumps(validity, indent=2)}")
+                    
+                    # Log individual fields we're trying to access
+                    #logger.info(f"""
+                    #Attempting to save validity check with:
+                    #- overall_score: {validity.get('overall_score')}
+                    #- style_guide_adherence: {validity.get('style_guide_adherence')}
+                    #- continuity: {validity.get('continuity')}
+                    #- areas_for_improvement: {validity.get('areas_for_improvement')}
+                    #""")
+
+                    # Parse the review JSON string to get scores
+                    review_data = json.loads(validity['review'])
+                    
+                    # Calculate overall score as average of all review scores
+                    scores = [item['score'] for item in review_data.values()]
+                    overall_score = int(sum(scores) / len(scores))
+                    
+                    # Convert style guide adherence to score (0-10)
+                    style_guide_score = 10 if validity['style_guide_adherence'] else 5
+                    
+                    # Convert continuity to score (0-10)
+                    continuity_score = 10 if validity['continuity'] else 5
+
                     await db_instance.save_validity_check(
-                        chapter_id=str(new_chapter['id']),
+                        chapter_id=str(chapter_id),
                         chapter_title=str(chapter_title),
                         is_valid=bool(validity['is_valid']),
-                        overall_score=int(validity.get('overall_score', 5)),  # Add default score
-                        general_feedback=str(validity['feedback']),  # Changed from feedback
-                        style_guide_adherence_score=int(validity.get('style_guide_adherence_score', 5)),  # New field
-                        style_guide_adherence_explanation=str(validity.get('style_guide_feedback', '')),  # Changed from style_guide_feedback
-                        continuity_score=int(validity.get('continuity_score', 5)),  # New field
-                        continuity_explanation=str(validity.get('continuity_feedback', '')),  # Changed from continuity_feedback
-                        areas_for_improvement=json.loads(validity.get('test_results', '[]')),  # Changed from test_results
+                        overall_score=overall_score,
+                        general_feedback=str(validity['feedback']),
+                        style_guide_adherence_score=style_guide_score,
+                        style_guide_adherence_explanation=str(validity['style_guide_feedback']),
+                        continuity_score=continuity_score,
+                        continuity_explanation=str(validity['continuity_feedback']),
+                        areas_for_improvement=json.loads(validity['test_results']),
                         user_id=current_user.id,
                         project_id=project_id
                     )
-                    #logging.debug("Validity check saved")
 
-                    #logging.debug("Preparing final chunk")
                     chunks.append(json.dumps({
                         'type': 'final', 
-                        'chapterId': new_chapter['id'], 
+                        'chapterId': chapter_id, 
                         'title': chapter_title, 
                         'content': chapter_content,
                         'validity': validity, 
@@ -515,10 +538,9 @@ async def generate_chapters(
 
                 chunks.append(json.dumps({'type': 'done'}))
             except Exception as e:
-                logging.error(f"Error in generate function: {str(e)}")
+                logger.error(f"Error in generate function: {str(e)}")
                 chunks.append(json.dumps({'type': 'error', 'message': str(e)}))
             finally:
-                #logging.debug(f"Generate function completed for user {user_id}, project {project_id}")
                 if project_id in generation_tasks[user_id]:
                     del generation_tasks[user_id][project_id]
             
@@ -535,10 +557,13 @@ async def generate_chapters(
 
         return StreamingResponse(stream_response(), media_type="application/json")
 
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException as e:
         raise e
     except Exception as e:
-        logging.error(f"Error in generate_chapters: {str(e)}")
+        logger.error(f"Error generating chapters: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -719,7 +744,9 @@ async def generate_codex_item(
 @codex_router.get("/characters")
 async def get_characters(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        characters = db_instance.get_characters_from_codex(current_user.id, project_id)
+        characters = db_instance.get_all_codex_items(current_user.id, project_id)
+        # Filter only character type items
+        characters = [item for item in characters if item['type'] == 'character']
         return {"characters": characters}
     except Exception as e:
         logger.error(f"Error fetching characters: {str(e)}")
@@ -1219,23 +1246,33 @@ async def delete_relationship(
 async def analyze_relationships(
     request: Request,
     project_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    chapter_id: str = 'latest'
 ):
     try:
+        if chapter_id == 'latest':
+            latest_chapter = db_instance.get_latest_chapter(project_id, current_user.id)
+            if not latest_chapter:
+                raise HTTPException(status_code=404, detail="No chapters found")
+            chapter_id = latest_chapter['id']
+
+        # Check if relationships have already been analyzed
+        if db_instance.is_chapter_processed_for_type(chapter_id, "analyze_relationships"):
+            return {"message": "Chapter already analyzed for relationships", "skip": True}
+
         # Parse the JSON body
         characters = await request.json()
         if not isinstance(characters, list):
             raise HTTPException(status_code=400, detail="Expected a list of character IDs")
             
-        #logger.debug(f"Analyzing relationships for characters: {characters} in project: {project_id}")
         agent_manager = AgentManager(current_user.id, project_id)
         relationships = await agent_manager.analyze_character_relationships(characters)
         
-        #logger.debug(f"Generated relationships: {relationships}")
+        # Mark the chapter as processed for relationships
+        db_instance.mark_chapter_processed(chapter_id, current_user.id, "analyze_relationships")
         
-        # Save each relationship analysis to the database
+        # Save relationships...
         for rel in relationships:
-            # Save the relationship analysis
             db_instance.save_relationship_analysis(
                 character1_id=rel['character1_id'],
                 character2_id=rel['character2_id'],
@@ -1245,13 +1282,12 @@ async def analyze_relationships(
                 project_id=project_id
             )
             
-            # Also create the actual relationship in the character_relationships table
             db_instance.create_character_relationship(
                 character_id=rel['character1_id'],
                 related_character_id=rel['character2_id'],
                 relationship_type=rel['relationship_type'],
                 project_id=project_id,
-                description=rel['description']  # Add this line
+                description=rel['description']
             )
             
         return {"relationships": relationships}
@@ -1262,22 +1298,33 @@ async def analyze_relationships(
 # Add this new endpoint
 @codex_router.post("/characters/{character_id}/extract-backstory", response_model=Dict[str, Any])
 async def extract_character_backstory(
-    request: BackstoryExtractionRequest,
+    character_id: str,
     project_id: str,
+    chapter_id: str = 'latest',  # Changed to make chapter_id optional with default value
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # If chapter_id is 'latest', get the latest chapter
+        if chapter_id == 'latest':
+            latest_chapter = db_instance.get_latest_chapter(project_id, current_user.id)
+            if not latest_chapter:
+                raise HTTPException(status_code=404, detail="No chapters found")
+            chapter_id = latest_chapter['id']
+
         agent_manager = AgentManager(current_user.id, project_id)
-        backstory = await agent_manager.extract_character_backstory(request.character_id, request.chapter_id)
+        backstory = await agent_manager.extract_character_backstory(character_id, chapter_id)
         
         if backstory and backstory.new_backstory:
-            # Save the extracted backstory to the database
+            # Save the extracted backstory
             db_instance.save_character_backstory(
-                request.character_id,
+                character_id,
                 backstory.new_backstory,
                 current_user.id,
                 project_id
             )
+            
+            # Mark the chapter as processed for this character's backstory
+            db_instance.mark_chapter_processed(chapter_id, current_user.id, f"extract_backstory_{character_id}")
         
         return {"message": "Backstory extracted successfully", "backstory": backstory.dict() if backstory else None}
     except Exception as e:
@@ -1320,10 +1367,269 @@ async def delete_character_backstory(
         logger.error(f"Error deleting character backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# Event endpoints
+@event_router.get("")
+async def get_events(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        events = db_instance.get_events_by_project(project_id, current_user.id)
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Error getting events: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.post("")
+async def create_event(
+    project_id: str,
+    event_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        event_id = db_instance.create_event(
+            title=event_data['title'],
+            description=event_data['description'],
+            date=datetime.fromisoformat(event_data['date']),
+            character_id=event_data.get('character_id'),
+            location_id=event_data.get('location_id'),
+            project_id=project_id
+        )
+        return {"id": event_id}
+    except Exception as e:
+        logger.error(f"Error creating event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.post("/analyze-chapter")
+async def analyze_chapter_events(
+    project_id: str,
+    chapter_id: str = 'latest',
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        if chapter_id == 'latest':
+            latest_chapter = db_instance.get_latest_chapter(project_id, current_user.id)
+            if not latest_chapter:
+                raise HTTPException(status_code=404, detail="No chapters found")
+            chapter_id = latest_chapter['id']
+
+        if db_instance.is_chapter_processed_for_type(chapter_id, PROCESS_TYPES['EVENTS']):
+            return {"message": "Chapter already analyzed for events", "skip": True}
+
+        agent_manager = AgentManager(current_user.id, project_id)
+        events = await agent_manager.analyze_unprocessed_chapter_events(chapter_id)  # Pass chapter_id
+        
+        db_instance.mark_chapter_processed(chapter_id, current_user.id, PROCESS_TYPES['EVENTS'])
+        
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Error analyzing chapter events: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.post("/analyze-connections")
+async def analyze_event_connections(
+    project_id: str,
+    event_ids: List[str],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        agent_manager = AgentManager(current_user.id, project_id)
+        analyses = await agent_manager.analyze_event_connections(event_ids)
+        # Should convert EventAnalysis to dict
+        return {"analyses": [analysis.dict() for analysis in analyses]}  # Fixed
+    except Exception as e:
+        logger.error(f"Error analyzing event connections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.get("/{event_id}")
+async def get_event(
+    event_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        event = db_instance.get_event_by_id(event_id, current_user.id, project_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        return event
+    except Exception as e:
+        logger.error(f"Error getting event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.put("/{event_id}")
+async def update_event(
+    event_id: str,
+    project_id: str,
+    event_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        updated_event = db_instance.update_event(event_id, current_user.id, project_id, event_data)
+        if not updated_event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        return updated_event
+    except Exception as e:
+        logger.error(f"Error updating event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.delete("/{event_id}")
+async def delete_event(
+    event_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        success = db_instance.delete_event(event_id, current_user.id, project_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Event not found")
+        return {"message": "Event deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Location endpoints
+@location_router.get("")
+async def get_locations(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        locations = db_instance.get_locations_by_project(project_id, current_user.id)
+        return {"locations": locations}
+    except Exception as e:
+        logger.error(f"Error getting locations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.post("")
+async def create_location(
+    project_id: str,
+    location_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        location_id = db_instance.create_location(
+            name=location_data['name'],
+            description=location_data['description'],
+            coordinates=location_data.get('coordinates'),
+            user_id=current_user.id,
+            project_id=project_id
+        )
+        return {"id": location_id}
+    except Exception as e:
+        logger.error(f"Error creating location: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@location_router.post("/analyze-chapter")
+async def analyze_chapter_locations(
+    project_id: str,
+    chapter_id: str = 'latest',
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        if chapter_id == 'latest':
+            latest_chapter = db_instance.get_latest_chapter(project_id, current_user.id)
+            if not latest_chapter:
+                raise HTTPException(status_code=404, detail="No chapters found")
+            chapter_id = latest_chapter['id']
+
+        if db_instance.is_chapter_processed_for_type(chapter_id, PROCESS_TYPES['LOCATIONS']):
+            return {"message": "Chapter already analyzed for locations", "skip": True}
+
+        agent_manager = AgentManager(current_user.id, project_id)
+        locations = await agent_manager.analyze_unprocessed_chapter_locations(chapter_id)  # Pass chapter_id
+        
+        db_instance.mark_chapter_processed(chapter_id, current_user.id, PROCESS_TYPES['LOCATIONS'])
+        
+        return {"locations": locations}
+    except Exception as e:
+        logger.error(f"Error analyzing chapter locations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.post("/analyze-connections")
+async def analyze_location_connections(
+    project_id: str,
+    location_ids: List[str],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        agent_manager = AgentManager(current_user.id, project_id)
+        connections = await agent_manager.analyze_location_connections(location_ids)
+        # Should convert LocationConnection to dict
+        return {"connections": [connection.dict() for connection in connections]}  # Fixed
+    except Exception as e:
+        logger.error(f"Error analyzing location connections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.get("/{location_id}")
+async def get_location(
+    location_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        location = db_instance.get_location_by_id(location_id, current_user.id, project_id)
+        if not location:
+            raise HTTPException(status_code=404, detail="Location not found")
+        return location
+    except Exception as e:
+        logger.error(f"Error getting location: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.put("/{location_id}")
+async def update_location(
+    location_id: str,
+    project_id: str,
+    location_data: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        updated_location = db_instance.update_location(location_id, current_user.id, project_id, location_data)
+        if not updated_location:
+            raise HTTPException(status_code=404, detail="Location not found")
+        return updated_location
+    except Exception as e:
+        logger.error(f"Error updating location: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.delete("/{location_id}")
+async def delete_location(
+    location_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        success = db_instance.delete_location(location_id, current_user.id, project_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Location not found")
+        return {"message": "Location deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting location: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.get("/{location_id}/events")
+async def get_location_events(
+    location_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        events = db_instance.get_events_by_location(location_id, current_user.id, project_id)
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Error getting location events: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(chapter_router)
 app.include_router(codex_item_router)
+app.include_router(event_router)
+app.include_router(location_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
 app.include_router(preset_router)

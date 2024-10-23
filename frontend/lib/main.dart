@@ -17,6 +17,7 @@ import 'utils/theme.dart';
 import 'package:flutter/services.dart';
 import 'providers/preset_provider.dart';
 import 'providers/relationship_provider.dart';
+import 'screens/timeline_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -69,6 +70,8 @@ class MyApp extends StatelessWidget {
         '/chapters': (context) => ChaptersScreen(
             projectId: ModalRoute.of(context)!.settings.arguments
                 as String), // Added ChaptersScreen route
+        '/timeline': (context) => TimelineScreen(
+            projectId: ModalRoute.of(context)!.settings.arguments as String),
       },
     );
   }

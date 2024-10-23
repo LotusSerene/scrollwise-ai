@@ -1,10 +1,10 @@
 # backend/database.py
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session, joinedload, relationship
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.dialects.postgresql import TEXT
+from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
 import os
 from dotenv import load_dotenv
@@ -15,6 +15,7 @@ import datetime
 from datetime import timezone
 from sqlalchemy import exists
 from sqlalchemy import alias
+from models import ChapterValidation
 
 
 load_dotenv()
@@ -40,12 +41,12 @@ class Project(Base):
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
 
-    # Add these relationships with cascade delete
-    chapters = relationship("Chapter", cascade="all, delete-orphan", back_populates="project")
-    validity_checks = relationship("ValidityCheck", cascade="all, delete-orphan", back_populates="project")
-    codex_items = relationship("CodexItem", cascade="all, delete-orphan", back_populates="project")
-    chat_histories = relationship("ChatHistory", cascade="all, delete-orphan", back_populates="project")
-    presets = relationship("Preset", cascade="all, delete-orphan", back_populates="project")
+    # Update the relationships with proper back_populates
+    chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
+    validity_checks = relationship("ValidityCheck", back_populates="project", cascade="all, delete-orphan")
+    codex_items = relationship("CodexItem", back_populates="project", cascade="all, delete-orphan")
+    chat_histories = relationship("ChatHistory", back_populates="project", cascade="all, delete-orphan")
+    presets = relationship("Preset", back_populates="project", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -70,6 +71,7 @@ class Chapter(Base):
     last_processed_position = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     project = relationship("Project", back_populates="chapters")
+    processed_types = Column(JSON, default=list, nullable=False)  # Changed from lambda to list
 
     def to_dict(self):
         return {
@@ -87,15 +89,18 @@ class ValidityCheck(Base):
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
     chapter_title = Column(String)
     is_valid = Column(Boolean)
-    overall_score = Column(Integer) # Added overall_score
-    general_feedback = Column(Text) # Changed feedback to general_feedback
-    style_guide_adherence_score = Column(Integer) # Added style_guide_adherence_score
-    style_guide_adherence_explanation = Column(Text) # Added style_guide_adherence_explanation
-    continuity_score = Column(Integer) # Added continuity_score
-    continuity_explanation = Column(Text) # Added continuity_explanation
-    areas_for_improvement = Column(JSON) # Changed test_results to areas_for_improvement
+    overall_score = Column(Integer)
+    general_feedback = Column(Text)
+    style_guide_adherence_score = Column(Integer)
+    style_guide_adherence_explanation = Column(Text)
+    continuity_score = Column(Integer)
+    continuity_explanation = Column(Text)
+    areas_for_improvement = Column(JSON)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Add the relationship definition
     project = relationship("Project", back_populates="validity_checks")
 
     def to_dict(self):
@@ -104,13 +109,13 @@ class ValidityCheck(Base):
             'chapterId': self.chapter_id,
             'chapterTitle': self.chapter_title,
             'isValid': self.is_valid,
-            'overallScore': self.overall_score, # Added overallScore
-            'generalFeedback': self.general_feedback, # Changed feedback to generalFeedback
-            'styleGuideAdherenceScore': self.style_guide_adherence_score, # Added styleGuideAdherenceScore
-            'styleGuideAdherenceExplanation': self.style_guide_adherence_explanation, # Added styleGuideAdherenceExplanation
-            'continuityScore': self.continuity_score, # Added continuityScore
-            'continuityExplanation': self.continuity_explanation, # Added continuityExplanation
-            'areasForImprovement': self.areas_for_improvement # Changed test_results to areasForImprovement
+            'overallScore': self.overall_score,
+            'generalFeedback': self.general_feedback,
+            'styleGuideAdherenceScore': self.style_guide_adherence_score,
+            'styleGuideAdherenceExplanation': self.style_guide_adherence_explanation,
+            'continuityScore': self.continuity_score,
+            'continuityExplanation': self.continuity_explanation,
+            'areasForImprovement': self.areas_for_improvement
         }
 
 class CodexItem(Base):
@@ -223,8 +228,9 @@ class Event(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     date = Column(DateTime, nullable=False)
-    character_id = Column(String, ForeignKey('codex_items.id'), nullable=True)  # Change this
+    character_id = Column(String, ForeignKey('codex_items.id'), nullable=True)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)  # Added this line
     location_id = Column(String, ForeignKey('locations.id'), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
@@ -368,8 +374,26 @@ class Database:
         finally:
             session.close()
 
-    async def create_chapter(self, title, content, user_id, project_id):
-        return await asyncio.to_thread(self._create_chapter, title, content, user_id, project_id)
+    async def create_chapter(self, content: str, chapter_number: int, title: str) -> str:
+        session = self.get_session()
+        try:
+            chapter = Chapter(
+                id=str(uuid.uuid4()),
+                title=title,
+                content=content,
+                chapter_number=chapter_number,
+                user_id=self.user_id,
+                project_id=self.project_id
+            )
+            session.add(chapter)
+            session.commit()
+            return chapter.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating chapter: {str(e)}")
+            raise
+        finally:
+            session.close()
 
     def _create_chapter(self, title, content, user_id, project_id, embedding_id=None):
         session = self.get_session()
@@ -431,10 +455,14 @@ class Database:
         finally:
             session.close()
 
-    def get_chapter(self, chapter_id, user_id, project_id):
+    def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
+            chapter = session.query(Chapter).filter_by(
+                id=chapter_id,
+                user_id=user_id,
+                project_id=project_id
+            ).first()
             if chapter:
                 return chapter.to_dict()
             return None
@@ -608,33 +636,57 @@ class Database:
         finally:
             session.close()
 
-    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
-        return await asyncio.to_thread(self._save_validity_check, chapter_id, chapter_title, is_valid, overall_score, general_feedback, style_guide_adherence_score, style_guide_adherence_explanation, continuity_score, continuity_explanation, areas_for_improvement, user_id, project_id)
-
-    def _save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
+    def save_validity_check(self, chapter_id: str, user_id: str, project_id: str, validity_check: ChapterValidation):
         session = self.get_session()
         try:
-            validity_check = ValidityCheck(
+            validity_check_dict = validity_check.dict()
+            check = ValidityCheck(
                 id=str(uuid.uuid4()),
                 chapter_id=chapter_id,
-                chapter_title=chapter_title,
-                is_valid=is_valid,
-                overall_score=overall_score,
-                general_feedback=general_feedback,
-                style_guide_adherence_score=style_guide_adherence_score,
-                style_guide_adherence_explanation=style_guide_adherence_explanation,
-                continuity_score=continuity_score,
-                continuity_explanation=continuity_explanation,
-                areas_for_improvement=areas_for_improvement,
+                is_valid=validity_check_dict['is_valid'],
+                overall_score=validity_check_dict['overall_score'],
+                general_feedback=validity_check_dict['general_feedback'],
+                style_guide_adherence_score=validity_check_dict['style_guide_adherence']['score'],
+                style_guide_adherence_explanation=validity_check_dict['style_guide_adherence']['explanation'],
+                continuity_score=validity_check_dict['continuity']['score'],
+                continuity_explanation=validity_check_dict['continuity']['explanation'],
+                areas_for_improvement=validity_check_dict['areas_for_improvement'],
                 user_id=user_id,
                 project_id=project_id
             )
-            session.add(validity_check)
+            session.add(check)
             session.commit()
+            return check.id
         except Exception as e:
             session.rollback()
             self.logger.error(f"Error saving validity check: {str(e)}")
             raise
+        finally:
+            session.close()
+
+    def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            validity_check = session.query(ValidityCheck).filter_by(
+                chapter_id=chapter_id,
+                user_id=user_id
+            ).first()
+            
+            if validity_check:
+                return {
+                    'id': validity_check.id,
+                    'chapter_title': validity_check.chapter_title,
+                    'is_valid': validity_check.is_valid,
+                    'overall_score': validity_check.overall_score,
+                    'general_feedback': validity_check.general_feedback,
+                    'style_guide_adherence_score': validity_check.style_guide_adherence_score,
+                    'style_guide_adherence_explanation': validity_check.style_guide_adherence_explanation,
+                    'continuity_score': validity_check.continuity_score,
+                    'continuity_explanation': validity_check.continuity_explanation,
+                    'areas_for_improvement': validity_check.areas_for_improvement,
+                    'created_at': validity_check.created_at
+                }
+            return None
         finally:
             session.close()
 
@@ -763,6 +815,318 @@ class Database:
         finally:
             session.close()
 
+    def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
+        session = self.get_session()
+        try:
+            relationship = session.query(CharacterRelationship).join(
+                CodexItem, CharacterRelationship.character_id == CodexItem.id
+            ).filter(
+                CharacterRelationship.id == relationship_id,
+                CodexItem.project_id == project_id,
+                CodexItem.user_id == user_id
+            ).first()
+            if relationship:
+                session.delete(relationship)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error deleting character relationship: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
+                                 description: str, user_id: str, project_id: str) -> str:
+        session = self.get_session()
+        try:
+            analysis = CharacterRelationshipAnalysis(
+                id=str(uuid.uuid4()),
+                character1_id=character1_id,
+                character2_id=character2_id,
+                relationship_type=relationship_type,
+                description=description,
+                user_id=user_id,
+                project_id=project_id
+            )
+            session.add(analysis)
+            session.commit()
+            return analysis.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error saving relationship analysis: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+
+    def get_character_by_id(self, character_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.project_id == project_id,
+                CodexItem.user_id == user_id,  # Add user_id filter
+                CodexItem.type == 'character'
+            ).first()
+            
+            if character:
+                return character.to_dict()
+            return None
+        finally:
+            session.close()
+
+    def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
+        session = self.get_session()
+        try:
+            latest_chapter = session.query(Chapter).filter(
+                Chapter.project_id == project_id
+            ).order_by(Chapter.chapter_number.desc()).first()
+            
+            if latest_chapter:
+                return latest_chapter.content
+            return None
+        finally:
+            session.close()
+
+    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            relationships = (
+                session.query(CharacterRelationship)
+                .join(
+                    CodexItem,
+                    CharacterRelationship.character_id == CodexItem.id
+                )
+                .filter(
+                    CodexItem.project_id == project_id,
+                    CodexItem.user_id == user_id
+                )
+                .all()
+            )
+
+            result = []
+            for rel in relationships:
+                character1 = session.query(CodexItem).filter_by(id=rel.character_id).first()
+                character2 = session.query(CodexItem).filter_by(id=rel.related_character_id).first()
+                
+                if character1 and character2:
+                    result.append({
+                        'id': rel.id,
+                        'character1_id': rel.character_id,
+                        'character2_id': rel.related_character_id,
+                        'character1_name': character1.name,
+                        'character2_name': character2.name,
+                        'relationship_type': rel.relationship_type,
+                        'description': rel.description or ''  # Add this line
+                    })
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting character relationships: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.user_id == user_id,
+                CodexItem.project_id == project_id
+            ).first()
+            
+            if character:
+                character.backstory = backstory
+                session.commit()
+            else:
+                raise ValueError("Character not found")
+        finally:
+            session.close()
+
+    def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            character = session.query(CodexItem).filter(
+                CodexItem.id == character_id,
+                CodexItem.user_id == user_id,
+                CodexItem.project_id == project_id
+            ).first()
+            
+            if character:
+                character.backstory = None
+                session.commit()
+            else:
+                raise ValueError("Character not found")
+        finally:
+            session.close()
+
+    def get_events_by_project(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            events = session.query(Event).filter(
+                Event.project_id == project_id,
+                Event.user_id == user_id  # Add user_id filter
+            ).all()
+            return [event.to_dict() for event in events]
+        finally:
+            session.close()
+
+    def create_event(self, title: str, description: str, date: datetime, 
+                    character_id: Optional[str], location_id: Optional[str], 
+                    project_id: str, user_id: str) -> str:
+        session = self.get_session()
+        try:
+            # Check if the project exists and belongs to the user
+            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
+            if not project_exists:
+                raise ValueError("Project not found or doesn't belong to the user")
+
+            event = Event(id=str(uuid.uuid4()), title=title, description=description, date=date, character_id=character_id, location_id=location_id, project_id=project_id)
+            session.add(event)
+            session.commit()
+            return event.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating event: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def get_locations_by_project(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            locations = session.query(Location).filter(
+                Location.project_id == project_id,
+                Location.user_id == user_id  # Add user_id filter
+            ).all()
+            return [location.to_dict() for location in locations]
+        finally:
+            session.close()
+
+    def create_location(self, name: str, description: str, coordinates: Optional[str],
+                       user_id: str, project_id: str) -> str:
+        session = self.get_session()
+        try:
+            location = Location(
+                id=str(uuid.uuid4()),
+                name=name,
+                description=description,
+                coordinates=coordinates,
+                user_id=user_id,
+                project_id=project_id
+            )
+            session.add(location)
+            session.commit()
+            return location.id
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error creating location: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
+        session = self.get_session()
+        try:
+            location = session.query(Location).filter_by(id=location_id, user_id=user_id, project_id=project_id).first()
+            if location:
+                session.delete(location)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+    
+
+    def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
+        session = self.get_session()
+        try:
+            event = session.query(Event).filter_by(id=event_id, user_id=user_id, project_id=project_id).first()
+            if event:
+                session.delete(event)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+    
+    def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter(
+                Chapter.id == chapter_id,
+                Chapter.user_id == user_id
+            ).first()
+            
+            if not chapter:
+                self.logger.warning(f"Chapter {chapter_id} not found when marking as processed")
+                return
+            
+            if not isinstance(chapter.processed_types, list):
+                chapter.processed_types = []
+            if process_type not in chapter.processed_types:
+                chapter.processed_types.append(process_type)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Error marking chapter as processed: {str(e)}")
+            raise
+        finally:
+            session.close()
+    
+    def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter(
+                Chapter.id == chapter_id
+            ).first()
+            
+            if chapter and isinstance(chapter.processed_types, list):
+                return process_type in chapter.processed_types
+            return False
+        finally:
+            session.close()
+    
+    def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            chapter = session.query(Chapter).filter_by(
+                project_id=project_id,
+                user_id=user_id
+            ).order_by(Chapter.chapter_number.desc()).first()
+            
+            if chapter:
+                return chapter.to_dict()
+            return None
+        finally:
+            session.close()
+    
+    def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            event = session.query(Event).filter_by(
+                id=event_id,
+                user_id=user_id,
+                project_id=project_id
+            ).first()
+            return event.to_dict() if event else None
+        finally:
+            session.close()
+    
+    def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        session = self.get_session()
+        try:
+            location = session.query(Location).filter_by(
+                id=location_id,
+                user_id=user_id,
+                project_id=project_id
+            ).first()
+            return location.to_dict() if location else None
+        finally:
+            session.close()
     def update_codex_item_embedding_id(self, item_id, embedding_id):
         session = self.get_session()
         try:
@@ -1089,15 +1453,14 @@ class Database:
         try:
             latest_chapter = session.query(Chapter).filter(
                 Chapter.project_id == project_id
-            ).order_by(Chapter.created_at.desc()).first()
+            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
 
             if latest_chapter:
                 processed_chapter = ProcessedChapter(
                     id=str(uuid.uuid4()),
                     chapter_id=latest_chapter.id,
                     project_id=project_id,
-                    processed_at=datetime.datetime.utcnow(),
-                    function_name=function_name
+                    processed_at=datetime.datetime.utcnow()
                 )
                 session.add(processed_chapter)
                 session.commit()
@@ -1181,22 +1544,18 @@ class Database:
         finally:
             session.close()
 
-    def get_latest_unprocessed_chapter_content(self, project_id: str, function_name: str) -> Optional[str]:
+    def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         session = self.get_session()
         try:
-            # Query for the latest chapter that hasn't been processed for this function
-            latest_chapter = session.query(Chapter).filter(
+            # Use JSON containment operator @> instead of LIKE
+            chapter = session.query(Chapter).filter(
                 Chapter.project_id == project_id,
-                ~exists().where(
-                    and_(
-                        ProcessedChapter.chapter_id == Chapter.id,
-                        ProcessedChapter.project_id == project_id
-                    )
-                )
-            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
-
-            if latest_chapter:
-                return latest_chapter.content
+                Chapter.user_id == user_id,
+                ~Chapter.processed_types.cast(JSONB).contains([process_type])
+            ).order_by(Chapter.chapter_number.desc()).first()
+            
+            if chapter:
+                return chapter.content
             return None
         finally:
             session.close()
@@ -1258,152 +1617,5 @@ class Database:
             return None
         except Exception as e:
             session.rollback()
-
-    def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
-        session = self.get_session()
-        try:
-            relationship = session.query(CharacterRelationship).join(
-                CodexItem, CharacterRelationship.character_id == CodexItem.id
-            ).filter(
-                CharacterRelationship.id == relationship_id,
-                CodexItem.project_id == project_id,
-                CodexItem.user_id == user_id
-            ).first()
-            if relationship:
-                session.delete(relationship)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting character relationship: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
-                                 description: str, user_id: str, project_id: str) -> str:
-        session = self.get_session()
-        try:
-            analysis = CharacterRelationshipAnalysis(
-                id=str(uuid.uuid4()),
-                character1_id=character1_id,
-                character2_id=character2_id,
-                relationship_type=relationship_type,
-                description=description,
-                user_id=user_id,
-                project_id=project_id
-            )
-            session.add(analysis)
-            session.commit()
-            return analysis.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving relationship analysis: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-
-    def get_character_by_id(self, character_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.project_id == project_id,
-                CodexItem.type == 'character'
-            ).first()
-            
-            if character:
-                return character.to_dict()
-            return None
-        finally:
-            session.close()
-
-    def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
-        session = self.get_session()
-        try:
-            latest_chapter = session.query(Chapter).filter(
-                Chapter.project_id == project_id
-            ).order_by(Chapter.chapter_number.desc()).first()
-            
-            if latest_chapter:
-                return latest_chapter.content
-            return None
-        finally:
-            session.close()
-
-    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            relationships = (
-                session.query(CharacterRelationship)
-                .join(
-                    CodexItem,
-                    CharacterRelationship.character_id == CodexItem.id
-                )
-                .filter(
-                    CodexItem.project_id == project_id,
-                    CodexItem.user_id == user_id
-                )
-                .all()
-            )
-
-            result = []
-            for rel in relationships:
-                character1 = session.query(CodexItem).filter_by(id=rel.character_id).first()
-                character2 = session.query(CodexItem).filter_by(id=rel.related_character_id).first()
-                
-                if character1 and character2:
-                    result.append({
-                        'id': rel.id,
-                        'character1_id': rel.character_id,
-                        'character2_id': rel.related_character_id,
-                        'character1_name': character1.name,
-                        'character2_name': character2.name,
-                        'relationship_type': rel.relationship_type,
-                        'description': rel.description or ''  # Add this line
-                    })
-
-            return result
-        except Exception as e:
-            self.logger.error(f"Error getting character relationships: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.user_id == user_id,
-                CodexItem.project_id == project_id
-            ).first()
-            
-            if character:
-                character.backstory = backstory
-                session.commit()
-            else:
-                raise ValueError("Character not found")
-        finally:
-            session.close()
-
-    def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.user_id == user_id,
-                CodexItem.project_id == project_id
-            ).first()
-            
-            if character:
-                character.backstory = None
-                session.commit()
-            else:
-                raise ValueError("Character not found")
-        finally:
-            session.close()
-
+    
 db_instance = Database()

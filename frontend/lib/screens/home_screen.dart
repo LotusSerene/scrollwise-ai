@@ -12,6 +12,7 @@ import '../components/editor.dart';
 import '../components/codex_generation.dart';
 import './character_relationships_screen.dart';
 import './character_journey_screen.dart';
+import './timeline_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -26,11 +27,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 11, vsync: this);
+    _tabController = TabController(length: 12, vsync: this);
+    _tabController.addListener(_handleTabSelection);
+  }
+
+  void _handleTabSelection() {
+    if (_tabController.indexIsChanging) {
+      // Only refresh when switching to the Dashboard tab (index 0)
+      if (_tabController.index == 0) {
+        final appState = Provider.of<AppState>(context, listen: false);
+        if (appState.currentProjectId != null) {
+          appState.refreshProjectData();
+        }
+      }
+    }
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabSelection);
     _tabController.dispose();
     super.dispose();
   }
@@ -66,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Tab(text: 'Project Settings'),
             Tab(text: 'Character Relationships'),
             Tab(text: 'Character Journey'),
+            Tab(text: 'Timeline'),
           ],
         ),
       ),
@@ -93,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ProjectSettings(projectId: projectId),
                 CharacterRelationshipsScreen(projectId: projectId),
                 CharacterJourneyScreen(projectId: projectId),
+                TimelineScreen(projectId: projectId),
               ],
             ),
     );

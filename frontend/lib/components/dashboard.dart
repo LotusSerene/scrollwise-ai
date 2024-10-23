@@ -33,19 +33,24 @@ class _DashboardState extends State<Dashboard> {
     _fetchData();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    Provider.of<AppState>(context, listen: false).refreshProjectData();
-  }
+  // Remove didChangeDependencies as it's causing extra refreshes
+  // @override
+  // void didChangeDependencies() {
+  //   super.didChangeDependencies();
+  //   Provider.of<AppState>(context, listen: false).refreshProjectData();
+  // }
 
   Future<void> _fetchData() async {
+    // Avoid fetching if widget is disposed
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _error = '';
     });
 
     try {
+      // Only fetch progress data once
       await Provider.of<AppState>(context, listen: false)
           .fetchProgressData(widget.projectId);
 
@@ -58,6 +63,9 @@ class _DashboardState extends State<Dashboard> {
         Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
         headers: headers,
       );
+
+      // Check if widget is still mounted before updating state
+      if (!mounted) return;
 
       if (chapterResponse.statusCode == 200 &&
           codexResponse.statusCode == 200) {

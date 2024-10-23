@@ -90,14 +90,8 @@ class _CharacterRelationshipsScreenState
       return;
     }
 
-    // Debug print to check the data
-    print('Selected characters before analysis: $selectedCharacters');
-
     // Convert Set to List and ensure all elements are strings
     List<String> characterIds = selectedCharacters.toList();
-
-    // Debug print to check the converted list
-    print('Character IDs for analysis: $characterIds');
 
     Provider.of<RelationshipProvider>(context, listen: false)
         .analyzeRelationships(characterIds, widget.projectId);
