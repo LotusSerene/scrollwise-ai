@@ -14,7 +14,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.docstore.document import Document
 from datetime import datetime
 import logging
-
+from cachetools import TTLCache
 
 import uuid
 from database import db_instance
