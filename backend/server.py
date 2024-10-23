@@ -388,26 +388,18 @@ async def generate_chapters(
     try:
         # Parse and validate the request body
         body = await request.json()
-        
-        # Log the received request for debugging
         logger.debug(f"Received chapter generation request: {body}")
         
         # Validate required fields
         required_fields = ['numChapters', 'plot', 'writingStyle', 'instructions']
         for field in required_fields:
             if field not in body:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Missing required field: {field}"
-                )
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
         
         # Validate instructions object
         instructions = body.get('instructions', {})
         if not isinstance(instructions, dict):
-            raise HTTPException(
-                status_code=400,
-                detail="Instructions must be an object"
-            )
+            raise HTTPException(status_code=400, detail="Instructions must be an object")
 
         user_id = current_user.id
 
@@ -419,11 +411,10 @@ async def generate_chapters(
         codex_items = db_instance.get_all_codex_items(current_user.id, project_id)
 
         async def generate():
-            chunks = []
             try:
                 for i in range(body['numChapters']):
                     chapter_number = len(previous_chapters) + i + 1
-                    chunks.append(json.dumps({'type': 'start', 'chapterNumber': chapter_number}))
+                    yield json.dumps({'type': 'start', 'chapterNumber': chapter_number}) + '\n'
 
                     chapter_content = ""
                     async for chunk in agent_manager.generate_chapter_stream(
@@ -434,149 +425,85 @@ async def generate_chapters(
                         previous_chapters=previous_chapters,
                         codex_items=codex_items
                     ):
-                        if isinstance(chunk, dict) and 'content' in chunk:
-                            chapter_content += chunk['content']
-                        chunks.append(json.dumps(chunk))
+                        if isinstance(chunk, dict):
+                            if 'content' in chunk:
+                                chapter_content += chunk['content']
+                            yield json.dumps(chunk) + '\n'
 
-                    chapter_title = await agent_manager.generate_title(chapter_content, chapter_number)
+                            # Handle validity check if present
+                            if 'validity_check' in chunk and 'chapter_title' in chunk:
+                                # Remove await since create_chapter is not async
+                                chapter_id = db_instance.create_chapter(
+                                    title=chunk['chapter_title'],
+                                    content=chapter_content,
+                                    user_id=current_user.id,
+                                    project_id=project_id,
+                                    chapter_number=chapter_number
+                                )
 
-                    validity = await agent_manager.check_chapter(chapter_content, instructions, previous_chapters)
+                                # Save the validity check
+                                agent_manager.save_validity_feedback(
+                                    result=chunk['validity_check'],
+                                    chapter_number=chapter_number,
+                                    chapter_id=chapter_id
+                                )
 
-                    new_codex_items = await agent_manager.check_and_extract_new_codex_items(chapter_content, codex_items)
+                                # Process new codex items if present
+                                if 'new_codex_items' in chunk:
+                                    for item in chunk['new_codex_items']:
+                                        try:
+                                            # First create the codex item and wait for the result
+                                            item_id = db_instance.create_codex_item(
+                                                name=item['name'],
+                                                description=item['description'],
+                                                type=item['type'],
+                                                subtype=item.get('subtype'),
+                                                user_id=current_user.id,
+                                                project_id=project_id
+                                            )
 
-                    for item in new_codex_items:
-                        item_id = await db_instance.create_codex_item(
-                            item['name'],
-                            item['description'],
-                            item['type'],
-                            item['subtype'],
-                            current_user.id,
-                            project_id
-                        )
-                        embedding_id = agent_manager.add_to_knowledge_base(
-                            "codex_item",
-                            item['description'],
-                            {
-                                "name": item['name'],
-                                "id": item_id,
-                                "type": item['type'],
-                                "subtype": item['subtype']
-                            }
-                        )
-                        db_instance.update_codex_item_embedding_id(item_id, embedding_id)
-                        codex_items.append({
-                            "id": item_id,
-                            "name": item['name'],
-                            "description": item['description'],
-                            "type": item['type'],
-                            "subtype": item['subtype'],
-                            "embedding_id": embedding_id
-                        })
+                                            # Now use the actual item_id (not a coroutine) in the metadata
+                                            metadata = {
+                                                "name": item['name'],
+                                                "id": str(item_id),  # Ensure ID is a string
+                                                "type": item['type'],
+                                                "subtype": item.get('subtype')
+                                            }
 
-                    chapter_id = await db_instance.create_chapter(chapter_content, chapter_number, f"Chapter {chapter_number}")
+                                            # Add to knowledge base with the proper metadata
+                                            embedding_id = agent_manager.add_to_knowledge_base(
+                                                "codex_item",
+                                                item['description'],
+                                                metadata
+                                            )
 
-                    embedding_id = agent_manager.add_to_knowledge_base(
-                        "chapter",
-                        chapter_content,
-                        {
-                            "title": chapter_title,
-                            "id": chapter_id,
-                            "type": "chapter"
-                        }
-                    )
+                                            # Update the embedding ID
+                                            db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
-                    db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
+                                        except Exception as e:
+                                            logger.error(f"Error processing codex item: {str(e)}")
+                                            continue
 
-                    # Log the validity check response
-                    #logger.info(f"Validity check response: {json.dumps(validity, indent=2)}")
-                    
-                    # Log individual fields we're trying to access
-                    #logger.info(f"""
-                    #Attempting to save validity check with:
-                    #- overall_score: {validity.get('overall_score')}
-                    #- style_guide_adherence: {validity.get('style_guide_adherence')}
-                    #- continuity: {validity.get('continuity')}
-                    #- areas_for_improvement: {validity.get('areas_for_improvement')}
-                    #""")
+                    yield json.dumps({'type': 'done'}) + '\n'
 
-                    # Parse the review JSON string to get scores
-                    review_data = json.loads(validity['review'])
-                    
-                    # Calculate overall score as average of all review scores
-                    scores = [item['score'] for item in review_data.values()]
-                    overall_score = int(sum(scores) / len(scores))
-                    
-                    # Convert style guide adherence to score (0-10)
-                    style_guide_score = 10 if validity['style_guide_adherence'] else 5
-                    
-                    # Convert continuity to score (0-10)
-                    continuity_score = 10 if validity['continuity'] else 5
-
-                    await db_instance.save_validity_check(
-                        chapter_id=str(chapter_id),
-                        chapter_title=str(chapter_title),
-                        is_valid=bool(validity['is_valid']),
-                        overall_score=overall_score,
-                        general_feedback=str(validity['feedback']),
-                        style_guide_adherence_score=style_guide_score,
-                        style_guide_adherence_explanation=str(validity['style_guide_feedback']),
-                        continuity_score=continuity_score,
-                        continuity_explanation=str(validity['continuity_feedback']),
-                        areas_for_improvement=json.loads(validity['test_results']),
-                        user_id=current_user.id,
-                        project_id=project_id
-                    )
-
-                    chunks.append(json.dumps({
-                        'type': 'final', 
-                        'chapterId': chapter_id, 
-                        'title': chapter_title, 
-                        'content': chapter_content,
-                        'validity': validity, 
-                        'newCodexItems': new_codex_items
-                    }))
-
-                chunks.append(json.dumps({'type': 'done'}))
             except Exception as e:
-                logger.error(f"Error in generate function: {str(e)}")
-                chunks.append(json.dumps({'type': 'error', 'message': str(e)}))
+                logger.error(f"Error in generate function: {str(e)}", exc_info=True)
+                yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
             finally:
                 if project_id in generation_tasks[user_id]:
                     del generation_tasks[user_id][project_id]
-            
-            return chunks
 
-        generation_task = asyncio.create_task(generate())
+        generation_task = generate()
         generation_tasks[user_id][project_id] = generation_task
-        background_tasks.add_task(await_and_log_exceptions, generation_task, user_id, project_id)
 
-        async def stream_response():
-            chunks = await generation_task
-            for chunk in chunks:
-                yield chunk + '\n'
-
-        return StreamingResponse(stream_response(), media_type="application/json")
+        return StreamingResponse(generation_task, media_type="application/json")
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException as e:
-        raise e
     except Exception as e:
         logger.error(f"Error generating chapters: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-async def await_and_log_exceptions(task, user_id, project_id):
-    try:
-        await task
-    except asyncio.CancelledError:
-        logging.info(f"Task cancelled for user {user_id}, project {project_id}")
-    except Exception as e:
-        logging.error(f"Error in background task for user {user_id}, project {project_id}: {str(e)}")
-    finally:
-        if project_id in generation_tasks[user_id]:
-            del generation_tasks[user_id][project_id]
 
 
 @chapter_router.post("/cancel")

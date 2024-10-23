@@ -62,8 +62,8 @@ class Project(Base):
 class Chapter(Base):
     __tablename__ = 'chapters'
     id = Column(String, primary_key=True)
-    title = Column(String(255), nullable=False)
-    content = Column(TEXT, nullable=False)
+    title = Column(String(500))  # Increase the length limit to 500
+    content = Column(Text)  # Text type for long content
     chapter_number = Column(Integer, nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)
@@ -374,31 +374,18 @@ class Database:
         finally:
             session.close()
 
-    async def create_chapter(self, content: str, chapter_number: int, title: str) -> str:
+    def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         session = self.get_session()
         try:
-            chapter = Chapter(
-                id=str(uuid.uuid4()),
-                title=title,
-                content=content,
-                chapter_number=chapter_number,
-                user_id=self.user_id,
-                project_id=self.project_id
-            )
-            session.add(chapter)
-            session.commit()
-            return chapter.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating chapter: {str(e)}")
-            raise
-        finally:
-            session.close()
+            # Log initial chapter creation attempt
+            self.logger.info(f"Creating new chapter - Title: {title}, User: {user_id}, Project: {project_id}")
+            
+            # Get the highest chapter number for this project if not provided
+            if chapter_number is None:
+                latest_chapter = session.query(Chapter).filter_by(project_id=project_id).order_by(Chapter.chapter_number.desc()).first()
+                chapter_number = (latest_chapter.chapter_number + 1) if latest_chapter else 1
+                self.logger.debug(f"Assigned chapter number: {chapter_number}")
 
-    def _create_chapter(self, title, content, user_id, project_id, embedding_id=None):
-        session = self.get_session()
-        try:
-            chapter_number = session.query(Chapter).filter_by(user_id=user_id, project_id=project_id).count() + 1
             chapter = Chapter(
                 id=str(uuid.uuid4()),
                 title=title,
@@ -406,17 +393,21 @@ class Database:
                 chapter_number=chapter_number,
                 user_id=user_id,
                 project_id=project_id,
-                embedding_id=embedding_id
+                embedding_id=embedding_id,
+                processed_types=[]
             )
             session.add(chapter)
             session.commit()
-            return chapter.to_dict()
+            
+            self.logger.info(f"Successfully created chapter - ID: {chapter.id}, Number: {chapter_number}")
+            return chapter.id
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error creating chapter: {str(e)}")
+            self.logger.error(f"Error creating chapter: {str(e)}", exc_info=True)
             raise
         finally:
             session.close()
+
 
     def update_chapter(self, chapter_id, title, content, user_id, project_id):
         session = self.get_session()
@@ -493,22 +484,21 @@ class Database:
         finally:
             session.close()
 
-    async def create_codex_item(self, name: str, description: str, item_type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
+    def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
         session = self.get_session()
         try:
-            item_id = str(uuid.uuid4())
-            new_item = CodexItem(
-                id=item_id,
+            item = CodexItem(
+                id=str(uuid.uuid4()),
                 name=name,
                 description=description,
-                type=item_type,
+                type=type,
                 subtype=subtype,
                 user_id=user_id,
                 project_id=project_id
             )
-            session.add(new_item)
+            session.add(item)
             session.commit()
-            return item_id
+            return item.id
         except Exception as e:
             session.rollback()
             self.logger.error(f"Error creating codex item: {str(e)}")
@@ -636,21 +626,21 @@ class Database:
         finally:
             session.close()
 
-    def save_validity_check(self, chapter_id: str, user_id: str, project_id: str, validity_check: ChapterValidation):
+    def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         session = self.get_session()
         try:
-            validity_check_dict = validity_check.dict()
             check = ValidityCheck(
                 id=str(uuid.uuid4()),
                 chapter_id=chapter_id,
-                is_valid=validity_check_dict['is_valid'],
-                overall_score=validity_check_dict['overall_score'],
-                general_feedback=validity_check_dict['general_feedback'],
-                style_guide_adherence_score=validity_check_dict['style_guide_adherence']['score'],
-                style_guide_adherence_explanation=validity_check_dict['style_guide_adherence']['explanation'],
-                continuity_score=validity_check_dict['continuity']['score'],
-                continuity_explanation=validity_check_dict['continuity']['explanation'],
-                areas_for_improvement=validity_check_dict['areas_for_improvement'],
+                chapter_title=chapter_title,
+                is_valid=is_valid,
+                overall_score=overall_score,
+                general_feedback=general_feedback,
+                style_guide_adherence_score=style_guide_adherence_score,
+                style_guide_adherence_explanation=style_guide_adherence_explanation,
+                continuity_score=continuity_score,
+                continuity_explanation=continuity_explanation,
+                areas_for_improvement=areas_for_improvement,
                 user_id=user_id,
                 project_id=project_id
             )

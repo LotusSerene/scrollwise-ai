@@ -212,17 +212,13 @@ class AgentManager:
         codex_items: List[Dict[str, Any]]
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
-            # Log the received parameters for debugging
-            #self.logger.debug(f"""
-            #Generating chapter with:
-            #- Chapter number: {chapter_number}
-            #- Plot: {plot}
-            #- Writing style: {writing_style}
-            #- Instructions: {instructions}
-            #""")
-
             # Construct context from previous chapters and codex items
-            context = await asyncio.to_thread(self._construct_context, plot, writing_style, {item['name']: item['description'] for item in codex_items}, previous_chapters)
+            context = self._construct_context(
+                plot, 
+                writing_style, 
+                {item['name']: item['description'] for item in codex_items}, 
+                previous_chapters
+            )
             
             # Use our existing _construct_prompt method
             prompt_template = self._construct_prompt(instructions, context)
@@ -237,9 +233,11 @@ class AgentManager:
             chat_history = ChatMessageHistory()
             total_tokens = 0
             max_history_tokens = self.MAX_INPUT_TOKENS // 4
+            
+            # Add relevant previous chapters to chat history
             for i, chapter in enumerate(reversed(previous_chapters), 1):
                 chapter_content = f"Chapter {chapter.get('chapter_number', i)}: {chapter['content']}"
-                chapter_tokens = await asyncio.to_thread(self.estimate_token_count, chapter_content)
+                chapter_tokens = self.estimate_token_count(chapter_content)
                 if total_tokens + chapter_tokens > max_history_tokens:
                     break
                 chat_history.add_user_message(chapter_content)
@@ -253,6 +251,7 @@ class AgentManager:
                 history_messages_key="chat_history",
             )
 
+            # Collect the full chapter content
             chapter_content = ""
             async for chunk in self._stream_chapter_generation(
                 chain,
@@ -270,57 +269,38 @@ class AgentManager:
                     chapter_content += chunk["content"]
                 yield chunk
 
-            # Check and extend the chapter if necessary
-            expected_word_count = instructions.get('minWordCount')
-            if expected_word_count > 0:
-                chapter_content = await self.check_and_extend_chapter(chapter_content, instructions, context, expected_word_count)
+            if not chapter_content:
+                raise ValueError("No chapter content was generated")
 
-            # Run and save validity check
+            # Generate title before returning
+            chapter_title = await self.generate_title(chapter_content, chapter_number)
+
+            # Check and extend chapter if necessary
+            expected_word_count = instructions.get('minWordCount', 0)
+            if expected_word_count > 0:
+                chapter_content = await self.check_and_extend_chapter(
+                    chapter_content, 
+                    instructions, 
+                    context, 
+                    expected_word_count
+                )
+
+            # Run validity check
             validity_result = await self.check_chapter(
-                chapter_content, 
-                instructions, 
+                chapter_content,
+                instructions,
                 previous_chapters
             )
-            
-            # Save chapter first to get chapter_id
-            chapter_id = self.save_chapter(chapter_content, chapter_number, f"Chapter {chapter_number}")
-            
-            # Save validity check with the obtained chapter_id
-            try:
-                db_instance.save_validity_check(
-                    chapter_id=chapter_id,
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    validity_data=validity_result
-                )
-            except Exception as e:
-                self.logger.error(f"Error saving validity check: {str(e)}")
 
-            # Extract new codex items after the chapter is generated
+            # Extract and process new codex items
             new_codex_items = await self.check_and_extract_new_codex_items(chapter_content, codex_items)
-            
-            # Add new codex items to the knowledge base
-            added_codex_items = []
-            for item in new_codex_items:
-                try:
-                    embedding_id = await asyncio.to_thread(
-                        self.add_to_knowledge_base,
-                        "codex_item",
-                        item['description'],
-                        {
-                            "name": item['name'],
-                            "type": item['type'],
-                            "subtype": item['subtype'] or "None"  # Use "None" as a string if subtype is None
-                        }
-                    )
-                    added_codex_items.append(item)
-                except Exception as e:
-                    self.logger.error(f"Error adding codex item to knowledge base: {str(e)}")
-            
+
+            # Return the chapter content and metadata without saving
             yield {
-                "type": "complete", 
-                "content": chapter_content, 
-                "new_codex_items": added_codex_items,
+                "type": "complete",
+                "content": chapter_content,
+                "chapter_title": chapter_title,
+                "new_codex_items": new_codex_items,
                 "validity_check": validity_result
             }
 
@@ -498,19 +478,19 @@ class AgentManager:
                 "format_instructions": parser.get_format_instructions()
             })
 
-            # Post-process the results for backward compatibility
-            validity_dict = {
-                "is_valid": result.is_valid,
-                "feedback": result.general_feedback,
-                "review": json.dumps({k: v.dict() for k, v in result.criteria_scores.items()}),
-                "style_guide_adherence": result.style_guide_adherence.score >= 7,
-                "style_guide_feedback": result.style_guide_adherence.explanation,
-                "continuity": result.continuity.score >= 7,
-                "continuity_feedback": result.continuity.explanation,
-                "test_results": json.dumps(result.areas_for_improvement)
+            # Convert the result to a dictionary format matching the database schema
+            validity_check = {
+                'is_valid': result.is_valid,
+                'overall_score': result.overall_score,
+                'general_feedback': result.general_feedback,
+                'style_guide_adherence_score': result.style_guide_adherence.score,
+                'style_guide_adherence_explanation': result.style_guide_adherence.explanation,
+                'continuity_score': result.continuity.score,
+                'continuity_explanation': result.continuity.explanation,
+                'areas_for_improvement': result.areas_for_improvement
             }
 
-            return validity_dict
+            return validity_check
 
         except ValidationError as e:
             self.logger.error(f"Validation error in check_chapter: {e}")
@@ -520,33 +500,43 @@ class AgentManager:
             return self._create_error_response("An error occurred during validity check.")
 
     def _create_error_response(self, message: str) -> Dict[str, Any]:
+        """Create a standardized error response dictionary"""
         return {
-            "is_valid": False,
-            "feedback": message,
-            "review": "N/A",
-            "style_guide_adherence": False,
-            "style_guide_feedback": "N/A",
-            "continuity": False,
-            "continuity_feedback": "N/A",
-            "test_results": "N/A"
+            'is_valid': False,
+            'overall_score': 0,
+            'general_feedback': message,
+            'style_guide_adherence_score': 0,
+            'style_guide_adherence_explanation': 'Error occurred during validation',
+            'continuity_score': 0,
+            'continuity_explanation': 'Error occurred during validation',
+            'areas_for_improvement': ['Unable to complete validation']
         }
 
-    def _extract_section(self, text: str, section_name: str) -> str:
-        start = text.find(section_name)
-        if start == -1:
-            return ""
-        start += len(section_name)
-        end = text.find("\n", start)
-        return text[start:end].strip() if end != -1 else text[start:].strip()
+    def save_validity_feedback(self, result: Dict[str, Any], chapter_number: int, chapter_id: str):
+        """Save the validity check results to the database."""
+        try:
+            # Get chapter title
+            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
+            chapter_title = chapter.get('title', f'Chapter {chapter_number}') if chapter else f'Chapter {chapter_number}'
 
-    def save_chapter(self, chapter: str, chapter_number: int, chapter_title: str):
-        chapter_id = db_instance.create_chapter(chapter_title, chapter, self.user_id, self.project_id)
-        self.add_to_knowledge_base("chapter", chapter, {"type": "chapter", "user_id": self.user_id, "chapter_number": chapter_number, "project_id": self.project_id})
-        return chapter_id
-
-    def save_validity_feedback(self, result: str, chapter_number: int, chapter_id: str):
-        chapter_title = f'Chapter {chapter_number}'
-        db_instance.save_validity_check(chapter_id, chapter_title, result, self.user_id, self.project_id)
+            # Save validity check with all required parameters
+            db_instance.save_validity_check(
+                chapter_id=chapter_id,
+                chapter_title=chapter_title,
+                is_valid=result['is_valid'],
+                overall_score=result['overall_score'],
+                general_feedback=result['general_feedback'],
+                style_guide_adherence_score=result['style_guide_adherence_score'],
+                style_guide_adherence_explanation=result['style_guide_adherence_explanation'],
+                continuity_score=result['continuity_score'],
+                continuity_explanation=result['continuity_explanation'],
+                areas_for_improvement=result['areas_for_improvement'],
+                user_id=self.user_id,
+                project_id=self.project_id
+            )
+        except Exception as e:
+            self.logger.error(f"Error saving validity feedback: {str(e)}")
+            raise
 
     def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
         try:
@@ -704,23 +694,32 @@ class AgentManager:
         return truncated
 
     async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
-        #self.logger.debug(f"Generating title for chapter {chapter_number}")
         try:
-            title_llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
             prompt = ChatPromptTemplate.from_template("""
-            Based on the following chapter content, generate a short, engaging title, but please only generate 1 title based on the chapter, 
-            use this format Chapter {chapter_number}: <Title>, do not respond with anything else, nothing more nothing less.
-
-            Chapter Content:
-            {chapter}
-
-            Title:
+            Generate a concise, engaging title for Chapter {chapter_number}. 
+            The title should be brief (maximum 50 characters) but capture the essence of the chapter.
+            
+            Chapter content:
+            {chapter_content}
+            
+            Return only the title, without "Chapter X:" prefix.
             """)
             
-            chain = prompt | title_llm | StrOutputParser()
-            title = await chain.ainvoke({"chapter": chapter_content[:1000], "chapter_number": chapter_number})
-            #self.logger.debug(f"Generated title: {title}")
-            return title
+            llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
+            chain = prompt | llm | StrOutputParser()
+            
+            title = await chain.ainvoke({
+                "chapter_number": chapter_number,
+                "chapter_content": chapter_content
+            })
+            
+            # Clean and format the title
+            title = title.strip()
+            if len(title) > 200:  # Leave room for "Chapter X: " prefix
+                title = title[:197] + "..."
+                
+            return f"Chapter {chapter_number}: {title}"
+            
         except Exception as e:
             self.logger.error(f"Error generating title: {str(e)}")
             return f"Chapter {chapter_number}"
@@ -867,46 +866,61 @@ class AgentManager:
         raise ValueError(f"No agent can handle task: {task}")
 
     async def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        async def process_chunk(chunk: str):
-            parser = PydanticOutputParser(pydantic_object=CodexExtraction)
-            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['CodexExtractionLLM']))
-            
-            prompt = ChatPromptTemplate.from_template("""
-            You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
+        try:
+            chunks = self.chunk_content(chapter, self.MAX_INPUT_TOKENS // 2)
+            all_new_items = []
 
-            For each new codex item you find:
-            1. Provide its name
-            2. Write a brief description of the codex item based on information in the chapter
-            3. Determine the type of codex item (lore, worldbuilding, item, character)
-            4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
+            for chunk in chunks:
+                parser = PydanticOutputParser(pydantic_object=CodexExtraction)
+                fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+                
+                prompt = ChatPromptTemplate.from_template("""
+                You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
 
-            IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
+                For each new codex item you find:
+                1. Provide its name
+                2. Write a brief description of the codex item based on information in the chapter
+                3. Determine the type of codex item (lore, worldbuilding, item, character)
+                4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
 
-            If you truly find no new codex items after a thorough analysis, return an empty list.
+                IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
 
-            Chapter:
-            {chapter}
+                If you truly find no new codex items after a thorough analysis, return an empty list.
 
-            Existing Codex Items:
-            {codex_items}
+                Chapter:
+                {chapter}
 
-            Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
+                Existing Codex Items:
+                {codex_items}
 
-            {format_instructions}
-            """)
+                Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
 
-            extraction_chain = prompt | self._initialize_llm(self.model_settings['CodexExtractionLLM']) | fixing_parser
+                {format_instructions}
+                """)
 
-            result = await extraction_chain.ainvoke({
-                "chapter": chunk,
-                "codex_items": ", ".join([item['name'] for item in codex_items]),
-                "format_instructions": parser.get_format_instructions()
-            })
+                extraction_chain = prompt | self.check_llm | fixing_parser
 
-            return result.new_items if result and isinstance(result, CodexExtraction) else []
+                result = await extraction_chain.ainvoke({
+                    "chapter": chunk,
+                    "codex_items": ", ".join([item['name'] for item in codex_items]),
+                    "format_instructions": parser.get_format_instructions()
+                })
 
-        all_new_items = await self.process_large_content(chapter, "codex_extraction", process_chunk)
-        return [{"name": item.name, "description": item.description, "type": item.type, "subtype": item.subtype} for item in all_new_items]
+                all_new_items.extend(result.new_items)
+
+            # Remove duplicates based on name
+            seen_names = set()
+            unique_items = []
+            for item in all_new_items:
+                if item.name not in seen_names:
+                    seen_names.add(item.name)
+                    unique_items.append(item)
+
+            return [item.dict() for item in unique_items]
+
+        except Exception as e:
+            self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
+            return []
 
     async def analyze_character_relationships(self, character_ids: List[str]) -> List[Dict[str, Any]]:
         try:
