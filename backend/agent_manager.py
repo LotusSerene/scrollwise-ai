@@ -145,14 +145,33 @@ class AgentManager:
 
         self.setup_caching()
         self.setup_rate_limiter()
-        self.llm = self._initialize_llm(self.model_settings['mainLLM'])
-        self.check_llm = self._initialize_llm(self.model_settings['checkLLM'])
+        self.llm = self._get_llm(self.model_settings['mainLLM'])
+        self.check_llm = self._get_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
         self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
         self.task_states: Dict[str, TaskState] = {}
         self.agents: Dict[str, Any] = {}
         self.complex_tasks: Dict[str, ComplexTask] = {}
         self.lock = asyncio.Lock()  # Add an asyncio lock for thread-safe operations
+
+    async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
+        async with self.lock:
+            if model in self._llm_cache:
+                return self._llm_cache[model]
+
+            llm = ChatGoogleGenerativeAI(
+                model=model,
+                google_api_key=self.api_key,
+                temperature=0.7,
+                max_output_tokens=self.MAX_OUTPUT_TOKENS,
+                max_input_tokens=self.MAX_INPUT_TOKENS,
+                caching=True,
+                rate_limiter=self.rate_limiter,
+                streaming=True,
+            )
+
+            self._llm_cache[model] = llm
+            return llm
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -184,27 +203,7 @@ class AgentManager:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        async with self.lock:
-            try:
-                if model in self._llm_cache:
-                    return self._llm_cache[model]
-
-                llm = ChatGoogleGenerativeAI(
-                    model=model,
-                    google_api_key=self.api_key,
-                    temperature=0.7,
-                    max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                    max_input_tokens=self.MAX_INPUT_TOKENS,
-                    caching=True,
-                    rate_limiter=self.rate_limiter,
-                    streaming=True,
-                )
-                
-                self._llm_cache[model] = llm
-                return llm
-            except Exception as e:
-                self.logger.error(f"Error initializing LLM: {str(e)}")
-                raise
+        return await self._get_llm(model)
 
     async def generate_chapter_stream(
         self,
