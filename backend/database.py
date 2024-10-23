@@ -332,47 +332,49 @@ class Database:
     def get_session(self):
         return self.Session()
 
-    def create_user(self, email, password):
-        session = self.get_session()
-        try:
-            user = User(id=str(uuid.uuid4()), email=email, password=password)
-            session.add(user)
-            session.commit()
-            return user.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating user: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def create_user(self, email, password):
+        async with self.get_session() as session:
+            try:
+                user = User(id=str(uuid.uuid4()), email=email, password=password)
+                session.add(user)
+                await session.commit()
+                return user.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating user: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def get_user_by_email(self, email):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(email=email).first()
-            if user:
-                return {
-                    'id': user.id,
-                    'username': user.email,
-                    'hashed_password': user.password,
-                    'email': user.email,
-                    'api_key': user.api_key,
-                    'model_settings': json.loads(user.model_settings) if user.model_settings else None
-                }
-            return None
-        finally:
-            session.close()
+    async def get_user_by_email(self, email):
+        async with self.get_session() as session:
+            try:
+                user = await session.execute(select(User).filter_by(email=email))
+                user = user.scalars().first()
+                if user:
+                    return {
+                        'id': user.id,
+                        'username': user.email,
+                        'hashed_password': user.password,
+                        'email': user.email,
+                        'api_key': user.api_key,
+                        'model_settings': json.loads(user.model_settings) if user.model_settings else None
+                    }
+                return None
+            finally:
+                await session.close()
 
-    def get_all_chapters(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            chapters = session.query(Chapter).filter_by(user_id=user_id, project_id=project_id).order_by(Chapter.chapter_number).all()
-            return [chapter.to_dict() for chapter in chapters]
-        except Exception as e:
-            self.logger.error(f"Error fetching all chapters: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def get_all_chapters(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                chapters = await session.execute(select(Chapter).filter_by(user_id=user_id, project_id=project_id).order_by(Chapter.chapter_number))
+                chapters = chapters.scalars().all()
+                return [chapter.to_dict() for chapter in chapters]
+            except Exception as e:
+                self.logger.error(f"Error fetching all chapters: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
     def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         session = self.get_session()
