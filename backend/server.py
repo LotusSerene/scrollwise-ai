@@ -1565,6 +1565,15 @@ app.include_router(universe_router)
 app.include_router(codex_router)
 app.include_router(relationship_router)
 
+# Store AgentManager instances
+agent_managers = {}
+
+# Shutdown event to clean up resources
+@app.on_event("shutdown")
+async def shutdown_event():
+    for manager in agent_managers.values():
+        manager.close()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
