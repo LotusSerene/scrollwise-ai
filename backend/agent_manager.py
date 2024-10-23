@@ -12,6 +12,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.docstore.document import Document
+from datetime import datetime
 import logging
 
 
@@ -73,6 +74,8 @@ class EventDescription(BaseModel):
     title: str = Field(..., description="Title of the event")
     description: str = Field(..., description="Detailed description of the event")
     impact: str = Field(..., description="Impact of the event on the story or characters")
+    involved_characters: List[str] = Field(default_factory=list, description="Characters involved in the event")
+    location: Optional[str] = Field(None, description="Location where the event takes place")
 
 class LocationDescription(BaseModel):
     name: str = Field(..., description="Name of the location")
@@ -82,10 +85,8 @@ class LocationDescription(BaseModel):
 class RelationshipAnalysisList(BaseModel):
     relationships: List[RelationshipAnalysis] = Field(..., description="List of relationship analyses")
 
-class EventDescription(BaseModel):
-    title: str = Field(..., description="Title of the event")
-    description: str = Field(..., description="Detailed description of the event")
-    impact: str = Field(..., description="Impact of the event on the story or characters")
+class EventAnalysis(BaseModel):
+    events: List[EventDescription] = Field(..., description="List of events found in the chapter")
 
 class LocationDescription(BaseModel):
     name: str = Field(..., description="Name of the location")
@@ -110,19 +111,19 @@ class ComplexTask(BaseModel):
     status: str = "pending"
     result: Optional[Any] = None
 
-class EventAnalysis(BaseModel):
-    event_id: str
-    impact_analysis: str
-    connected_events: List[str]
-    involved_characters: List[str]
-    location_significance: str
-
 class LocationAnalysis(BaseModel):
     location_id: str
     significance_analysis: str
     connected_locations: List[str]
     notable_events: List[str]
     character_associations: List[str]
+
+class EventConnectionAnalysis(BaseModel):
+    event_id: str
+    impact_analysis: str
+    connected_events: List[str]
+    involved_characters: List[str]
+    location_significance: str
 
 class LocationConnection(BaseModel):
     location1_id: str
@@ -1134,8 +1135,8 @@ class AgentManager:
             })
 
             if result.new_backstory:
-                # Mark the chapter as processed
-                db_instance.mark_chapter_processed(chapter_id, "extract_backstory")
+                # Mark the chapter as processed with the correct process type
+                db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
 
             return result
         except Exception as e:
@@ -1331,7 +1332,7 @@ class AgentManager:
                     continue
 
             # Mark the chapter as processed for location analysis
-            db_instance.mark_chapter_processed(chapter_id, PROCESS_TYPES['LOCATIONS'])
+            db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['LOCATIONS'])
             
             self.logger.info(f"Location analysis completed. Found {len(locations)} locations")
             return locations
@@ -1339,60 +1340,78 @@ class AgentManager:
             self.logger.error(f"Error analyzing locations: {str(e)}")
             raise
 
+
     async def analyze_unprocessed_chapter_events(self, chapter_id: str):
         try:
-            # Get the chapter content
-            chapter = await db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
+            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
             if not chapter:
-                raise ValueError("Chapter not found")
-                
-            chapter_content = chapter.get('content', '')
-            
-            # Make sure we're working with the content as a string
-            if not isinstance(chapter_content, str):
-                raise ValueError("Invalid chapter content format")
+                raise ValueError(f"Chapter with ID {chapter_id} not found")
 
+            parser = PydanticOutputParser(pydantic_object=EventAnalysis)
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+            
             prompt = ChatPromptTemplate.from_template("""
-            Analyze the following chapter content and identify any events that occur.
-            For each event, provide:
-            1. A title for the event
-            2. A detailed description
-            3. When it occurred (be as specific as possible)
-            4. Which characters were involved
-            5. Where it took place
-            6. The impact on the story
+            Analyze the following chapter and identify all significant events. For each event, provide:
+            1. A title
+            2. A description
+            3. The impact on the story or characters
+            4. List of involved characters
+            5. Location where it takes place (if mentioned)
 
             Chapter Content:
             {chapter_content}
 
-            Format your response as a list of events with their details.
+            Format your response as a dictionary with a single key 'events' containing a list of events.
+            {format_instructions}
             """)
 
-            chain = prompt | self.check_llm | StrOutputParser()
-            
-            result = await chain.ainvoke({"chapter_content": chapter_content})
-            
-            # Process and save the events
-            events = []
-            for event_data in result:
+            chain = prompt | self.check_llm | fixing_parser
+
+            result = await chain.ainvoke({
+                "chapter_content": chapter['content'],
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            # Process and store the events
+            stored_events = []
+            for event in result.events:
+                # Get character ID for the first involved character (if any)
+                character_id = None
+                if event.involved_characters:
+                    character = db_instance.get_character_by_name(event.involved_characters[0], self.user_id, self.project_id)
+                    if character:
+                        character_id = character['id']
+
+                # Get location ID if location is specified
+                location_id = None
+                if event.location:
+                    location = db_instance.get_location_by_name(event.location, self.user_id, self.project_id)
+                    if location:
+                        location_id = location['id']
+
                 event_id = db_instance.create_event(
-                    title=event_data['title'],
-                    description=event_data['description'],
-                    date=event_data['date'],
-                    character_id=event_data.get('character_id'),
-                    location_id=event_data.get('location_id'),
-                    project_id=self.project_id
+                    title=event.title,
+                    description=event.description,
+                    date=datetime.now(),  # You might want to extract or compute this
+                    project_id=self.project_id,
+                    user_id=self.user_id,
+                    character_id=character_id,
+                    location_id=location_id
                 )
-                events.append({"id": event_id, **event_data})
+                stored_events.append({
+                    "id": event_id,
+                    **event.dict()
+                })
 
-            db_instance.mark_chapter_processed(chapter_id, self.project_id, len(chapter_content))
+            # Mark the chapter as processed for events
+            db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
 
-            return events
+            return stored_events
         except Exception as e:
             self.logger.error(f"Error analyzing events: {str(e)}")
             raise
 
-    async def analyze_event_connections(self, event_ids: List[str]) -> List[EventAnalysis]:
+    async def analyze_event_connections(self, event_ids: List[str]) -> List[EventConnectionAnalysis]:
         try:
             events = [db_instance.get_event_by_id(event_id, self.user_id, self.project_id) for event_id in event_ids]
             events = [e for e in events if e]  # Filter out None values
@@ -1413,7 +1432,7 @@ class AgentManager:
             {format_instructions}
             """)
 
-            parser = PydanticOutputParser(pydantic_object=EventAnalysis)
+            parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
             chain = prompt | self.check_llm | parser
 
             analyses = []

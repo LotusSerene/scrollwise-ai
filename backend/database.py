@@ -1056,19 +1056,12 @@ class Database:
     def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
         session = self.get_session()
         try:
-            chapter = session.query(Chapter).filter(
-                Chapter.id == chapter_id,
-                Chapter.user_id == user_id
-            ).first()
-            
-            if not chapter:
-                self.logger.warning(f"Chapter {chapter_id} not found when marking as processed")
-                return
-            
-            if not isinstance(chapter.processed_types, list):
-                chapter.processed_types = []
-            if process_type not in chapter.processed_types:
-                chapter.processed_types.append(process_type)
+            chapter = session.query(Chapter).filter_by(id=chapter_id).first()
+            if chapter:
+                if not chapter.processed_types:
+                    chapter.processed_types = []
+                if process_type not in chapter.processed_types:
+                    chapter.processed_types.append(process_type)
                 session.commit()
         except Exception as e:
             session.rollback()
@@ -1377,7 +1370,7 @@ class Database:
             session.close()
 
 
-    def create_event(self, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> str:
+    def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
         session = self.get_session()
         try:
             # Check if the project exists and belongs to the user
@@ -1385,7 +1378,16 @@ class Database:
             if not project_exists:
                 raise ValueError("Project not found or doesn't belong to the user")
 
-            event = Event(id=str(uuid.uuid4()), title=title, description=description, date=date, character_id=character_id, location_id=location_id, project_id=project_id)
+            event = Event(
+                id=str(uuid.uuid4()), 
+                title=title, 
+                description=description, 
+                date=date, 
+                character_id=character_id, 
+                location_id=location_id, 
+                project_id=project_id,
+                user_id=user_id
+            )
             session.add(event)
             session.commit()
             return event.id
@@ -1618,4 +1620,18 @@ class Database:
         except Exception as e:
             session.rollback()
     
+    def get_location_by_name(self, name: str, user_id: str, project_id: str):
+        session = self.get_session()
+        try:
+            location = session.query(Location).filter_by(
+                name=name, 
+                user_id=user_id, 
+                project_id=project_id
+            ).first()
+            if location:
+                return location.to_dict()
+            return None
+        finally:
+            session.close()
+
 db_instance = Database()
