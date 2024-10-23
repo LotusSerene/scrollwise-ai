@@ -112,7 +112,7 @@ class ModelSettings(BaseModel):
     checkLLM: str
     embeddingsModel: str
     titleGenerationLLM: str
-    CodexExtractionLLM: str
+    ExtractionLLM: str
     knowledgeBaseQueryLLM: str
 
 class ApiKeyUpdate(BaseModel):
@@ -1303,7 +1303,7 @@ async def get_events(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        events = db_instance.get_events_by_project(project_id, current_user.id)
+        events = db_instance.get_events(project_id, current_user.id)  # Changed from get_events_by_project
         return {"events": events}
     except Exception as e:
         logger.error(f"Error getting events: {str(e)}")
@@ -1423,7 +1423,7 @@ async def get_locations(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        locations = db_instance.get_locations_by_project(project_id, current_user.id)
+        locations = db_instance.get_locations(project_id, current_user.id)  # Changed from get_locations_by_project
         return {"locations": locations}
     except Exception as e:
         logger.error(f"Error getting locations: {str(e)}")

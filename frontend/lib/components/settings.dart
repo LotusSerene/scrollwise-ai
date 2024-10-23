@@ -22,7 +22,7 @@ class _SettingsState extends State<Settings> {
     'checkLLM': 'gemini-1.5-pro-002',
     'embeddingsModel': 'models/text-embedding-004',
     'titleGenerationLLM': 'gemini-1.5-pro-002',
-    'CodexExtractionLLM': 'gemini-1.5-pro-002',
+    'ExtractionLLM': 'gemini-1.5-pro-002',
     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002',
   };
   final List<String> _modelOptions = [

@@ -67,8 +67,6 @@ class RelationshipAnalysis(BaseModel):
     relationship_type: str = Field(..., description="Type of relationship between the characters")
     description: str = Field(..., description="Detailed description of the relationship")
 
-class RelationshipAnalysisList(BaseModel):
-    relationships: List[RelationshipAnalysis]
 
 class EventDescription(BaseModel):
     title: str = Field(..., description="Title of the event")
@@ -76,11 +74,6 @@ class EventDescription(BaseModel):
     impact: str = Field(..., description="Impact of the event on the story or characters")
     involved_characters: List[str] = Field(default_factory=list, description="Characters involved in the event")
     location: Optional[str] = Field(None, description="Location where the event takes place")
-
-class LocationDescription(BaseModel):
-    name: str = Field(..., description="Name of the location")
-    description: str = Field(..., description="Detailed description of the location")
-    significance: str = Field(..., description="Significance of the location in the story")
 
 class RelationshipAnalysisList(BaseModel):
     relationships: List[RelationshipAnalysis] = Field(..., description="List of relationship analyses")
@@ -340,14 +333,19 @@ class AgentManager:
             ("human", human_template)
         ])
 
-    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any]):
-        """Stream the chapter generation using the provided chain and variables."""
+    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream the chapter generation using the provided chain and variables.
+
+        Args:
+            chain: The LangChain chain to use for generation.
+            variables (Dict[str, Any]): The variables to pass to the chain.
+
+        Yields:
+            Dict[str, Any]: Chunks of generated content or error information.
+        """
         try:
-            # Ensure we're sending proper messages to Gemini
-            async for chunk in chain.astream(
-                variables,
-                config={"temperature": 0.7}  # Add any additional Gemini parameters here
-            ):
+            async for chunk in chain.astream(variables):
                 if isinstance(chunk, str):
                     yield {"type": "chunk", "content": chunk}
                 else:
@@ -356,21 +354,7 @@ class AgentManager:
             self.logger.error(f"Error in _stream_chapter_generation: {str(e)}")
             yield {"error": str(e)}
 
-    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any], config: Dict[str, Any] = None):
-        """Stream the chapter generation using the provided chain and variables."""
-        try:
-            async for chunk in chain.astream(variables, config=config):
-                if isinstance(chunk, str):
-                    yield {"type": "chunk", "content": chunk}
-                else:
-                    yield chunk
-        except Exception as e:
-            self.logger.error(f"Error in _stream_chapter_generation: {str(e)}")
-            yield {"error": str(e)}
 
-    async def _async_generator(self, sync_generator, *args, **kwargs):
-        for item in sync_generator(*args, **kwargs):
-            yield item
 
     def _construct_context(self, plot: str, writing_style: str, 
                            codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
@@ -897,8 +881,9 @@ class AgentManager:
 
                 {format_instructions}
                 """)
-
-                extraction_chain = prompt | self.check_llm | fixing_parser
+                Codexllm = self._initialize_llm(self.model_settings['extractionLLM'])
+                
+                extraction_chain = prompt | Codexllm | fixing_parser
 
                 result = await extraction_chain.ainvoke({
                     "chapter": chunk,
@@ -924,14 +909,11 @@ class AgentManager:
 
     async def analyze_character_relationships(self, character_ids: List[str]) -> List[Dict[str, Any]]:
         try:
-            # Get character data from the database
-            #self.logger.debug(f"Getting character data for IDs: {character_ids}")
             character_data = {}
             for char_id in character_ids:
-                char = db_instance.get_character_by_id(char_id, self.user_id, self.project_id)
-                if char:
+                char = db_instance.get_codex_item_by_id(char_id, self.user_id, self.project_id)  # Changed from get_character_by_id
+                if char and char['type'] == 'character':  # Add type check
                     character_data[char_id] = char['name']
-                    #self.logger.debug(f"Found character: {char['name']} for ID: {char_id}")
                 else:
                     self.logger.warning(f"Character not found for ID: {char_id}")
 
@@ -997,7 +979,8 @@ class AgentManager:
                 """)
 
             parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-            chain = prompt | self.check_llm | parser
+            llmRelationship = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmRelationship | parser
 
             result = await chain.ainvoke({
                 "valid_characters": ", ".join(valid_characters),
@@ -1114,7 +1097,7 @@ class AgentManager:
 
     async def extract_character_backstory(self, character_id: str, chapter_id: str):
         try:
-            character = db_instance.get_character_by_id(character_id, self.user_id, self.project_id)
+            character = db_instance.get_codex_item_by_id(character_id, self.user_id, self.project_id)  # Changed from get_character_by_id
             if not character or character['type'] != 'character':
                 raise ValueError(f"Character with ID {character_id} not found")
             
@@ -1140,7 +1123,8 @@ class AgentManager:
             """)
             
             parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
-            chain = prompt | self.check_llm | parser
+            llmBackstory = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmBackstory | parser
             
             result = await chain.ainvoke({
                 "character_info": json.dumps(character),
@@ -1224,7 +1208,8 @@ class AgentManager:
 
         """)
 
-        chain = prompt | self.llm | StrOutputParser()
+        llmExtend = self._initialize_llm(self.model_settings['mainLLM'])
+        chain = prompt | llmExtend | StrOutputParser()
 
         while current_word_count < expected_word_count:
             words_to_add = expected_word_count - current_word_count
@@ -1321,8 +1306,8 @@ class AgentManager:
             Only include locations that are explicitly mentioned or described in the chapter.
             Be specific and detailed in the descriptions.
             """)
-
-            chain = prompt | self.check_llm | StrOutputParser()
+            llmLocation = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmLocation | StrOutputParser()
             
             result = await chain.ainvoke({"chapter_content": chapter_content})
             
@@ -1379,7 +1364,8 @@ class AgentManager:
             {format_instructions}
             """)
 
-            chain = prompt | self.check_llm | fixing_parser
+            llmAnalysis = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmAnalysis | fixing_parser
 
             result = await chain.ainvoke({
                 "chapter_content": chapter['content'],
@@ -1447,7 +1433,8 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
-            chain = prompt | self.check_llm | parser
+            llmEvent = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmEvent | parser
 
             analyses = []
             for event in events:
@@ -1484,7 +1471,8 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=LocationConnection)
-            chain = prompt | self.check_llm | parser
+            llmLocationConnection = self._initialize_llm(self.model_settings['extractionLLM'])
+            chain = prompt | llmLocationConnection | parser
 
             connections = []
             for i, loc1 in enumerate(locations):

@@ -620,7 +620,7 @@ class Database:
                 'checkLLM': 'gemini-1.5-pro-002',
                 'embeddingsModel': 'models/text-embedding-004',
                 'titleGenerationLLM': 'gemini-1.5-pro-002',
-                'CodexExtractionLLM': 'gemini-1.5-pro-002',
+                'ExtractionLLM': 'gemini-1.5-pro-002',
                 'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
             }
         finally:
@@ -953,20 +953,8 @@ class Database:
         finally:
             session.close()
 
-    def get_events_by_project(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            events = session.query(Event).filter(
-                Event.project_id == project_id,
-                Event.user_id == user_id  # Add user_id filter
-            ).all()
-            return [event.to_dict() for event in events]
-        finally:
-            session.close()
 
-    def create_event(self, title: str, description: str, date: datetime, 
-                    character_id: Optional[str], location_id: Optional[str], 
-                    project_id: str, user_id: str) -> str:
+    def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
         session = self.get_session()
         try:
             # Check if the project exists and belongs to the user
@@ -974,7 +962,16 @@ class Database:
             if not project_exists:
                 raise ValueError("Project not found or doesn't belong to the user")
 
-            event = Event(id=str(uuid.uuid4()), title=title, description=description, date=date, character_id=character_id, location_id=location_id, project_id=project_id)
+            event = Event(
+                id=str(uuid.uuid4()), 
+                title=title, 
+                description=description, 
+                date=date, 
+                character_id=character_id, 
+                location_id=location_id, 
+                project_id=project_id,
+                user_id=user_id
+            )
             session.add(event)
             session.commit()
             return event.id
@@ -985,16 +982,6 @@ class Database:
         finally:
             session.close()
 
-    def get_locations_by_project(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            locations = session.query(Location).filter(
-                Location.project_id == project_id,
-                Location.user_id == user_id  # Add user_id filter
-            ).all()
-            return [location.to_dict() for location in locations]
-        finally:
-            session.close()
 
     def create_location(self, name: str, description: str, coordinates: Optional[str],
                        user_id: str, project_id: str) -> str:
@@ -1338,17 +1325,6 @@ class Database:
         finally:
             session.close()
 
-    def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
-            return [project.to_dict() for project in projects]
-        finally:
-            session.close()
-
-    def get_character(self, character_id: str, user_id: str, project_id: str):
-        return self.get_codex_item_by_id(character_id, user_id, project_id)
-
     def get_character_by_name(self, name: str, user_id: str, project_id: str):
         session = self.get_session()
         try:
@@ -1359,64 +1335,11 @@ class Database:
         finally:
             session.close()
 
-
-    def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
-        session = self.get_session()
-        try:
-            # Check if the project exists and belongs to the user
-            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
-            if not project_exists:
-                raise ValueError("Project not found or doesn't belong to the user")
-
-            event = Event(
-                id=str(uuid.uuid4()), 
-                title=title, 
-                description=description, 
-                date=date, 
-                character_id=character_id, 
-                location_id=location_id, 
-                project_id=project_id,
-                user_id=user_id
-            )
-            session.add(event)
-            session.commit()
-            return event.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating event: {str(e)}")
-            raise
-        finally:
-            session.close()
-
     def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         session = self.get_session()
         try:
-            # Check if the project belongs to the user
-            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
-            if not project_exists:
-                raise ValueError("Project not found or doesn't belong to the user")
-
             events = session.query(Event).filter_by(project_id=project_id).all()
             return [event.to_dict() for event in events]
-        finally:
-            session.close()
-
-    def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
-        session = self.get_session()
-        try:
-            # Check if the project exists and belongs to the user
-            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
-            if not project_exists:
-                raise ValueError("Project not found or doesn't belong to the user")
-
-            location = Location(id=str(uuid.uuid4()), name=name, description=description, coordinates=coordinates, user_id=user_id, project_id=project_id)
-            session.add(location)
-            session.commit()
-            return location.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating location: {str(e)}")
-            raise
         finally:
             session.close()
 
@@ -1427,7 +1350,6 @@ class Database:
             return [location.to_dict() for location in locations]
         finally:
             session.close()
-
 
     def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
         session = self.get_session()
@@ -1445,7 +1367,7 @@ class Database:
         try:
             latest_chapter = session.query(Chapter).filter(
                 Chapter.project_id == project_id
-            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
+            ).order_by(Chapter.chapter_number.desc()).first()
 
             if latest_chapter:
                 processed_chapter = ProcessedChapter(
@@ -1456,19 +1378,6 @@ class Database:
                 )
                 session.add(processed_chapter)
                 session.commit()
-        finally:
-            session.close()
-
-    def get_remaining_chapter_content(self, chapter_id: str, project_id: str) -> Optional[str]:
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(
-                id=chapter_id, 
-                project_id=project_id
-            ).first()
-            if chapter:
-                return chapter.content[chapter.last_processed_position:]
-            return None
         finally:
             session.close()
 
@@ -1514,25 +1423,6 @@ class Database:
                 type='character'
             ).all()
             return [character.to_dict() for character in characters]
-        finally:
-            session.close()
-
-    def mark_latest_chapter_processed(self, project_id: str, function_name: str):
-        session = self.get_session()
-        try:
-            latest_chapter = session.query(Chapter).filter(
-                Chapter.project_id == project_id
-            ).order_by(Chapter.chapter_number.desc()).first()  # Changed from created_at to chapter_number
-
-            if latest_chapter:
-                processed_chapter = ProcessedChapter(
-                    id=str(uuid.uuid4()),
-                    chapter_id=latest_chapter.id,
-                    project_id=project_id,
-                    processed_at=datetime.datetime.utcnow()
-                )
-                session.add(processed_chapter)
-                session.commit()
         finally:
             session.close()
 
@@ -1590,7 +1480,6 @@ class Database:
             raise
         finally:
             session.close()
-
 
     def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         session = self.get_session()
