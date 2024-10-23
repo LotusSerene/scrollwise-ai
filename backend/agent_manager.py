@@ -413,85 +413,86 @@ class AgentManager:
 
     async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
                         previous_chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
-        try:
-            truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
-            
-            evaluation_criteria = [
-                "Plot Consistency",
-                "Character Development",
-                "Pacing",
-                "Dialogue Quality",
-                "Setting Description",
-                "Adherence to Writing Style",
-                "Emotional Impact",
-                "Conflict and Tension",
-                "Theme Exploration",
-                "Grammar and Syntax"
-            ]
+        async with self.lock:
+            try:
+                truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
+                
+                evaluation_criteria = [
+                    "Plot Consistency",
+                    "Character Development",
+                    "Pacing",
+                    "Dialogue Quality",
+                    "Setting Description",
+                    "Adherence to Writing Style",
+                    "Emotional Impact",
+                    "Conflict and Tension",
+                    "Theme Exploration",
+                    "Grammar and Syntax"
+                ]
 
-            prompt = ChatPromptTemplate.from_template("""
-            You are an expert editor tasked with evaluating the quality and consistency of a novel chapter. Analyze the following chapter thoroughly:
+                prompt = ChatPromptTemplate.from_template("""
+                You are an expert editor tasked with evaluating the quality and consistency of a novel chapter. Analyze the following chapter thoroughly:
 
-            Chapter:
-            {chapter}
+                Chapter:
+                {chapter}
 
-            Instructions:
-            {instructions}
+                Instructions:
+                {instructions}
 
-            Previous Chapters:
-            {truncated_previous_chapters}
-                                                            
-            Chapter words: {chapter_word_count}
+                Previous Chapters:
+                {truncated_previous_chapters}
+                                                                
+                Chapter words: {chapter_word_count}
 
-            Evaluate the chapter based on the following criteria:
-            {evaluation_criteria}
+                Evaluate the chapter based on the following criteria:
+                {evaluation_criteria}
 
-            For each criterion, provide a score from 1 to 10 and a brief explanation, never give a score of 0.
+                For each criterion, provide a score from 1 to 10 and a brief explanation, never give a score of 0.
 
-            Additionally, assess the following:
-            1. Overall validity (Is the chapter acceptable?)
-            2. Style guide adherence
-            3. Continuity with previous chapters
-            4. Areas for improvement
+                Additionally, assess the following:
+                1. Overall validity (Is the chapter acceptable?)
+                2. Style guide adherence
+                3. Continuity with previous chapters
+                4. Areas for improvement
 
-            Provide your analysis in the following format:
-            {format_instructions}
-            """)
+                Provide your analysis in the following format:
+                {format_instructions}
+                """)
 
-            parser = PydanticOutputParser(pydantic_object=ChapterValidation)
-            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
-            
-            chain = prompt | self.check_llm | fixing_parser
-            
-            result = await chain.ainvoke({
-                "chapter": chapter,
-                "instructions": json.dumps(instructions),
-                "truncated_previous_chapters": truncated_previous_chapters,
-                "chapter_word_count": len(chapter.split()),
-                "evaluation_criteria": "\n".join(evaluation_criteria),
-                "format_instructions": parser.get_format_instructions()
-            })
+                parser = PydanticOutputParser(pydantic_object=ChapterValidation)
+                fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+                
+                chain = prompt | self.check_llm | fixing_parser
+                
+                result = await chain.ainvoke({
+                    "chapter": chapter,
+                    "instructions": json.dumps(instructions),
+                    "truncated_previous_chapters": truncated_previous_chapters,
+                    "chapter_word_count": len(chapter.split()),
+                    "evaluation_criteria": "\n".join(evaluation_criteria),
+                    "format_instructions": parser.get_format_instructions()
+                })
 
-            # Convert the result to a dictionary format matching the database schema
-            validity_check = {
-                'is_valid': result.is_valid,
-                'overall_score': result.overall_score,
-                'general_feedback': result.general_feedback,
-                'style_guide_adherence_score': result.style_guide_adherence.score,
-                'style_guide_adherence_explanation': result.style_guide_adherence.explanation,
-                'continuity_score': result.continuity.score,
-                'continuity_explanation': result.continuity.explanation,
-                'areas_for_improvement': result.areas_for_improvement
-            }
+                # Convert the result to a dictionary format matching the database schema
+                validity_check = {
+                    'is_valid': result.is_valid,
+                    'overall_score': result.overall_score,
+                    'general_feedback': result.general_feedback,
+                    'style_guide_adherence_score': result.style_guide_adherence.score,
+                    'style_guide_adherence_explanation': result.style_guide_adherence.explanation,
+                    'continuity_score': result.continuity.score,
+                    'continuity_explanation': result.continuity.explanation,
+                    'areas_for_improvement': result.areas_for_improvement
+                }
 
-            return validity_check
+                return validity_check
 
-        except ValidationError as e:
-            self.logger.error(f"Validation error in check_chapter: {e}")
-            return self._create_error_response("Invalid output format from validity check.")
-        except Exception as e:
-            self.logger.error(f"An error occurred in check_chapter: {str(e)}", exc_info=True)
-            return self._create_error_response("An error occurred during validity check.")
+            except ValidationError as e:
+                self.logger.error(f"Validation error in check_chapter: {e}")
+                return self._create_error_response("Invalid output format from validity check.")
+            except Exception as e:
+                self.logger.error(f"An error occurred in check_chapter: {str(e)}", exc_info=True)
+                return self._create_error_response("An error occurred during validity check.")
 
     def _create_error_response(self, message: str) -> Dict[str, Any]:
         """Create a standardized error response dictionary"""
