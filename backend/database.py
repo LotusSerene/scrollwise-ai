@@ -1,9 +1,8 @@
-# backend/database.py
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session, joinedload, relationship
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import relationship
+from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
 import os
@@ -323,13 +322,17 @@ class Database:
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set")
         
-        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=50, max_overflow=10, 
-                                    pool_recycle=3600, pool_pre_ping=True, client_encoding='utf8')
-        self.Session = scoped_session(sessionmaker(bind=self.engine))
+        self.engine = create_async_engine(db_url, poolclass=QueuePool, pool_size=50, max_overflow=10, 
+                                          pool_recycle=3600, pool_pre_ping=True, client_encoding='utf8')
+        self.Session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         
-        Base.metadata.create_all(self.engine)
+        async def create_tables():
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        
+        asyncio.run(create_tables())
 
-    def get_session(self):
+    async def get_session(self):
         return self.Session()
 
     async def create_user(self, email, password):
@@ -411,1023 +414,1025 @@ class Database:
             finally:
                 await session.close()
 
+    async def update_chapter(self, chapter_id, title, content, user_id, project_id):
+        async with self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
+                    chapter.title = title
+                    chapter.content = content
+                    await session.commit()
+                    return chapter.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating chapter: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def update_chapter(self, chapter_id, title, content, user_id, project_id):
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
-            if chapter:
-                chapter.title = title
-                chapter.content = content
-                session.commit()
-                return chapter.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating chapter: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def delete_chapter(self, chapter_id, user_id, project_id):
+        async with self.get_session() as session:
+            try:
+                # First, delete related validity checks
+                await session.execute(delete(ValidityCheck).where(ValidityCheck.chapter_id == chapter_id, ValidityCheck.user_id == user_id, ValidityCheck.project_id == project_id))
 
-    def delete_chapter(self, chapter_id, user_id, project_id):
-        session = self.get_session()
-        try:
-            # First, delete related validity checks
-            session.query(ValidityCheck).filter_by(chapter_id=chapter_id, user_id=user_id, project_id=project_id).delete()
+                # Then, delete the chapter
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
+                    await session.delete(chapter)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting chapter: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-            # Then, delete the chapter
-            chapter = session.query(Chapter).filter_by(id=chapter_id, user_id=user_id, project_id=project_id).first()
-            if chapter:
-                session.delete(chapter)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting chapter: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
+                    return chapter.to_dict()
+                return None
+            finally:
+                await session.close()
 
-    def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(
-                id=chapter_id,
-                user_id=user_id,
-                project_id=project_id
-            ).first()
-            if chapter:
-                return chapter.to_dict()
-            return None
-        finally:
-            session.close()
+    async def get_all_validity_checks(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                checks = await session.execute(select(ValidityCheck).filter_by(user_id=user_id, project_id=project_id))
+                checks = checks.scalars().all()
+                return [check.to_dict() for check in checks]
+            finally:
+                await session.close()
 
-    def get_all_validity_checks(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            checks = session.query(ValidityCheck).filter_by(user_id=user_id, project_id=project_id).all()
-            return [check.to_dict() for check in checks]
-        finally:
-            session.close()
+    async def delete_validity_check(self, check_id, user_id, project_id):
+        async with self.get_session() as session:
+            try:
+                validity_check = await session.get(ValidityCheck, check_id)
+                if validity_check and validity_check.user_id == user_id and validity_check.project_id == project_id:
+                    await session.delete(validity_check)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting validity check: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def delete_validity_check(self, check_id, user_id, project_id):
-        session = self.get_session()
-        try:
-            validity_check = session.query(ValidityCheck).filter_by(id=check_id, user_id=user_id, project_id=project_id).first()
-            if validity_check:
-                session.delete(validity_check)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting validity check: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
-        session = self.get_session()
-        try:
-            item = CodexItem(
-                id=str(uuid.uuid4()),
-                name=name,
-                description=description,
-                type=type,
-                subtype=subtype,
-                user_id=user_id,
-                project_id=project_id
-            )
-            session.add(item)
-            session.commit()
-            return item.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating codex item: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_all_codex_items(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            codex_items = session.query(CodexItem).filter_by(user_id=user_id, project_id=project_id).all()
-            return [item.to_dict() for item in codex_items]
-        finally:
-            session.close()
-
-    def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
-            if codex_item:
-                codex_item.name = name
-                codex_item.description = description
-                codex_item.type = type
-                codex_item.subtype = subtype
-                session.commit()
-                return codex_item.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating codex item: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
-            if codex_item:
-                session.delete(codex_item)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting codex item: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id, user_id=user_id, project_id=project_id).first()
-            if codex_item:
-                return codex_item.to_dict()
-            return None
-        finally:
-            session.close()
-
-    def save_api_key(self, user_id, api_key):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(id=user_id).first()
-            if user:
-                user.api_key = api_key
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving API key: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_api_key(self, user_id):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(id=user_id).first()
-            return user.api_key if user else None
-        finally:
-            session.close()
-
-    def remove_api_key(self, user_id):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(id=user_id).first()
-            if user:
-                user.api_key = None
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error removing API key: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def save_model_settings(self, user_id, settings):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(id=user_id).first()
-            if user:
-                user.model_settings = json.dumps(settings)
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving model settings: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_model_settings(self, user_id):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(id=user_id).first()
-            if user and user.model_settings:
-                return json.loads(user.model_settings)
-            return {
-                'mainLLM': 'gemini-1.5-pro-002',
-                'checkLLM': 'gemini-1.5-pro-002',
-                'embeddingsModel': 'models/text-embedding-004',
-                'titleGenerationLLM': 'gemini-1.5-pro-002',
-                'ExtractionLLM': 'gemini-1.5-pro-002',
-                'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
-            }
-        finally:
-            session.close()
-
-    def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            check = ValidityCheck(
-                id=str(uuid.uuid4()),
-                chapter_id=chapter_id,
-                chapter_title=chapter_title,
-                is_valid=is_valid,
-                overall_score=overall_score,
-                general_feedback=general_feedback,
-                style_guide_adherence_score=style_guide_adherence_score,
-                style_guide_adherence_explanation=style_guide_adherence_explanation,
-                continuity_score=continuity_score,
-                continuity_explanation=continuity_explanation,
-                areas_for_improvement=areas_for_improvement,
-                user_id=user_id,
-                project_id=project_id
-            )
-            session.add(check)
-            session.commit()
-            return check.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving validity check: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            validity_check = session.query(ValidityCheck).filter_by(
-                chapter_id=chapter_id,
-                user_id=user_id
-            ).first()
-            
-            if validity_check:
-                return {
-                    'id': validity_check.id,
-                    'chapter_title': validity_check.chapter_title,
-                    'is_valid': validity_check.is_valid,
-                    'overall_score': validity_check.overall_score,
-                    'general_feedback': validity_check.general_feedback,
-                    'style_guide_adherence_score': validity_check.style_guide_adherence_score,
-                    'style_guide_adherence_explanation': validity_check.style_guide_adherence_explanation,
-                    'continuity_score': validity_check.continuity_score,
-                    'continuity_explanation': validity_check.continuity_explanation,
-                    'areas_for_improvement': validity_check.areas_for_improvement,
-                    'created_at': validity_check.created_at
-                }
-            return None
-        finally:
-            session.close()
-
-    def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
-        session = self.get_session()
-        try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
-            
-            # Convert ChatHistoryItem objects to dictionaries
-            serializable_messages = [
-                {"type": msg["type"], "content": msg["content"]}
-                for msg in messages
-            ]
-            
-            if chat_history:
-                chat_history.messages = json.dumps(serializable_messages)
-            else:
-                chat_history = ChatHistory(
+    async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
+        async with self.get_session() as session:
+            try:
+                item = CodexItem(
                     id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    type=type,
+                    subtype=subtype,
                     user_id=user_id,
-                    project_id=project_id,
-                    messages=json.dumps(serializable_messages)
+                    project_id=project_id
                 )
-                session.add(chat_history)
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving chat history: {str(e)}")
-            raise
-        finally:
-            session.close()
+                session.add(item)
+                await session.commit()
+                return item.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating codex item: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def get_chat_history(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
-            return json.loads(chat_history.messages) if chat_history else []
-        finally:
-            session.close()
+    async def get_all_codex_items(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                codex_items = await session.execute(select(CodexItem).filter_by(user_id=user_id, project_id=project_id))
+                codex_items = codex_items.scalars().all()
+                return [item.to_dict() for item in codex_items]
+            finally:
+                await session.close()
 
-    def delete_chat_history(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            chat_history = session.query(ChatHistory).filter_by(user_id=user_id, project_id=project_id).first()
-            if chat_history:
-                session.delete(chat_history)
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting chat history: {str(e)}")
-            raise
-        finally:
-            session.close()
-    def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
-        session = self.get_session()
-        try:
-            # Check if a preset with the same name, user_id, and project_id already exists
-            existing_preset = session.query(Preset).filter_by(user_id=user_id, project_id=project_id, name=name).first()
-            if existing_preset:
-                raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
-            
-            preset = Preset(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, name=name, data=data)
-            session.add(preset)
-            session.commit()
-            return preset.id
-        except ValueError as ve:
-            session.rollback()
-            self.logger.error(f"Error creating preset: {str(ve)}")
-            raise
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating preset: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                codex_item = await session.get(CodexItem, item_id)
+                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
+                    codex_item.name = name
+                    codex_item.description = description
+                    codex_item.type = type
+                    codex_item.subtype = subtype
+                    await session.commit()
+                    return codex_item.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating codex item: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def get_presets(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            presets = session.query(Preset).filter_by(user_id=user_id, project_id=project_id).all()
-            return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
-        finally:
-            session.close()
+    async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                codex_item = await session.get(CodexItem, item_id)
+                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
+                    await session.delete(codex_item)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting codex item: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def delete_preset(self, preset_name: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id).first()
-            if preset:
-                session.delete(preset)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting preset: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                codex_item = await session.get(CodexItem, item_id)
+                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
+                    return codex_item.to_dict()
+                return None
+            finally:
+                await session.close()
 
-    def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            preset = session.query(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id).first()
-            if preset:
-                return {"id": preset.id, "name": preset.name, "data": preset.data}
-            return None
-        finally:
-            session.close()
+    async def save_api_key(self, user_id, api_key):
+        async with self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                if user:
+                    user.api_key = api_key
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving API key: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_api_key(self, user_id):
+        async with self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                return user.api_key if user else None
+            finally:
+                await session.close()
+
+    async def remove_api_key(self, user_id):
+        async with self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                if user:
+                    user.api_key = None
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error removing API key: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def save_model_settings(self, user_id, settings):
+        async with self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                if user:
+                    user.model_settings = json.dumps(settings)
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving model settings: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_model_settings(self, user_id):
+        async with self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                if user and user.model_settings:
+                    return json.loads(user.model_settings)
+                return {
+                    'mainLLM': 'gemini-1.5-pro-002',
+                    'checkLLM': 'gemini-1.5-pro-002',
+                    'embeddingsModel': 'models/text-embedding-004',
+                    'titleGenerationLLM': 'gemini-1.5-pro-002',
+                    'ExtractionLLM': 'gemini-1.5-pro-002',
+                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+                }
+            finally:
+                await session.close()
+
+    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                check = ValidityCheck(
+                    id=str(uuid.uuid4()),
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    is_valid=is_valid,
+                    overall_score=overall_score,
+                    general_feedback=general_feedback,
+                    style_guide_adherence_score=style_guide_adherence_score,
+                    style_guide_adherence_explanation=style_guide_adherence_explanation,
+                    continuity_score=continuity_score,
+                    continuity_explanation=continuity_explanation,
+                    areas_for_improvement=areas_for_improvement,
+                    user_id=user_id,
+                    project_id=project_id
+                )
+                session.add(check)
+                await session.commit()
+                return check.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving validity check: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                validity_check = await session.get(ValidityCheck, chapter_id)
+                if validity_check and validity_check.user_id == user_id:
+                    return {
+                        'id': validity_check.id,
+                        'chapter_title': validity_check.chapter_title,
+                        'is_valid': validity_check.is_valid,
+                        'overall_score': validity_check.overall_score,
+                        'general_feedback': validity_check.general_feedback,
+                        'style_guide_adherence_score': validity_check.style_guide_adherence_score,
+                        'style_guide_adherence_explanation': validity_check.style_guide_adherence_explanation,
+                        'continuity_score': validity_check.continuity_score,
+                        'continuity_explanation': validity_check.continuity_explanation,
+                        'areas_for_improvement': validity_check.areas_for_improvement,
+                        'created_at': validity_check.created_at
+                    }
+                return None
+            finally:
+                await session.close()
+
+    async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
+        async with self.get_session() as session:
+            try:
+                chat_history = await session.get(ChatHistory, (user_id, project_id))
+                
+                # Convert ChatHistoryItem objects to dictionaries
+                serializable_messages = [
+                    {"type": msg["type"], "content": msg["content"]}
+                    for msg in messages
+                ]
+                
+                if chat_history:
+                    chat_history.messages = json.dumps(serializable_messages)
+                else:
+                    chat_history = ChatHistory(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        project_id=project_id,
+                        messages=json.dumps(serializable_messages)
+                    )
+                    session.add(chat_history)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving chat history: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_chat_history(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                chat_history = await session.get(ChatHistory, (user_id, project_id))
+                return json.loads(chat_history.messages) if chat_history else []
+            finally:
+                await session.close()
+
+    async def delete_chat_history(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                chat_history = await session.get(ChatHistory, (user_id, project_id))
+                if chat_history:
+                    await session.delete(chat_history)
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting chat history: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
+        async with self.get_session() as session:
+            try:
+                # Check if a preset with the same name, user_id, and project_id already exists
+                existing_preset = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id, name=name))
+                existing_preset = existing_preset.scalars().first()
+                if existing_preset:
+                    raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
+                
+                preset = Preset(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, name=name, data=data)
+                session.add(preset)
+                await session.commit()
+                return preset.id
+            except ValueError as ve:
+                await session.rollback()
+                self.logger.error(f"Error creating preset: {str(ve)}")
+                raise
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating preset: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_presets(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                presets = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id))
+                presets = presets.scalars().all()
+                return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
+            finally:
+                await session.close()
+
+    async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
+                preset = preset.scalars().first()
+                if preset:
+                    await session.delete(preset)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting preset: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
+                preset = preset.scalars().first()
+                if preset:
+                    return {"id": preset.id, "name": preset.name, "data": preset.data}
+                return None
+            finally:
+                await session.close()
 
     # Add methods to update embedding_id for existing chapters and codex_items 
 
-    def update_chapter_embedding_id(self, chapter_id, embedding_id):
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id).first()
-            if chapter:
-                chapter.embedding_id = embedding_id
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def update_chapter_embedding_id(self, chapter_id, embedding_id):
+        async with self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter:
+                    chapter.embedding_id = embedding_id
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
-        session = self.get_session()
-        try:
-            relationship = session.query(CharacterRelationship).join(
-                CodexItem, CharacterRelationship.character_id == CodexItem.id
-            ).filter(
-                CharacterRelationship.id == relationship_id,
-                CodexItem.project_id == project_id,
-                CodexItem.user_id == user_id
-            ).first()
-            if relationship:
-                session.delete(relationship)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting character relationship: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
-                                 description: str, user_id: str, project_id: str) -> str:
-        session = self.get_session()
-        try:
-            analysis = CharacterRelationshipAnalysis(
-                id=str(uuid.uuid4()),
-                character1_id=character1_id,
-                character2_id=character2_id,
-                relationship_type=relationship_type,
-                description=description,
-                user_id=user_id,
-                project_id=project_id
-            )
-            session.add(analysis)
-            session.commit()
-            return analysis.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving relationship analysis: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-
-    def get_character_by_id(self, character_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.project_id == project_id,
-                CodexItem.user_id == user_id,  # Add user_id filter
-                CodexItem.type == 'character'
-            ).first()
-            
-            if character:
-                return character.to_dict()
-            return None
-        finally:
-            session.close()
-
-    def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
-        session = self.get_session()
-        try:
-            latest_chapter = session.query(Chapter).filter(
-                Chapter.project_id == project_id
-            ).order_by(Chapter.chapter_number.desc()).first()
-            
-            if latest_chapter:
-                return latest_chapter.content
-            return None
-        finally:
-            session.close()
-
-    def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            relationships = (
-                session.query(CharacterRelationship)
-                .join(
-                    CodexItem,
-                    CharacterRelationship.character_id == CodexItem.id
-                )
-                .filter(
+    async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                relationship = await session.execute(select(CharacterRelationship).join(
+                    CodexItem, CharacterRelationship.character_id == CodexItem.id
+                ).filter(
+                    CharacterRelationship.id == relationship_id,
                     CodexItem.project_id == project_id,
                     CodexItem.user_id == user_id
-                )
-                .all()
-            )
+                ))
+                relationship = relationship.scalars().first()
+                if relationship:
+                    await session.delete(relationship)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting character relationship: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-            result = []
-            for rel in relationships:
-                character1 = session.query(CodexItem).filter_by(id=rel.character_id).first()
-                character2 = session.query(CodexItem).filter_by(id=rel.related_character_id).first()
-                
-                if character1 and character2:
-                    result.append({
-                        'id': rel.id,
-                        'character1_id': rel.character_id,
-                        'character2_id': rel.related_character_id,
-                        'character1_name': character1.name,
-                        'character2_name': character2.name,
-                        'relationship_type': rel.relationship_type,
-                        'description': rel.description or ''  # Add this line
-                    })
-
-            return result
-        except Exception as e:
-            self.logger.error(f"Error getting character relationships: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.user_id == user_id,
-                CodexItem.project_id == project_id
-            ).first()
-            
-            if character:
-                character.backstory = backstory
-                session.commit()
-            else:
-                raise ValueError("Character not found")
-        finally:
-            session.close()
-
-    def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter(
-                CodexItem.id == character_id,
-                CodexItem.user_id == user_id,
-                CodexItem.project_id == project_id
-            ).first()
-            
-            if character:
-                character.backstory = None
-                session.commit()
-            else:
-                raise ValueError("Character not found")
-        finally:
-            session.close()
-
-
-    def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
-        session = self.get_session()
-        try:
-            # Check if the project exists and belongs to the user
-            project_exists = session.query(exists().where(and_(Project.id == project_id, Project.user_id == user_id))).scalar()
-            if not project_exists:
-                raise ValueError("Project not found or doesn't belong to the user")
-
-            event = Event(
-                id=str(uuid.uuid4()), 
-                title=title, 
-                description=description, 
-                date=date, 
-                character_id=character_id, 
-                location_id=location_id, 
-                project_id=project_id,
-                user_id=user_id
-            )
-            session.add(event)
-            session.commit()
-            return event.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating event: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-
-    def create_location(self, name: str, description: str, coordinates: Optional[str],
-                       user_id: str, project_id: str) -> str:
-        session = self.get_session()
-        try:
-            location = Location(
-                id=str(uuid.uuid4()),
-                name=name,
-                description=description,
-                coordinates=coordinates,
-                user_id=user_id,
-                project_id=project_id
-            )
-            session.add(location)
-            session.commit()
-            return location.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating location: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
-        session = self.get_session()
-        try:
-            location = session.query(Location).filter_by(id=location_id, user_id=user_id, project_id=project_id).first()
-            if location:
-                session.delete(location)
-                session.commit()
-                return True
-            return False
-        finally:
-            session.close()
-    
-
-    def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
-        session = self.get_session()
-        try:
-            event = session.query(Event).filter_by(id=event_id, user_id=user_id, project_id=project_id).first()
-            if event:
-                session.delete(event)
-                session.commit()
-                return True
-            return False
-        finally:
-            session.close()
-    
-    def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id).first()
-            if chapter:
-                if not chapter.processed_types:
-                    chapter.processed_types = []
-                if process_type not in chapter.processed_types:
-                    chapter.processed_types.append(process_type)
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error marking chapter as processed: {str(e)}")
-            raise
-        finally:
-            session.close()
-    
-    def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter(
-                Chapter.id == chapter_id
-            ).first()
-            
-            if chapter and isinstance(chapter.processed_types, list):
-                return process_type in chapter.processed_types
-            return False
-        finally:
-            session.close()
-    
-    def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            chapter = session.query(Chapter).filter_by(
-                project_id=project_id,
-                user_id=user_id
-            ).order_by(Chapter.chapter_number.desc()).first()
-            
-            if chapter:
-                return chapter.to_dict()
-            return None
-        finally:
-            session.close()
-    
-    def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            event = session.query(Event).filter_by(
-                id=event_id,
-                user_id=user_id,
-                project_id=project_id
-            ).first()
-            return event.to_dict() if event else None
-        finally:
-            session.close()
-    
-    def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            location = session.query(Location).filter_by(
-                id=location_id,
-                user_id=user_id,
-                project_id=project_id
-            ).first()
-            return location.to_dict() if location else None
-        finally:
-            session.close()
-    def update_codex_item_embedding_id(self, item_id, embedding_id):
-        session = self.get_session()
-        try:
-            codex_item = session.query(CodexItem).filter_by(id=item_id).first()
-            if codex_item:
-                codex_item.embedding_id = embedding_id
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
-        session = self.get_session()
-        try:
-            project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, universe_id=universe_id)
-            session.add(project)
-            session.commit()
-            return project.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating project: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            projects = session.query(Project).filter_by(user_id=user_id).all()
-            return [project.to_dict() for project in projects]
-        finally:
-            session.close()
-
-    def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
-            return [project.to_dict() for project in projects]
-        finally:
-            session.close()
-
-    def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
-            return project.to_dict() if project else None
-        finally:
-            session.close()
-
-    def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
-            if project:
-                if name is not None:
-                    project.name = name
-                if description is not None:
-                    project.description = description
-                if universe_id is not None:
-                    project.universe_id = universe_id
-                if target_word_count is not None:
-                    project.target_word_count = target_word_count
-                project.updated_at = datetime.datetime.now(timezone.utc)
-                session.commit()
-                return project.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating project: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
-            if project:
-                project.universe_id = universe_id  # This can now be None
-                project.updated_at = datetime.datetime.now(timezone.utc)
-                session.commit()
-                return project.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating project universe: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def delete_project(self, project_id: str, user_id: str) -> bool:
-        session = self.get_session()
-        try:
-            project = session.query(Project).filter_by(id=project_id, user_id=user_id).first()
-            if project:
-                session.delete(project)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting project: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            universes = session.query(Universe).filter_by(user_id=user_id).all()
-            return [universe.to_dict() for universe in universes]
-        except Exception as e:
-            self.logger.error(f"Error fetching universes: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def create_universe(self, name: str, user_id: str) -> str:
-        session = self.get_session()
-        try:
-            universe = Universe(id=str(uuid.uuid4()), name=name, user_id=user_id)
-            session.add(universe)
-            session.commit()
-            return universe.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating universe: {str(e)}")
-            raise ValueError(str(e))  # Ensure the error is a string
-        finally:
-            session.close()
-
-    def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
-            if universe:
-                return universe.to_dict()
-            return None
-        finally:
-            session.close()
-
-    def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
-            if universe:
-                universe.name = name
-                session.commit()
-                return universe.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error updating universe: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def delete_universe(self, universe_id: str, user_id: str) -> bool:
-        session = self.get_session()
-        try:
-            universe = session.query(Universe).filter(and_(Universe.id == universe_id, Universe.user_id == user_id)).first()
-            if universe:
-                session.delete(universe)
-                session.commit()
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error deleting universe: {str(e)}")
-            raise
-        finally:
-            session.close()
-
-    def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            codex_items = session.query(CodexItem).join(Project).filter(
-                and_(Project.universe_id == universe_id, CodexItem.user_id == user_id)
-            ).all()
-            return [item.to_dict() for item in codex_items]
-        finally:
-            session.close()
-
-    def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
-        session = self.get_session()
-        try:
-            # Fetch all projects for the given universe
-            projects = session.query(Project).filter_by(universe_id=universe_id, user_id=user_id).all()
-            project_ids = [project.id for project in projects]
-
-            # Initialize the result dictionary
-            knowledge_base = {project.id: [] for project in projects}
-
-            # Fetch chapters and codex items with pagination
-            for project_id in project_ids:
-                chapters = session.query(Chapter).filter_by(project_id=project_id).limit(limit).offset(offset).all()
-                codex_items = session.query(CodexItem).filter_by(project_id=project_id).limit(limit).offset(offset).all()
-
-                for chapter in chapters:
-                    knowledge_base[project_id].append({
-                        'id': chapter.id,
-                        'type': 'chapter',
-                        'title': chapter.title,
-                        'content': chapter.content,
-                        'embedding_id': chapter.embedding_id
-                    })
-
-                for item in codex_items:
-                    knowledge_base[project_id].append({
-                        'id': item.id,
-                        'type': 'codex_item',
-                        'name': item.name,
-                        'description': item.description,
-                        'embedding_id': item.embedding_id
-                    })
-
-            # Remove any empty projects
-            knowledge_base = {k: v for k, v in knowledge_base.items() if v}
-
-            return knowledge_base
-        finally:
-            session.close()
-
-    def get_character_by_name(self, name: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter_by(name=name, user_id=user_id, project_id=project_id, type='character').first()
-            if character:
-                return character.to_dict()
-            return None
-        finally:
-            session.close()
-
-    def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            events = session.query(Event).filter_by(project_id=project_id).all()
-            return [event.to_dict() for event in events]
-        finally:
-            session.close()
-
-    def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            locations = session.query(Location).filter_by(user_id=user_id, project_id=project_id).all()
-            return [location.to_dict() for location in locations]
-        finally:
-            session.close()
-
-    def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
-        session = self.get_session()
-        try:
-            processed_chapter = session.query(ProcessedChapter).filter_by(
-                chapter_id=chapter_id, 
-                project_id=project_id
-            ).first()
-            return processed_chapter is not None
-        finally:
-            session.close()
-
-    def mark_latest_chapter_processed(self, project_id: str, function_name: str):
-        session = self.get_session()
-        try:
-            latest_chapter = session.query(Chapter).filter(
-                Chapter.project_id == project_id
-            ).order_by(Chapter.chapter_number.desc()).first()
-
-            if latest_chapter:
-                processed_chapter = ProcessedChapter(
+    async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
+                                 description: str, user_id: str, project_id: str) -> str:
+        async with self.get_session() as session:
+            try:
+                analysis = CharacterRelationshipAnalysis(
                     id=str(uuid.uuid4()),
-                    chapter_id=latest_chapter.id,
-                    project_id=project_id,
-                    processed_at=datetime.datetime.utcnow()
+                    character1_id=character1_id,
+                    character2_id=character2_id,
+                    relationship_type=relationship_type,
+                    description=description,
+                    user_id=user_id,
+                    project_id=project_id
                 )
-                session.add(processed_chapter)
-                session.commit()
-        finally:
-            session.close()
+                session.add(analysis)
+                await session.commit()
+                return analysis.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving relationship analysis: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            character = session.query(CodexItem).filter_by(
-                id=character_id, 
-                user_id=user_id, 
-                project_id=project_id, 
-                type='character'
-            ).first()
-            if character:
-                if character.backstory:
-                    character.backstory += f"\n\n{content}"
+    async def get_character_by_id(self, character_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                character = await session.execute(select(CodexItem).filter(
+                    CodexItem.id == character_id,
+                    CodexItem.project_id == project_id,
+                    CodexItem.user_id == user_id,  # Add user_id filter
+                    CodexItem.type == 'character'
+                ))
+                character = character.scalars().first()
+                
+                if character:
+                    return character.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
+        async with self.get_session() as session:
+            try:
+                latest_chapter = await session.execute(select(Chapter).filter(
+                    Chapter.project_id == project_id
+                ).order_by(Chapter.chapter_number.desc()))
+                latest_chapter = latest_chapter.scalars().first()
+                
+                if latest_chapter:
+                    return latest_chapter.content
+                return None
+            finally:
+                await session.close()
+
+    async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                relationships = (
+                    await session.execute(select(CharacterRelationship)
+                    .join(
+                        CodexItem,
+                        CharacterRelationship.character_id == CodexItem.id
+                    )
+                    .filter(
+                        CodexItem.project_id == project_id,
+                        CodexItem.user_id == user_id
+                    ))
+                ).scalars().all()
+
+                result = []
+                for rel in relationships:
+                    character1 = await session.get(CodexItem, rel.character_id)
+                    character2 = await session.get(CodexItem, rel.related_character_id)
+                    
+                    if character1 and character2:
+                        result.append({
+                            'id': rel.id,
+                            'character1_id': rel.character_id,
+                            'character2_id': rel.related_character_id,
+                            'character1_name': character1.name,
+                            'character2_name': character2.name,
+                            'relationship_type': rel.relationship_type,
+                            'description': rel.description or ''  # Add this line
+                        })
+
+                return result
+            except Exception as e:
+                self.logger.error(f"Error getting character relationships: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                character = await session.get(CodexItem, character_id)
+                if character and character.user_id == user_id and character.project_id == project_id:
+                    character.backstory = backstory
+                    await session.commit()
                 else:
-                    character.backstory = content
-                character.updated_at = datetime.datetime.now(timezone.utc)
-                session.commit()
-                return character.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error saving character backstory: {str(e)}")
-            raise
-        finally:
-            session.close()
+                    raise ValueError("Character not found")
+            finally:
+                await session.close()
 
-    def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            backstories = session.query(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at).all()
-            return [backstory.to_dict() for backstory in backstories]
-        finally:
-            session.close()
+    async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                character = await session.get(CodexItem, character_id)
+                if character and character.user_id == user_id and character.project_id == project_id:
+                    character.backstory = None
+                    await session.commit()
+                else:
+                    raise ValueError("Character not found")
+            finally:
+                await session.close()
 
-    def get_characters_from_codex(self, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            characters = session.query(CodexItem).filter_by(
-                user_id=user_id, 
-                project_id=project_id, 
-                type='character'
-            ).all()
-            return [character.to_dict() for character in characters]
-        finally:
-            session.close()
+    async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
+        async with self.get_session() as session:
+            try:
+                # Check if the project exists and belongs to the user
+                project_exists = await session.execute(select(exists().where(and_(Project.id == project_id, Project.user_id == user_id))))
+                project_exists = project_exists.scalars().first()
+                if not project_exists:
+                    raise ValueError("Project not found or doesn't belong to the user")
+
+                event = Event(
+                    id=str(uuid.uuid4()), 
+                    title=title, 
+                    description=description, 
+                    date=date, 
+                    character_id=character_id, 
+                    location_id=location_id, 
+                    project_id=project_id,
+                    user_id=user_id
+                )
+                session.add(event)
+                await session.commit()
+                return event.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating event: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def create_location(self, name: str, description: str, coordinates: Optional[str],
+                       user_id: str, project_id: str) -> str:
+        async with self.get_session() as session:
+            try:
+                location = Location(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    coordinates=coordinates,
+                    user_id=user_id,
+                    project_id=project_id
+                )
+                session.add(location)
+                await session.commit()
+                return location.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating location: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                location = await session.get(Location, location_id)
+                if location and location.user_id == user_id and location.project_id == project_id:
+                    await session.delete(location)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting location: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                event = await session.get(Event, event_id)
+                if event and event.user_id == user_id and event.project_id == project_id:
+                    await session.delete(event)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting event: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
+        async with self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and chapter.user_id == user_id:
+                    if not chapter.processed_types:
+                        chapter.processed_types = []
+                    if process_type not in chapter.processed_types:
+                        chapter.processed_types.append(process_type)
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error marking chapter as processed: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and isinstance(chapter.processed_types, list):
+                    return process_type in chapter.processed_types
+                return False
+            finally:
+                await session.close()
+
+    async def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                chapter = await session.execute(select(Chapter).filter_by(
+                    project_id=project_id,
+                    user_id=user_id
+                ).order_by(Chapter.chapter_number.desc()))
+                chapter = chapter.scalars().first()
+                
+                if chapter:
+                    return chapter.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                event = await session.get(Event, event_id)
+                if event and event.user_id == user_id and event.project_id == project_id:
+                    return event.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                location = await session.get(Location, location_id)
+                if location and location.user_id == user_id and location.project_id == project_id:
+                    return location.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def update_codex_item_embedding_id(self, item_id, embedding_id):
+        async with self.get_session() as session:
+            try:
+                codex_item = await session.get(CodexItem, item_id)
+                if codex_item:
+                    codex_item.embedding_id = embedding_id
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
+        async with self.get_session() as session:
+            try:
+                project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, universe_id=universe_id)
+                session.add(project)
+                await session.commit()
+                return project.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating project: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                projects = await session.execute(select(Project).filter_by(user_id=user_id))
+                projects = projects.scalars().all()
+                return [project.to_dict() for project in projects]
+            finally:
+                await session.close()
+
+    async def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
+                projects = projects.scalars().all()
+                return [project.to_dict() for project in projects]
+            finally:
+                await session.close()
+
+    async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                project = await session.get(Project, project_id)
+                if project and project.user_id == user_id:
+                    return project.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                project = await session.get(Project, project_id)
+                if project and project.user_id == user_id:
+                    if name is not None:
+                        project.name = name
+                    if description is not None:
+                        project.description = description
+                    if universe_id is not None:
+                        project.universe_id = universe_id
+                    if target_word_count is not None:
+                        project.target_word_count = target_word_count
+                    project.updated_at = datetime.datetime.now(timezone.utc)
+                    await session.commit()
+                    return project.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating project: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                project = await session.get(Project, project_id)
+                if project and project.user_id == user_id:
+                    project.universe_id = universe_id  # This can now be None
+                    project.updated_at = datetime.datetime.now(timezone.utc)
+                    await session.commit()
+                    return project.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating project universe: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def delete_project(self, project_id: str, user_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                project = await session.get(Project, project_id)
+                if project and project.user_id == user_id:
+                    await session.delete(project)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting project: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                universes = await session.execute(select(Universe).filter_by(user_id=user_id))
+                universes = universes.scalars().all()
+                return [universe.to_dict() for universe in universes]
+            except Exception as e:
+                self.logger.error(f"Error fetching universes: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def create_universe(self, name: str, user_id: str) -> str:
+        async with self.get_session() as session:
+            try:
+                universe = Universe(id=str(uuid.uuid4()), name=name, user_id=user_id)
+                session.add(universe)
+                await session.commit()
+                return universe.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating universe: {str(e)}")
+                raise ValueError(str(e))  # Ensure the error is a string
+            finally:
+                await session.close()
+
+    async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                universe = await session.get(Universe, universe_id)
+                if universe and universe.user_id == user_id:
+                    return universe.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                universe = await session.get(Universe, universe_id)
+                if universe and universe.user_id == user_id:
+                    universe.name = name
+                    await session.commit()
+                    return universe.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating universe: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def delete_universe(self, universe_id: str, user_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                universe = await session.get(Universe, universe_id)
+                if universe and universe.user_id == user_id:
+                    await session.delete(universe)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting universe: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                codex_items = await session.execute(select(CodexItem).join(Project).filter(
+                    and_(Project.universe_id == universe_id, CodexItem.user_id == user_id)
+                ))
+                codex_items = codex_items.scalars().all()
+                return [item.to_dict() for item in codex_items]
+            finally:
+                await session.close()
+
+    async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
+        async with self.get_session() as session:
+            try:
+                # Fetch all projects for the given universe
+                projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
+                projects = projects.scalars().all()
+                project_ids = [project.id for project in projects]
+
+                # Initialize the result dictionary
+                knowledge_base = {project.id: [] for project in projects}
+
+                # Fetch chapters and codex items with pagination
+                for project_id in project_ids:
+                    chapters = await session.execute(select(Chapter).filter_by(project_id=project_id).limit(limit).offset(offset))
+                    codex_items = await session.execute(select(CodexItem).filter_by(project_id=project_id).limit(limit).offset(offset))
+
+                    chapters = chapters.scalars().all()
+                    codex_items = codex_items.scalars().all()
+
+                    for chapter in chapters:
+                        knowledge_base[project_id].append({
+                            'id': chapter.id,
+                            'type': 'chapter',
+                            'title': chapter.title,
+                            'content': chapter.content,
+                            'embedding_id': chapter.embedding_id
+                        })
+
+                    for item in codex_items:
+                        knowledge_base[project_id].append({
+                            'id': item.id,
+                            'type': 'codex_item',
+                            'name': item.name,
+                            'description': item.description,
+                            'embedding_id': item.embedding_id
+                        })
+
+                # Remove any empty projects
+                knowledge_base = {k: v for k, v in knowledge_base.items() if v}
+
+                return knowledge_base
+            finally:
+                await session.close()
+
+    async def get_character_by_name(self, name: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                character = await session.execute(select(CodexItem).filter_by(name=name, user_id=user_id, project_id=project_id, type='character'))
+                character = character.scalars().first()
+                if character:
+                    return character.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                events = await session.execute(select(Event).filter_by(project_id=project_id))
+                events = events.scalars().all()
+                return [event.to_dict() for event in events]
+            finally:
+                await session.close()
+
+    async def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                locations = await session.execute(select(Location).filter_by(user_id=user_id, project_id=project_id))
+                locations = locations.scalars().all()
+                return [location.to_dict() for location in locations]
+            finally:
+                await session.close()
+
+    async def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
+        async with self.get_session() as session:
+            try:
+                processed_chapter = await session.execute(select(ProcessedChapter).filter_by(
+                    chapter_id=chapter_id, 
+                    project_id=project_id
+                ))
+                processed_chapter = processed_chapter.scalars().first()
+                return processed_chapter is not None
+            finally:
+                await session.close()
+
+    async def mark_latest_chapter_processed(self, project_id: str, function_name: str):
+        async with self.get_session() as session:
+            try:
+                latest_chapter = await session.execute(select(Chapter).filter(
+                    Chapter.project_id == project_id
+                ).order_by(Chapter.chapter_number.desc()))
+                latest_chapter = latest_chapter.scalars().first()
+
+                if latest_chapter:
+                    processed_chapter = ProcessedChapter(
+                        id=str(uuid.uuid4()),
+                        chapter_id=latest_chapter.id,
+                        project_id=project_id,
+                        processed_at=datetime.datetime.utcnow()
+                    )
+                    session.add(processed_chapter)
+                    await session.commit()
+            finally:
+                await session.close()
+
+    async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                character = await session.get(CodexItem, character_id)
+                if character and character.user_id == user_id and character.project_id == project_id and character.type == 'character':
+                    if character.backstory:
+                        character.backstory += f"\n\n{content}"
+                    else:
+                        character.backstory = content
+                    character.updated_at = datetime.datetime.now(timezone.utc)
+                    await session.commit()
+                    return character.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving character backstory: {str(e)}")
+                raise
+            finally:
+                await session.close()
+
+    async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                backstories = await session.execute(select(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at))
+                backstories = backstories.scalars().all()
+                return [backstory.to_dict() for backstory in backstories]
+            finally:
+                await session.close()
+
+    async def get_characters_from_codex(self, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                characters = await session.execute(select(CodexItem).filter_by(
+                    user_id=user_id, 
+                    project_id=project_id, 
+                    type='character'
+                ))
+                characters = characters.scalars().all()
+                return [character.to_dict() for character in characters]
+            finally:
+                await session.close()
 
     def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         session = self.get_session()
