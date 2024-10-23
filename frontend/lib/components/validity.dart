@@ -112,18 +112,20 @@ class _ValidityState extends State<Validity> {
                       children: [
                         Text(
                             'Validity: ${check['isValid'] ? 'Valid' : 'Invalid'}'),
-                        Text('Chapter ID: ${check['chapterId']}'),
-                        Text('Feedback: ${_formatString(check['feedback'])}'),
-                        Text('Review: ${_formatString(check['review'])}'),
                         Text(
-                            'Style Guide Adherence: ${_formatBool(check['style_guide_adherence'])}'),
+                            'Overall Score: ${check['overallScore'] ?? 'N/A'}'),
                         Text(
-                            'Style Guide Feedback: ${_formatString(check['style_guide_feedback'])}'),
-                        Text('Continuity: ${_formatBool(check['continuity'])}'),
+                            'General Feedback: ${_formatString(check['generalFeedback'])}'),
                         Text(
-                            'Continuity Feedback: ${_formatString(check['continuity_feedback'])}'),
+                            'Style Guide Score: ${check['styleGuideAdherenceScore'] ?? 'N/A'}'),
                         Text(
-                            'Test Results: ${_formatString(check['test_results'])}'),
+                            'Style Guide Feedback: ${_formatString(check['styleGuideAdherenceExplanation'])}'),
+                        Text(
+                            'Continuity Score: ${check['continuityScore'] ?? 'N/A'}'),
+                        Text(
+                            'Continuity Feedback: ${_formatString(check['continuityExplanation'])}'),
+                        Text(
+                            'Areas for Improvement: ${_formatString(check['areasForImprovement']?.toString())}'),
                       ],
                     ),
                   ),
