@@ -1433,91 +1433,110 @@ class Database:
             finally:
                 await session.close()
 
-    def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
-        session = self.get_session()
-        try:
-            # Use JSON containment operator @> instead of LIKE
-            chapter = session.query(Chapter).filter(
-                Chapter.project_id == project_id,
-                Chapter.user_id == user_id,
-                ~Chapter.processed_types.cast(JSONB).contains([process_type])
-            ).order_by(Chapter.chapter_number.desc()).first()
-            
-            if chapter:
-                return chapter.content
-            return None
-        finally:
-            session.close()
+    async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
+        async with self.get_session() as session:
+            try:
+                # Use JSON containment operator @> instead of LIKE
+                chapter = await session.execute(
+                    select(Chapter).filter(
+                        Chapter.project_id == project_id,
+                        Chapter.user_id == user_id,
+                        ~Chapter.processed_types.cast(JSONB).contains([process_type])
+                    ).order_by(Chapter.chapter_number.desc())
+                )
+                chapter = chapter.scalars().first()
+                
+                if chapter:
+                    return chapter.content
+                return None
+            finally:
+                await session.close()
 
-    def create_character_relationship(self, character_id: str, related_character_id: str, 
-                                    relationship_type: str, project_id: str, 
-                                    description: Optional[str] = None) -> str:
-        session = self.get_session()
-        try:
-            # Ensure character IDs are not None before querying
-            if character_id is None or related_character_id is None:
-                raise ValueError("Character IDs cannot be None")
-            
-            # Check if both characters exist in the codex_items table
-            character = session.query(CodexItem).filter_by(id=character_id, project_id=project_id, type='character').first()
-            related_character = session.query(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character').first()
-            
-            if not character:
-                self.logger.error(f"Character with ID {character_id} not found in the codex")
-            if not related_character:
-                self.logger.error(f"Character with ID {related_character_id} not found in the codex")
-            
-            if not character or not related_character:
-                raise ValueError("One or both characters do not exist in the codex")
-            
-            relationship = CharacterRelationship(
-                id=str(uuid.uuid4()),
-                character_id=character.id,
-                related_character_id=related_character.id,
-                relationship_type=relationship_type,
-                description=description,  # Add this line
-                project_id=project_id
-            )
-            session.add(relationship)
-            session.commit()
-            return relationship.id
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Error creating character relationship: {str(e)}")
-            raise
-        finally:
-            session.close()
+    async def create_character_relationship(self, character_id: str, related_character_id: str, 
+                                            relationship_type: str, project_id: str, 
+                                            description: Optional[str] = None) -> str:
+        async with self.get_session() as session:
+            try:
+                # Ensure character IDs are not None before querying
+                if character_id is None or related_character_id is None:
+                    raise ValueError("Character IDs cannot be None")
+                
+                # Check if both characters exist in the codex_items table
+                character = await session.execute(
+                    select(CodexItem).filter_by(id=character_id, project_id=project_id, type='character')
+                )
+                character = character.scalars().first()
+                related_character = await session.execute(
+                    select(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character')
+                )
+                related_character = related_character.scalars().first()
+                
+                if not character:
+                    self.logger.error(f"Character with ID {character_id} not found in the codex")
+                if not related_character:
+                    self.logger.error(f"Character with ID {related_character_id} not found in the codex")
+                
+                if not character or not related_character:
+                    raise ValueError("One or both characters do not exist in the codex")
+                
+                relationship = CharacterRelationship(
+                    id=str(uuid.uuid4()),
+                    character_id=character.id,
+                    related_character_id=related_character.id,
+                    relationship_type=relationship_type,
+                    description=description,  # Add this line
+                    project_id=project_id
+                )
+                session.add(relationship)
+                await session.commit()
+                return relationship.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating character relationship: {str(e)}")
+                raise
+            finally:
+                await session.close()
 
-    def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get_session()
-        try:
-            relationship = session.query(CharacterRelationship).join(
-                CodexItem, CharacterRelationship.character_id == CodexItem.id
-            ).filter(
-                CharacterRelationship.id == relationship_id,
-                CodexItem.project_id == project_id,
-                CodexItem.user_id == user_id
-            ).first()
-            if relationship:
-                relationship.relationship_type = relationship_type
-                session.commit()
-                return relationship.to_dict()
-            return None
-        except Exception as e:
-            session.rollback()
+    async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+        async with self.get_session() as session:
+            try:
+                relationship = await session.execute(
+                    select(CharacterRelationship).join(
+                        CodexItem, CharacterRelationship.character_id == CodexItem.id
+                    ).filter(
+                        CharacterRelationship.id == relationship_id,
+                        CodexItem.project_id == project_id,
+                        CodexItem.user_id == user_id
+                    )
+                )
+                relationship = relationship.scalars().first()
+                if relationship:
+                    relationship.relationship_type = relationship_type
+                    await session.commit()
+                    return relationship.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating character relationship: {str(e)}")
+                raise
+            finally:
+                await session.close()
     
-    def get_location_by_name(self, name: str, user_id: str, project_id: str):
-        session = self.get_session()
-        try:
-            location = session.query(Location).filter_by(
-                name=name, 
-                user_id=user_id, 
-                project_id=project_id
-            ).first()
-            if location:
-                return location.to_dict()
-            return None
-        finally:
-            session.close()
+    async def get_location_by_name(self, name: str, user_id: str, project_id: str):
+        async with self.get_session() as session:
+            try:
+                location = await session.execute(
+                    select(Location).filter_by(
+                        name=name, 
+                        user_id=user_id, 
+                        project_id=project_id
+                    )
+                )
+                location = location.scalars().first()
+                if location:
+                    return location.to_dict()
+                return None
+            finally:
+                await session.close()
 
 db_instance = Database()
