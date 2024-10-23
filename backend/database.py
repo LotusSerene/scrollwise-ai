@@ -323,8 +323,8 @@ class Database:
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set")
         
-        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=20, max_overflow=0, 
-                                    client_encoding='utf8')
+        self.engine = create_engine(db_url, poolclass=QueuePool, pool_size=50, max_overflow=10, 
+                                    pool_recycle=3600, pool_pre_ping=True, client_encoding='utf8')
         self.Session = scoped_session(sessionmaker(bind=self.engine))
         
         Base.metadata.create_all(self.engine)
