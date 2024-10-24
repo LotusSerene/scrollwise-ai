@@ -2,6 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from datetime import datetime, timezone
 from sqlalchemy import delete  # Changed this line
 from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
@@ -37,8 +38,8 @@ class Project(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     universe_id = Column(String, ForeignKey('universes.id'), nullable=True)
     target_word_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Update the relationships with proper back_populates
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
@@ -68,7 +69,7 @@ class Chapter(Base):
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     last_processed_position = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     project = relationship("Project", back_populates="chapters")
     processed_types = Column(JSON, default=list, nullable=False)  # Changed from lambda to list
 
