@@ -100,41 +100,37 @@ class _CodexState extends State<Codex> {
     bool isUpdating = false;
 
     Future<void> updateCodexItem(BuildContext context) async {
-      setState(() => isUpdating = true);
-      final appState = Provider.of<AppState>(context, listen: false);
-      final token = appState.token;
+      setState(() {
+        isUpdating = true;
+      });
 
       try {
-        final headers = {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        };
-        final body = jsonEncode({
-          'name': nameController.text,
-          'description': descriptionController.text,
-          'type': selectedType,
-          'subtype': selectedSubtype == 'all' ? null : selectedSubtype,
-        });
+        final headers = await getAuthHeaders();
         final response = await http.put(
           Uri.parse(
               '$apiUrl/codex-items/${item['id']}?project_id=${widget.projectId}'),
           headers: headers,
-          body: utf8.encode(json.encode(body)),
+          body: json.encode({
+            'name': nameController.text,
+            'description': descriptionController.text,
+            'type': selectedType,
+            'subtype': selectedSubtype == 'all' ? null : selectedSubtype,
+          }),
         );
 
         if (response.statusCode == 200) {
-          // Codex item updated successfully
-          Navigator.of(context).pop(); // Close the dialog
-          _fetchCodexItems(); // Refresh the list
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Codex item updated successfully')),
           );
+          Navigator.of(context).pop(); // Close the dialog
+          _fetchCodexItems(); // Refresh the codex items
         } else {
-          // Error updating codex item
-          final error =
-              jsonDecode(response.body)['error'] ?? 'Error updating codex item';
+          final responseBody = json.decode(response.body);
+          final error = responseBody['detail'] ?? 'Error updating codex item';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(error)),
+            SnackBar(
+                content:
+                    Text('Error: $error (Status: ${response.statusCode})')),
           );
         }
       } catch (e) {
@@ -142,7 +138,9 @@ class _CodexState extends State<Codex> {
           SnackBar(content: Text('Error updating codex item: $e')),
         );
       } finally {
-        setState(() => isUpdating = false);
+        setState(() {
+          isUpdating = false;
+        });
       }
     }
 
@@ -437,17 +435,18 @@ class _CodexState extends State<Codex> {
         Uri.parse('$apiUrl/codex-items/$itemId?project_id=${widget.projectId}'),
         headers: headers,
       );
+
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Codex item deleted successfully'),
-          ),
+          const SnackBar(content: Text('Codex item deleted successfully')),
         );
+        _fetchCodexItems();
       } else {
-        final error =
-            jsonDecode(response.body)['error'] ?? 'Error deleting codex item';
+        final responseBody = json.decode(response.body);
+        final error = responseBody['detail'] ?? 'Error deleting codex item';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
+          SnackBar(
+              content: Text('Error: $error (Status: ${response.statusCode})')),
         );
       }
     } catch (e) {

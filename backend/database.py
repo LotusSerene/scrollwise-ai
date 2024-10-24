@@ -12,8 +12,7 @@ from dotenv import load_dotenv
 import uuid
 import asyncio
 from typing import Optional, List, Dict, Any
-import datetime
-from datetime import timezone
+import datetime as dt  # Add this line if you need the module itself
 from sqlalchemy import exists, alias
 from models import ChapterValidation
 
@@ -130,8 +129,8 @@ class CodexItem(Base):
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     # Add these fields for character-specific information
     backstory = Column(Text)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     
     # Add these relationships
     relationships = relationship("CharacterRelationship", 
@@ -193,7 +192,7 @@ class ProcessedChapter(Base):
     id = Column(String, primary_key=True)
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
-    processed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    processed_at = Column(DateTime, default=datetime.now(timezone.utc))
     function_name = Column(String, default='default_function_name', nullable=False)
 
 class CharacterRelationship(Base):
@@ -232,8 +231,8 @@ class Event(Base):
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)  # Added this line
     location_id = Column(String, ForeignKey('locations.id'), nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     character = relationship("CodexItem", back_populates="events")
     location = relationship("Location", back_populates="events")
@@ -258,8 +257,8 @@ class Location(Base):
     coordinates = Column(String, nullable=True)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     events = relationship("Event", back_populates="location")
 
@@ -279,7 +278,7 @@ class CharacterBackstory(Base):
     character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
     content = Column(Text, nullable=False)
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -300,8 +299,8 @@ class CharacterRelationshipAnalysis(Base):
     description = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -501,7 +500,7 @@ class Database:
         async with await self.get_session() as session:
             try:
                 # Create timezone-naive datetime objects
-                current_time = datetime.datetime.utcnow()
+                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
                 item = CodexItem(
                     id=str(uuid.uuid4()),
                     name=name,
@@ -541,6 +540,7 @@ class Database:
                     codex_item.description = description
                     codex_item.type = type
                     codex_item.subtype = subtype
+                    codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return codex_item.to_dict()
                 return None
@@ -935,15 +935,21 @@ class Database:
             finally:
                 await session.close()
 
+
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
             try:
                 character = await session.get(CodexItem, character_id)
-                if character and character.user_id == user_id and character.project_id == project_id:
+                if character:
+                    if character.user_id != user_id:
+                        raise ValueError(f"User {user_id} is not authorized to update character {character_id}")
+                    if character.project_id != project_id:
+                        raise ValueError(f"Character {character_id} does not belong to project {project_id}")
                     character.backstory = backstory
+                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                 else:
-                    raise ValueError("Character not found")
+                    raise ValueError(f"Character with ID {character_id} not found")
             finally:
                 await session.close()
 
@@ -953,29 +959,29 @@ class Database:
                 character = await session.get(CodexItem, character_id)
                 if character and character.user_id == user_id and character.project_id == project_id:
                     character.backstory = None
+                    # Use a timezone-naive datetime
+                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                 else:
                     raise ValueError("Character not found")
             finally:
                 await session.close()
+
+
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
         async with await self.get_session() as session:
             try:
-                # Check if the project exists and belongs to the user
-                project_exists = await session.execute(select(exists().where(and_(Project.id == project_id, Project.user_id == user_id))))
-                project_exists = project_exists.scalars().first()
-                if not project_exists:
-                    raise ValueError("Project not found or doesn't belong to the user")
-
                 event = Event(
-                    id=str(uuid.uuid4()), 
-                    title=title, 
-                    description=description, 
-                    date=date, 
-                    character_id=character_id, 
-                    location_id=location_id, 
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    description=description,
+                    date=date,
+                    character_id=character_id,
                     project_id=project_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    location_id=location_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
                 )
                 session.add(event)
                 await session.commit()
@@ -987,8 +993,7 @@ class Database:
             finally:
                 await session.close()
 
-    async def create_location(self, name: str, description: str, coordinates: Optional[str],
-                       user_id: str, project_id: str) -> str:
+    async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
         async with await self.get_session() as session:
             try:
                 location = Location(
@@ -997,7 +1002,9 @@ class Database:
                     description=description,
                     coordinates=coordinates,
                     user_id=user_id,
-                    project_id=project_id
+                    project_id=project_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
                 )
                 session.add(location)
                 await session.commit()
@@ -1123,7 +1130,7 @@ class Database:
         async with await self.get_session() as session:
             try:
                 # Create timezone-naive datetime objects
-                current_time = datetime.datetime.utcnow()
+                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
                 project = Project(
                     id=str(uuid.uuid4()),
                     name=name,
@@ -1184,7 +1191,7 @@ class Database:
                         project.universe_id = universe_id
                     if target_word_count is not None:
                         project.target_word_count = target_word_count
-                    project.updated_at = datetime.datetime.now(timezone.utc)
+                    project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return project.to_dict()
                 return None
@@ -1202,7 +1209,7 @@ class Database:
                 if project and project.user_id == user_id:
                     project.universe_id = universe_id
                     # Use a timezone-naive datetime
-                    project.updated_at = datetime.datetime.utcnow()
+                    project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return project.to_dict()
                 return None
@@ -1406,7 +1413,7 @@ class Database:
                         id=str(uuid.uuid4()),
                         chapter_id=latest_chapter.id,
                         project_id=project_id,
-                        processed_at=datetime.datetime.utcnow()
+                        processed_at=lambda: datetime.now(timezone.utc)
                     )
                     session.add(processed_chapter)
                     await session.commit()
@@ -1422,7 +1429,8 @@ class Database:
                         character.backstory += f"\n\n{content}"
                     else:
                         character.backstory = content
-                    character.updated_at = datetime.datetime.now(timezone.utc)
+                    # Convert to timezone-naive datetime before saving
+                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return character.to_dict()
                 return None
@@ -1469,7 +1477,10 @@ class Database:
                 chapter = chapter.scalars().first()
                 
                 if chapter:
-                    return chapter.content
+                    return {
+                        'id': chapter.id,
+                        'content': chapter.content
+                    }
                 return None
             finally:
                 await session.close()
@@ -1519,6 +1530,52 @@ class Database:
             finally:
                 await session.close()
 
+    async def update_event(self, event_id: str, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                event = await session.get(Event, event_id)
+                if event:
+                    for key, value in event_data.items():
+                        setattr(event, key, value)
+                    await session.commit()
+                    return event.to_dict()
+                return None
+            finally:
+                await session.close()
+
+    async def get_event_by_title(self, title: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                event = await session.execute(select(Event).filter_by(title=title, user_id=user_id, project_id=project_id))
+                event = event.scalars().first()
+                return event.to_dict() if event else None
+            finally:
+                await session.close()
+
+
+    async def get_location_by_title(self, title: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                location = await session.execute(select(Location).filter_by(title=title, user_id=user_id, project_id=project_id))
+                location = location.scalars().first()
+                return location.to_dict() if location else None
+            finally:
+                await session.close()
+
+    async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                location = await session.get(Location, location_id)
+                if location:
+                    for key, value in location_data.items():
+                        setattr(location, key, value)
+                    await session.commit()
+                    return location.to_dict()
+                return None
+            finally:
+                await session.close()
+                
+
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
@@ -1567,4 +1624,5 @@ class Database:
             await self.engine.dispose()
 
 db_instance = Database()
+
 

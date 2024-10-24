@@ -1,4 +1,5 @@
-// In frontend/lib/models/relationship.dart
+import 'dart:convert';
+
 class Relationship {
   final String id;
   final String character1_id;
@@ -26,7 +27,7 @@ class Relationship {
       character1_name: json['character1_name'] as String? ?? '',
       character2_name: json['character2_name'] as String? ?? '',
       relationshipType: json['relationship_type'] as String? ?? '',
-      description: json['description'] as String? ?? '',
+      description: utf8.decode(json['description'].toString().codeUnits),
     );
   }
 

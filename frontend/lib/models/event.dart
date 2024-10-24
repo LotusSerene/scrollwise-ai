@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class Event {
   final String id;
   final String title;
@@ -25,7 +27,7 @@ class Event {
     return Event(
       id: json['id'],
       title: json['title'],
-      description: json['description'],
+      description: utf8.decode(json['description'].toString().codeUnits),
       date: DateTime.parse(json['date']),
       characterId: json['character_id'],
       locationId: json['location_id'],

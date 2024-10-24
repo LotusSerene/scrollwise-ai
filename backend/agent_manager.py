@@ -129,6 +129,8 @@ class LocationConnection(BaseModel):
     travel_routes: Optional[str] = None
     cultural_influences: Optional[str] = None
 
+# Add at the top with other imports
+agent_managers: Dict[Tuple[str, str], 'AgentManager'] = {}
 class AgentManager:
     _llm_cache = TTLCache(maxsize=100, ttl=3600)  # Class-level cache for LLM instances
 
@@ -137,30 +139,56 @@ class AgentManager:
         self.logger.setLevel(logging.DEBUG)
         self.user_id = user_id
         self.project_id = project_id
-        self.api_key = self._get_api_key()
-        self.model_settings = self._get_model_settings()
+        self.api_key = None
+        self.model_settings = None
+        self.MAX_INPUT_TOKENS = None
+        self.MAX_OUTPUT_TOKENS = None
+        self.chat_history = None
+        self.vector_store = None
+        self.summarize_chain = None
+        self.task_states = {}
+        self.agents = {}
+        self.complex_tasks = {}
+        self.lock = asyncio.Lock()
+    @classmethod
+    async def create(cls, user_id: str, project_id: str):
+        instance = cls(user_id, project_id)
+        await instance.initialize()
+        return instance
+
+    async def initialize(self):
+        self.api_key = await self._get_api_key()
+        self.model_settings = await self._get_model_settings()
         self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
-        self.chat_history = db_instance.get_chat_history(user_id, project_id)
+        self.chat_history = await db_instance.get_chat_history(self.user_id, self.project_id)
+        if self.chat_history is None:
+            self.chat_history = []  # Initialize as an empty list if no history exists
 
         self.setup_caching()
         self.setup_rate_limiter()
-        self.llm = self._get_llm(self.model_settings['mainLLM'])
-        self.check_llm = self._get_llm(self.model_settings['checkLLM'])
+        self.llm = await self._get_llm(self.model_settings['mainLLM'])
+        self.check_llm = await self._get_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
         self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
-        self.task_states: Dict[str, TaskState] = {}
-        self.agents: Dict[str, Any] = {}
-        self.complex_tasks: Dict[str, ComplexTask] = {}
-        self.lock = asyncio.Lock()  # Add an asyncio lock for thread-safe operations
+
+        # Register this instance for cleanup
+        agent_managers[(self.user_id, self.project_id)] = self
 
     def __del__(self):
-        self.close()
+        asyncio.create_task(self.close())
 
-    def close(self):
+    async def close(self):
         # Clean up resources
         self._llm_cache.clear()
-        self.vector_store.close()
+        if self.vector_store:
+            # Check if the vector_store has a close method before calling it
+            if hasattr(self.vector_store, 'close') and callable(self.vector_store.close):
+                self.vector_store.close()
+            # If there's no close method, we might want to perform any necessary cleanup here
+            # For example, if there's a client that needs to be closed:
+            # if hasattr(self.vector_store, '_client') and hasattr(self.vector_store._client, 'close'):
+            #     self.vector_store._client.close()
         self.chat_history = []
         self.task_states.clear()
         self.agents.clear()
@@ -356,19 +384,24 @@ class AgentManager:
             ("human", human_template)
         ])
 
-    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
+    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any], config: Dict[str, Any] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream the chapter generation using the provided chain and variables.
 
         Args:
             chain: The LangChain chain to use for generation.
             variables (Dict[str, Any]): The variables to pass to the chain.
+            config (Dict[str, Any], optional): Additional configuration for the chain.
 
         Yields:
             Dict[str, Any]: Chunks of generated content or error information.
         """
         try:
-            async for chunk in chain.astream(variables):
+            stream_kwargs = {}
+            if config:
+                stream_kwargs['config'] = config
+
+            async for chunk in chain.astream(variables, **stream_kwargs):
                 if isinstance(chunk, str):
                     yield {"type": "chunk", "content": chunk}
                 else:
@@ -520,15 +553,14 @@ class AgentManager:
             'areas_for_improvement': ['Unable to complete validation']
         }
 
-    def save_validity_feedback(self, result: Dict[str, Any], chapter_number: int, chapter_id: str):
-        """Save the validity check results to the database."""
+    async def save_validity_feedback(self, result: Dict[str, Any], chapter_number: int, chapter_id: str):
         try:
             # Get chapter title
-            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
+            chapter = await db_instance.get_chapter(chapter_id, self.user_id, self.project_id)  # Add await here
             chapter_title = chapter.get('title', f'Chapter {chapter_number}') if chapter else f'Chapter {chapter_number}'
 
             # Save validity check with all required parameters
-            db_instance.save_validity_check(
+            await db_instance.save_validity_check(
                 chapter_id=chapter_id,
                 chapter_title=chapter_title,
                 is_valid=result['is_valid'],
@@ -546,34 +578,42 @@ class AgentManager:
             self.logger.error(f"Error saving validity feedback: {str(e)}")
             raise
 
-    def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
+    async def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
         try:
+            if self.vector_store is None:
+                await self.initialize()
+
             # Ensure metadata includes the content type
             metadata['type'] = content_type
 
+            filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+
             # Add the content to the vector store and get the embedding ID
-            embedding_id = self.vector_store.add_to_knowledge_base(content, metadata=metadata)
+            embedding_id = await self.vector_store.add_to_knowledge_base(content, metadata=filtered_metadata)
 
             return embedding_id
         except Exception as e:
+            self.logger.error(f"Error adding to knowledge base: {str(e)}", exc_info=True)
             raise
     
 
-    def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
+    async def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
+        if self.vector_store is None:
+            await self.initialize()
         try:
             if isinstance(identifier, str):
                 embedding_id = identifier
             elif isinstance(identifier, dict) and 'item_id' in identifier and 'item_type' in identifier:
-                embedding_id = self.vector_store.get_embedding_id(identifier['item_id'], identifier['item_type'])
+                embedding_id = await self.vector_store.get_embedding_id(identifier['item_id'], identifier['item_type'])
             else:
                 raise ValueError("Invalid identifier. Must be embedding_id or dict with item_id and item_type")
 
             if action == 'delete':
-                self.vector_store.delete_from_knowledge_base(embedding_id)
+                await self.vector_store.delete_from_knowledge_base(embedding_id)
             elif action == 'update':
                 if new_content is None and new_metadata is None:
                     raise ValueError("Either new_content or new_metadata must be provided for update action")
-                self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+                await self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
             else:
                 raise ValueError("Invalid action. Must be 'delete' or 'update'")
             
@@ -581,12 +621,14 @@ class AgentManager:
             self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}", exc_info=True)
             raise
 
-    def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
-        return self.vector_store.similarity_search(query, k=k)
+    async def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
+        if self.vector_store is None:
+            await self.initialize()
+        return await self.vector_store.similarity_search(query, k=k)
 
     async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         #self.logger.debug(f"Generating response for query: {query}")
-        qa_llm = self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
+        qa_llm = await self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
         
         # Create a history-aware retriever
@@ -713,7 +755,7 @@ class AgentManager:
             Return only the title, without "Chapter X:" prefix.
             """)
             
-            llm = self._initialize_llm(self.model_settings['titleGenerationLLM'])
+            llm = await self._initialize_llm(self.model_settings['titleGenerationLLM'])  # Add await here
             chain = prompt | llm | StrOutputParser()
             
             title = await chain.ainvoke({
@@ -732,16 +774,16 @@ class AgentManager:
             self.logger.error(f"Error generating title: {str(e)}")
             return f"Chapter {chapter_number}"
 
-    def get_knowledge_base_content(self):
-        return self.vector_store.get_knowledge_base_content()
+    async def get_knowledge_base_content(self):
+        return await self.vector_store.get_knowledge_base_content()
 
-    def reset_memory(self):
+    async def reset_memory(self):
         self.chat_history = []
-        db_instance.delete_chat_history(self.user_id, self.project_id)
+        await db_instance.delete_chat_history(self.user_id, self.project_id)
         #self.logger.info("Chat history has been reset.")
 
-    def get_chat_history(self):
-        return db_instance.get_chat_history(self.user_id, self.project_id)
+    async def get_chat_history(self):
+        return await db_instance.get_chat_history(self.user_id, self.project_id)
 
     def chunk_content(self, content: str, max_tokens: int) -> List[str]:
         chunks = []
@@ -905,7 +947,7 @@ class AgentManager:
 
                 {format_instructions}
                 """)
-                Codexllm = self._initialize_llm(self.model_settings['extractionLLM'])
+                Codexllm = await self._initialize_llm(self.model_settings['extractionLLM'])
                 
                 extraction_chain = prompt | Codexllm | fixing_parser
 
@@ -935,9 +977,15 @@ class AgentManager:
         try:
             character_data = {}
             for char_id in character_ids:
-                char = db_instance.get_codex_item_by_id(char_id, self.user_id, self.project_id)  # Changed from get_character_by_id
-                if char and char['type'] == 'character':  # Add type check
-                    character_data[char_id] = char['name']
+                char = await db_instance.get_codex_item_by_id(char_id, self.user_id, self.project_id)
+                if char and char['type'] == 'character':
+                    # Store full character info
+                    character_data[char_id] = {
+                        'id': char_id,
+                        'name': char['name'].split(',')[0].strip(),  # Split and strip to handle commas
+                        'description': char.get('description', ''),
+                        'full_name': char['name']
+                    }
                 else:
                     self.logger.warning(f"Character not found for ID: {char_id}")
 
@@ -947,33 +995,30 @@ class AgentManager:
 
             # Create pairs of characters for analysis
             character_pairs = [(a, b) for i, a in enumerate(character_ids) for b in character_ids[i+1:]]
-            #self.logger.debug(f"Created character pairs: {character_pairs}")
 
             # Get the latest chapter content
-            chapter_content = db_instance.get_latest_unprocessed_chapter_content(
+            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
-                "analyze_relationships"  # Add process_type parameter
+                PROCESS_TYPES['RELATIONSHIPS']
             )
             
-            if not chapter_content:
-                # If no unprocessed chapter, get the latest chapter regardless of processing status
-                chapter_content = db_instance.get_latest_chapter_content(self.project_id)
-                
+            if not chapter_data:
+                return []
+            chapter_id = chapter_data['id']
+            chapter_content = chapter_data['content']
+            
             if not chapter_content:
                 self.logger.warning("No chapter content found for analysis")
                 return []
 
-            #self.logger.debug("Preparing to analyze relationships with chapter content")
-            
-            # Format character pairs using names instead of IDs for the prompt
+            # Format character pairs using cleaned names
             formatted_pairs = [
-                f"{character_data[pair[0]]} and {character_data[pair[1]]}"
+                f"{character_data[pair[0]]['name']} and {character_data[pair[1]]['name']}"
                 for pair in character_pairs
             ]
             
-            # Create a list of valid character names for the prompt
-            valid_characters = list(character_data.values())
+            valid_characters = [char['name'] for char in character_data.values()]
 
             prompt = ChatPromptTemplate.from_template("""
                 Analyze the relationships between the following character pairs based on the given chapter content.
@@ -987,6 +1032,13 @@ class AgentManager:
 
                 Chapter Content:
                 {chapter_content}
+
+                Character descriptions:
+                {character_descriptions}
+
+                IMPORTANT: Only analyze relationships between the characters listed above. Do not include any other characters in your analysis.
+
+                                                      
 
                 For each pair of characters, provide:
                 1. The nature of their relationship (e.g., friends, rivals, family, none)
@@ -1003,46 +1055,68 @@ class AgentManager:
                 """)
 
             parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-            llmRelationship = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmRelationship = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmRelationship | parser
+
+            character_descriptions = "\n".join(
+                f"{char['name']}: {char['description']}" for char in character_data.values()
+            )
 
             result = await chain.ainvoke({
                 "valid_characters": ", ".join(valid_characters),
                 "character_pairs": ", ".join(formatted_pairs),
                 "chapter_content": chapter_content,
+                "character_descriptions": character_descriptions,
                 "format_instructions": parser.get_format_instructions()
             })
 
-            # Convert the Pydantic models to dictionaries and map IDs
-            name_to_id = {v: k for k, v in character_data.items()}
+            name_to_id = {v['name']: k for k, v in character_data.items()}
             relationships = []
             
             for rel in result.relationships:
-                # Skip any relationships that include characters not in our valid set
                 if rel.character1 not in valid_characters or rel.character2 not in valid_characters:
                     self.logger.warning(f"Skipping invalid relationship with characters: {rel.character1}, {rel.character2}")
                     continue
                 
-                # Convert Pydantic model to dict and add IDs
-                relationship_dict = {
-                    'character1_id': name_to_id[rel.character1],
-                    'character2_id': name_to_id[rel.character2],
-                    'relationship_type': rel.relationship_type,
-                    'description': rel.description
-                }
-                relationships.append(relationship_dict)
+                char1_id = name_to_id[rel.character1]
+                char2_id = name_to_id[rel.character2]
                 
-                # Save to database
-                db_instance.save_relationship_analysis(
-                    character1_id=relationship_dict['character1_id'],
-                    character2_id=relationship_dict['character2_id'],
-                    relationship_type=relationship_dict['relationship_type'],
-                    description=relationship_dict['description'],
+                # Save to relationship analysis table
+                analysis_id = await db_instance.save_relationship_analysis(
+                    character1_id=char1_id,
+                    character2_id=char2_id,
+                    relationship_type=rel.relationship_type,
+                    description=rel.description,
                     user_id=self.user_id,
                     project_id=self.project_id
                 )
-
-            #self.logger.debug(f"Generated and saved relationships: {relationships}")
+                
+                # Also save to character relationships table
+                relationship_id = await db_instance.create_character_relationship(
+                    char1_id,
+                    char2_id,
+                    rel.relationship_type,
+                    self.project_id,
+                    description=rel.description
+                )
+                
+                relationship_dict = {
+                    'character1_id': char1_id,
+                    'character2_id': char2_id,
+                    'character1_name': character_data[char1_id]['full_name'],
+                    'character2_name': character_data[char2_id]['full_name'],
+                    'character1_description': character_data[char1_id]['description'],
+                    'character2_description': character_data[char2_id]['description'],
+                    'relationship_type': rel.relationship_type,
+                    'description': rel.description
+                }
+                relationship_dict['id'] = relationship_id
+                relationship_dict['analysis_id'] = analysis_id
+                
+                relationships.append(relationship_dict)
+                
+            if relationships:
+                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['RELATIONSHIPS'])
             return relationships
         except Exception as e:
             self.logger.error(f"Error analyzing relationships: {str(e)}", exc_info=True)
@@ -1052,10 +1126,11 @@ class AgentManager:
         #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
         try:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
-            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self._initialize_llm(self.model_settings['mainLLM']))
+            llm = await self._initialize_llm(self.model_settings['mainLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=llm)
             
             # Fetch all existing codex items for the user and project
-            existing_codex_items = db_instance.get_all_codex_items(self.user_id, self.project_id)
+            existing_codex_items = await db_instance.get_all_codex_items(self.user_id, self.project_id)
             
             prompt = ChatPromptTemplate.from_template("""
             You are a master storyteller and world-builder, tasked with creating rich, detailed codex items for an immersive narrative universe. Your expertise spans across various domains, including history, culture, geography, character development, and artifact creation. Your goal is to craft a new codex item that seamlessly integrates into the story world.
@@ -1092,7 +1167,7 @@ class AgentManager:
             {format_instructions}
             """)
             
-            llm = self._initialize_llm(self.model_settings['mainLLM'])
+            llm = await self._initialize_llm(self.model_settings['mainLLM'])
             chain = prompt | llm | fixing_parser
             
             result = await chain.ainvoke({
@@ -1121,14 +1196,21 @@ class AgentManager:
 
     async def extract_character_backstory(self, character_id: str, chapter_id: str):
         try:
-            character = db_instance.get_codex_item_by_id(character_id, self.user_id, self.project_id)  # Changed from get_character_by_id
+            character = await db_instance.get_codex_item_by_id(character_id, self.user_id, self.project_id)
             if not character or character['type'] != 'character':
                 raise ValueError(f"Character with ID {character_id} not found")
             
             # Get the chapter content
-            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
-            if not chapter:
-                raise ValueError(f"Chapter with ID {chapter_id} not found")
+            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+                self.project_id,
+                self.user_id,
+                PROCESS_TYPES['BACKSTORY']
+            )
+            if not chapter_data:
+                raise ValueError("No unprocessed chapter found for backstory extraction")
+
+            chapter_id = chapter_data['id']
+            chapter_content = chapter_data['content']
 
             prompt = ChatPromptTemplate.from_template("""
             Given the following information about a character and a new chapter, extract any new backstory information for the character.
@@ -1147,18 +1229,18 @@ class AgentManager:
             """)
             
             parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
-            llmBackstory = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmBackstory = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmBackstory | parser
             
             result = await chain.ainvoke({
                 "character_info": json.dumps(character),
-                "chapter_content": chapter['content'],
+                "chapter_content": chapter_content,
                 "format_instructions": parser.get_format_instructions()
             })
 
             if result.new_backstory:
                 # Mark the chapter as processed with the correct process type
-                db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
+                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
 
             return result
         except Exception as e:
@@ -1232,8 +1314,8 @@ class AgentManager:
 
         """)
 
-        llmExtend = self._initialize_llm(self.model_settings['mainLLM'])
-        chain = prompt | llmExtend | StrOutputParser()
+        llmExtend = await self._initialize_llm(self.model_settings['mainLLM'])
+        chain =  prompt | llmExtend | StrOutputParser()
 
         while current_word_count < expected_word_count:
             words_to_add = expected_word_count - current_word_count
@@ -1305,11 +1387,16 @@ class AgentManager:
         self.logger.info("Starting location analysis for chapter")
         try:
             # Get the chapter content
-            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
-            if not chapter:
-                raise ValueError("Chapter not found")
+            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+                self.project_id,
+                self.user_id,
+                PROCESS_TYPES['LOCATIONS']
+            )
+            if not chapter_data:
+                raise ValueError("No unprocessed chapter found for location analysis")
             
-            chapter_content = chapter.get('content', '')
+            chapter_id = chapter_data['id']
+            chapter_content = chapter_data['content']
             self.logger.info("Retrieved chapter content")
             
             if not chapter_content:
@@ -1330,7 +1417,7 @@ class AgentManager:
             Only include locations that are explicitly mentioned or described in the chapter.
             Be specific and detailed in the descriptions.
             """)
-            llmLocation = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmLocation = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmLocation | StrOutputParser()
             
             result = await chain.ainvoke({"chapter_content": chapter_content})
@@ -1342,7 +1429,14 @@ class AgentManager:
             locations = []
             for location_data in location_list:
                 try:
-                    location_id = db_instance.create_location(
+                    # Check if the location already exists
+                    existing_location = await db_instance.get_location_by_name(location_data['name'], self.user_id, self.project_id)
+                    if existing_location:
+                        self.logger.info(f"Location {location_data['name']} already exists, skipping save.")
+                        locations.append({"id": existing_location['id'], **location_data})
+                        continue
+
+                    location_id = await db_instance.create_location(
                         name=location_data['name'],
                         description=location_data['description'],
                         coordinates=location_data.get('coordinates'),
@@ -1355,7 +1449,8 @@ class AgentManager:
                     continue
 
             # Mark the chapter as processed for location analysis
-            db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['LOCATIONS'])
+            if locations:
+                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['LOCATIONS'])
             
             self.logger.info(f"Location analysis completed. Found {len(locations)} locations")
             return locations
@@ -1366,9 +1461,16 @@ class AgentManager:
 
     async def analyze_unprocessed_chapter_events(self, chapter_id: str):
         try:
-            chapter = db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
-            if not chapter:
-                raise ValueError(f"Chapter with ID {chapter_id} not found")
+            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+                self.project_id,
+                self.user_id,
+                PROCESS_TYPES['EVENTS']
+            )
+            if not chapter_data:
+                raise ValueError(f"No unprocessed chapter found for events analysis")
+
+            chapter_id = chapter_data['id']
+            chapter_content = chapter_data['content']
 
             parser = PydanticOutputParser(pydantic_object=EventAnalysis)
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
@@ -1388,11 +1490,11 @@ class AgentManager:
             {format_instructions}
             """)
 
-            llmAnalysis = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmAnalysis = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmAnalysis | fixing_parser
 
             result = await chain.ainvoke({
-                "chapter_content": chapter['content'],
+                "chapter_content": chapter_content,
                 "format_instructions": parser.get_format_instructions()
             })
 
@@ -1402,18 +1504,25 @@ class AgentManager:
                 # Get character ID for the first involved character (if any)
                 character_id = None
                 if event.involved_characters:
-                    character = db_instance.get_character_by_name(event.involved_characters[0], self.user_id, self.project_id)
+                    character = await db_instance.get_character_by_name(event.involved_characters[0], self.user_id, self.project_id)
                     if character:
                         character_id = character['id']
 
                 # Get location ID if location is specified
                 location_id = None
                 if event.location:
-                    location = db_instance.get_location_by_name(event.location, self.user_id, self.project_id)
+                    location = await db_instance.get_location_by_name(event.location, self.user_id, self.project_id)
                     if location:
                         location_id = location['id']
 
-                event_id = db_instance.create_event(
+                # Check if the event already exists
+                existing_event = await db_instance.get_event_by_title(event.title, self.user_id, self.project_id)
+                if existing_event:
+                    self.logger.info(f"Event {event.title} already exists, skipping save.")
+                    stored_events.append({"id": existing_event['id'], **event.dict()})
+                    continue
+
+                event_id = await db_instance.create_event(
                     title=event.title,
                     description=event.description,
                     date=datetime.now(),  # You might want to extract or compute this
@@ -1428,7 +1537,8 @@ class AgentManager:
                 })
 
             # Mark the chapter as processed for events
-            db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
+            if stored_events:
+                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
 
             return stored_events
         except Exception as e:
@@ -1437,7 +1547,7 @@ class AgentManager:
 
     async def analyze_event_connections(self, event_ids: List[str]) -> List[EventConnectionAnalysis]:
         try:
-            events = [db_instance.get_event_by_id(event_id, self.user_id, self.project_id) for event_id in event_ids]
+            events = [await db_instance.get_event_by_id(event_id, self.user_id, self.project_id) for event_id in event_ids]
             events = [e for e in events if e]  # Filter out None values
 
             prompt = ChatPromptTemplate.from_template("""
@@ -1457,7 +1567,7 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
-            llmEvent = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmEvent = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmEvent | parser
 
             analyses = []
@@ -1475,7 +1585,7 @@ class AgentManager:
 
     async def analyze_location_connections(self, location_ids: List[str]) -> List[LocationConnection]:
         try:
-            locations = [db_instance.get_location_by_id(loc_id, self.user_id, self.project_id) for loc_id in location_ids]
+            locations = [await db_instance.get_location_by_id(loc_id, self.user_id, self.project_id) for loc_id in location_ids]
             locations = [l for l in locations if l]  # Filter out None values
 
             prompt = ChatPromptTemplate.from_template("""
@@ -1495,7 +1605,7 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=LocationConnection)
-            llmLocationConnection = self._initialize_llm(self.model_settings['extractionLLM'])
+            llmLocationConnection = await self._initialize_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmLocationConnection | parser
 
             connections = []

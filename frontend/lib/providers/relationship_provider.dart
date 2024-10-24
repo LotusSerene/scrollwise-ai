@@ -37,7 +37,9 @@ class RelationshipProvider extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['relationships'] != null) {
+        if (data['skip'] == true) {
+          _message = 'No unprocessed chapters to analyze';
+        } else if (data['relationships'] != null) {
           _relationships = (data['relationships'] as List)
               .map((json) =>
                   Relationship.fromJson(Map<String, dynamic>.from(json)))

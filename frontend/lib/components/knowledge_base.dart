@@ -59,14 +59,15 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       final response = await http.post(
         Uri.parse('$apiUrl/knowledge-base/'),
         headers: headers,
-        body: utf8.encode(json.encode({
+        body: {
           'documents': text,
-          'metadata':
-              json.encode({'type': 'text', 'project_id': widget.projectId})
-        })),
+          'metadata_str':
+              json.encode({'type': 'text', 'project_id': widget.projectId}),
+          'project_id': widget.projectId,
+        },
       );
-      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-      if (response.statusCode == 201 && !jsonResponse.containsKey('error')) {
+      final jsonResponse = json.decode(response.body);
+      if (response.statusCode == 200 && !jsonResponse.containsKey('error')) {
         setState(() {
           _textController.clear();
         });
@@ -91,8 +92,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         ...await getAuthHeaders(),
         'Content-Type': 'multipart/form-data',
       };
-      final request =
-          http.MultipartRequest('POST', Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'));
+      final request = http.MultipartRequest('POST',
+          Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'));
       request.headers.addAll(headers);
       final file =
           await http.MultipartFile.fromPath('file', _selectedFile.path);
@@ -125,11 +126,13 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   Future<void> _handleDelete(String embeddingId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$apiUrl/knowledge-base/$embeddingId?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/knowledge-base/$embeddingId?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
       final jsonResponse = json.decode(response.body);
-      if ((response.statusCode == 204 || response.statusCode == 200) && !jsonResponse.containsKey('error')) {
+      if ((response.statusCode == 204 || response.statusCode == 200) &&
+          !jsonResponse.containsKey('error')) {
         setState(() {
           _knowledgeBaseContent
               .removeWhere((item) => item['embedding_id'] == embeddingId);

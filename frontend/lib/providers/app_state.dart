@@ -130,13 +130,8 @@ class AppState extends ChangeNotifier {
           body: json.encode({'target_word_count': targetWordCount}),
         );
 
-        if (response.statusCode != 200) {
-          print('Error updating target word count: ${response.statusCode}');
-          print('Response body: ${response.body}');
-        }
-      } catch (error) {
-        print('Error updating target word count: $error');
-      }
+        if (response.statusCode != 200) {}
+      } catch (error) {}
     }
   }
 

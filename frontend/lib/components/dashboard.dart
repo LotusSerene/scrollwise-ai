@@ -193,7 +193,10 @@ class _DashboardState extends State<Dashboard> {
                     Icons.book,
                     Colors.blue,
                     () => Navigator.pushNamed(context, '/chapters',
-                        arguments: widget.projectId),
+                            arguments: widget.projectId)
+                        .then((_) {
+                      _fetchData();
+                    }),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -204,7 +207,10 @@ class _DashboardState extends State<Dashboard> {
                     Icons.list_alt,
                     Colors.green,
                     () => Navigator.pushNamed(context, '/codex',
-                        arguments: widget.projectId),
+                            arguments: widget.projectId)
+                        .then((_) {
+                      _fetchData();
+                    }),
                   ),
                 ),
               ],

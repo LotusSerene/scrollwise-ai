@@ -29,8 +29,9 @@ class _CharacterRelationshipsScreenState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<RelationshipProvider>(context, listen: false)
-          .getRelationships(widget.projectId);
+      final relationshipProvider =
+          Provider.of<RelationshipProvider>(context, listen: false);
+      relationshipProvider.getRelationships(widget.projectId);
       _fetchCharacters();
     });
   }
@@ -58,7 +59,9 @@ class _CharacterRelationshipsScreenState
       }
     } catch (e) {
       print('Error fetching characters: $e');
-      // Handle error (e.g., show a snackbar)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error fetching characters: $e')),
+      );
     }
   }
 
@@ -90,11 +93,19 @@ class _CharacterRelationshipsScreenState
       return;
     }
 
-    // Convert Set to List and ensure all elements are strings
     List<String> characterIds = selectedCharacters.toList();
 
     Provider.of<RelationshipProvider>(context, listen: false)
-        .analyzeRelationships(characterIds, widget.projectId);
+        .analyzeRelationships(characterIds, widget.projectId)
+        .then((_) {
+      final relationshipProvider =
+          Provider.of<RelationshipProvider>(context, listen: false);
+      if (relationshipProvider.message != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(relationshipProvider.message!)),
+        );
+      }
+    });
   }
 
   void _handleEditRelationship(Relationship relationship) {
@@ -149,8 +160,6 @@ class _CharacterRelationshipsScreenState
                 }
 
                 final relationships = relationshipProvider.relationships;
-                print(
-                    'Building relationships list. Count: ${relationships.length}'); // Debug log
 
                 return ListView.builder(
                   itemCount: characters.length,
@@ -161,9 +170,6 @@ class _CharacterRelationshipsScreenState
                             r.character1_id == character['id'] ||
                             r.character2_id == character['id'])
                         .toList();
-
-                    print(
-                        'Character ${character['name']} has ${characterRelationships.length} relationships'); // Debug log
 
                     return CharacterRelationshipCard(
                       characterId: character['id'] ?? '',

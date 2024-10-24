@@ -26,6 +26,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   List<Event> events = [];
   List<Location> locations = [];
   bool isLoading = false;
+  bool isAlreadyAnalyzed = false;
   late TabController _tabController;
 
   @override
@@ -90,21 +91,34 @@ class _TimelineScreenState extends State<TimelineScreen>
       final headers = await getAuthHeaders();
 
       // Analyze events
-      await http.post(
+      final eventResponse = await http.post(
         Uri.parse(
             '$apiUrl/events/analyze-chapter?project_id=${widget.projectId}'),
         headers: headers,
       );
 
       // Analyze locations
-      await http.post(
+      final locationResponse = await http.post(
         Uri.parse(
             '$apiUrl/locations/analyze-chapter?project_id=${widget.projectId}'),
         headers: headers,
       );
 
-      await _loadData();
-      _showSuccess('Analysis completed successfully');
+      if (eventResponse.statusCode == 200 &&
+          locationResponse.statusCode == 200) {
+        final eventData = json.decode(eventResponse.body);
+        final locationData = json.decode(locationResponse.body);
+
+        setState(() {
+          isAlreadyAnalyzed = eventData['alreadyAnalyzed'] == true ||
+              locationData['alreadyAnalyzed'] == true;
+        });
+
+        await _loadData();
+        _showSuccess('Analysis completed successfully');
+      } else {
+        _showError('Error analyzing chapters');
+      }
     } catch (e) {
       _showError('Error analyzing chapters: $e');
     } finally {

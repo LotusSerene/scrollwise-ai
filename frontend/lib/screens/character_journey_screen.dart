@@ -119,24 +119,33 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   }
 
   Future<void> _deleteBackstory(String characterId) async {
+    setState(() => isLoading = true);
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/codex/characters/$characterId/backstory?project_id=${widget.projectId}'),
+            '$apiUrl/codex-items/characters/$characterId/backstory?project_id=${widget.projectId}'),
         headers: headers,
       );
-
       if (response.statusCode == 200) {
-        await _loadCharacters(); // Reload characters after deletion
+        setState(() {
+          final index = characters.indexWhere((c) => c.id == characterId);
+          if (index != -1) {
+            characters[index] = characters[index].copyWith(backstory: '');
+          }
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backstory deleted successfully')),
         );
+      } else {
+        throw Exception('Failed to delete backstory');
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error deleting backstory: $e')),
       );
+    } finally {
+      setState(() => isLoading = false);
     }
   }
 
@@ -172,27 +181,41 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     );
 
     if (result != null) {
+      setState(() => isLoading = true);
       try {
         final headers = await getAuthHeaders();
         headers['Content-Type'] = 'application/json';
-
         final response = await http.put(
           Uri.parse(
-              '$apiUrl/codex/characters/${character.id}/backstory?project_id=${widget.projectId}'),
+              '$apiUrl/codex-items/characters/${character.id}/backstory?project_id=${widget.projectId}'),
           headers: headers,
-          body: json.encode({'backstory': result}),
+          body: json.encode(result), // Change this line
         );
 
         if (response.statusCode == 200) {
-          await _loadCharacters(); // Reload characters after update
+          setState(() {
+            final index = characters.indexWhere((c) => c.id == character.id);
+            if (index != -1) {
+              characters[index] = characters[index].copyWith(backstory: result);
+            }
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Backstory updated successfully')),
           );
+        } else {
+          print('Error updating backstory: ${response.body}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error updating backstory: ${response.body}')),
+          );
         }
       } catch (e) {
+        print('Error updating backstory: $e');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error updating backstory: $e')),
         );
+      } finally {
+        setState(() => isLoading = false);
       }
     }
   }

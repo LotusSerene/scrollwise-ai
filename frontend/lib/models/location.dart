@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class Location {
   final String id;
   final String name;
@@ -21,7 +23,7 @@ class Location {
     return Location(
       id: json['id'],
       name: json['name'],
-      description: json['description'],
+      description: utf8.decode(json['description'].toString().codeUnits),
       coordinates: json['coordinates'],
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),

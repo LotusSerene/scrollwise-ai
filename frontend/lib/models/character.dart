@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class Character {
   final String id;
   final String name;
@@ -19,7 +21,7 @@ class Character {
     return Character(
       id: json['id'],
       name: json['name'],
-      description: json['description'],
+      description: utf8.decode(json['description'].toString().codeUnits),
       backstory: json['backstory'] ?? '',
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),

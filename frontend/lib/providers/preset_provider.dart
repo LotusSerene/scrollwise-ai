@@ -41,6 +41,12 @@ class PresetProvider with ChangeNotifier {
   }
 
   Future<void> loadPreset(String presetName, String projectId) async {
+    if (presetName == "select a preset") {
+      _selectedPreset = null;
+      _currentPreset = null;
+      notifyListeners();
+      return;
+    }
     try {
       final response = await http.get(
         Uri.parse(
