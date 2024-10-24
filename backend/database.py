@@ -289,7 +289,7 @@ class CharacterBackstory(Base):
             'created_at': self.created_at.isoformat()
         }
 
-# Add this with the other model definitions (around line 31)
+
 class CharacterRelationshipAnalysis(Base):
     __tablename__ = 'character_relationship_analyses'
     id = Column(String, primary_key=True)
@@ -373,7 +373,7 @@ class Database:
                         'api_key': user.api_key,
                         'model_settings': json.loads(user.model_settings) if user.model_settings else None
                     }
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -433,7 +433,7 @@ class Database:
                     chapter.content = content
                     await session.commit()
                     return chapter.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating chapter: {str(e)}")
@@ -467,7 +467,7 @@ class Database:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
                     return chapter.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -543,7 +543,7 @@ class Database:
                     codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return codex_item.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating codex item: {str(e)}")
@@ -554,13 +554,18 @@ class Database:
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
             try:
+                # First, delete related character relationship analyses
+                await session.execute(delete(CharacterRelationshipAnalysis).where(
+                    (CharacterRelationshipAnalysis.character1_id == item_id) |
+                    (CharacterRelationshipAnalysis.character2_id == item_id)
+                ))
+
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
                     events = await session.execute(select(Event).filter_by(character_id=item_id))
                     events = events.scalars().all()
                     for event in events:
                         event.character_id = None
-                        # Ensure the updated_at is timezone-naive
                         event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
                     await session.delete(codex_item)
@@ -580,7 +585,7 @@ class Database:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
                     return codex_item.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -697,7 +702,7 @@ class Database:
                         'areas_for_improvement': validity_check.areas_for_improvement,
                         'created_at': validity_check.created_at
                     }
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -805,7 +810,7 @@ class Database:
                 preset = preset.scalars().first()
                 if preset:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -886,7 +891,7 @@ class Database:
                 
                 if character:
                     return character.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -900,7 +905,7 @@ class Database:
                 
                 if latest_chapter:
                     return latest_chapter.content
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1093,7 +1098,7 @@ class Database:
                 
                 if chapter:
                     return chapter.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1103,7 +1108,7 @@ class Database:
                 event = await session.get(Event, event_id)
                 if event and event.user_id == user_id and event.project_id == project_id:
                     return event.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1113,7 +1118,7 @@ class Database:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
                     return location.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1181,7 +1186,7 @@ class Database:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
                     return project.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1201,7 +1206,7 @@ class Database:
                     project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return project.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating project: {str(e)}")
@@ -1219,7 +1224,7 @@ class Database:
                     project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return project.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating project universe: {str(e)}")
@@ -1275,7 +1280,7 @@ class Database:
                 universe = await session.get(Universe, universe_id)
                 if universe and universe.user_id == user_id:
                     return universe.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1287,7 +1292,7 @@ class Database:
                     universe.name = name
                     await session.commit()
                     return universe.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating universe: {str(e)}")
@@ -1373,7 +1378,7 @@ class Database:
                 character = character.scalars().first()
                 if character:
                     return character.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1440,7 +1445,7 @@ class Database:
                     character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return character.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error saving character backstory: {str(e)}")
@@ -1488,7 +1493,7 @@ class Database:
                         'id': chapter.id,
                         'content': chapter.content
                     }
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1546,7 +1551,7 @@ class Database:
                         setattr(event, key, value)
                     await session.commit()
                     return event.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
@@ -1578,7 +1583,7 @@ class Database:
                         setattr(location, key, value)
                     await session.commit()
                     return location.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
                 
@@ -1600,7 +1605,7 @@ class Database:
                     relationship.relationship_type = relationship_type
                     await session.commit()
                     return relationship.to_dict()
-                return None
+                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating character relationship: {str(e)}")
@@ -1621,7 +1626,7 @@ class Database:
                 location = location.scalars().first()
                 if location:
                     return location.to_dict()
-                return None
+                raise
             finally:
                 await session.close()
 
