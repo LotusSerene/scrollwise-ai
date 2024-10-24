@@ -510,7 +510,7 @@ class Database:
                     user_id=user_id,
                     project_id=project_id,
                     created_at=current_time,
-                    updated_at=current_time
+                    updated_at=current_time,
                 )
                 session.add(item)
                 await session.commit()
@@ -556,6 +556,13 @@ class Database:
             try:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
+                    events = await session.execute(select(Event).filter_by(character_id=item_id))
+                    events = events.scalars().all()
+                    for event in events:
+                        event.character_id = None
+                        # Ensure the updated_at is timezone-naive
+                        event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
                     await session.delete(codex_item)
                     await session.commit()
                     return True
