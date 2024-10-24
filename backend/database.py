@@ -231,8 +231,8 @@ class Event(Base):
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)  # Added this line
     location_id = Column(String, ForeignKey('locations.id'), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     character = relationship("CodexItem", back_populates="events")
     location = relationship("Location", back_populates="events")
