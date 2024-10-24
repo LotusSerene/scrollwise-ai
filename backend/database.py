@@ -1,8 +1,9 @@
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, select, delete
-from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool
+from sqlalchemy.orm import relationship
+from sqlalchemy import delete  # Changed this line
+from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
 import os
@@ -36,8 +37,8 @@ class Project(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     universe_id = Column(String, ForeignKey('universes.id'), nullable=True)
     target_word_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Update the relationships with proper back_populates
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
@@ -128,8 +129,8 @@ class CodexItem(Base):
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     # Add these fields for character-specific information
     backstory = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     
     # Add these relationships
     relationships = relationship("CharacterRelationship", 
@@ -230,8 +231,8 @@ class Event(Base):
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)  # Added this line
     location_id = Column(String, ForeignKey('locations.id'), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     character = relationship("CodexItem", back_populates="events")
     location = relationship("Location", back_populates="events")
@@ -256,8 +257,8 @@ class Location(Base):
     coordinates = Column(String, nullable=True)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     events = relationship("Event", back_populates="location")
 
@@ -277,7 +278,7 @@ class CharacterBackstory(Base):
     character_id = Column(String, ForeignKey('codex_items.id'), nullable=False)
     content = Column(Text, nullable=False)
     chapter_id = Column(String, ForeignKey('chapters.id'), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     def to_dict(self):
         return {
@@ -298,8 +299,8 @@ class CharacterRelationshipAnalysis(Base):
     description = Column(Text)
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), onupdate=datetime.datetime.utcnow)
 
     def to_dict(self):
         return {
@@ -321,21 +322,31 @@ class Database:
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set")
         
-        self.engine = create_async_engine(db_url, poolclass=QueuePool, pool_size=50, max_overflow=10, 
-                                          pool_recycle=3600, pool_pre_ping=True, client_encoding='utf8')
+        # Convert the database URL to use the async driver
+        if db_url.startswith('postgresql://'):
+            db_url = db_url.replace('postgresql://', 'postgresql+asyncpg://', 1)
+        
+        # Remove QueuePool and use default async pool settings
+        self.engine = create_async_engine(
+            db_url,
+            echo=True,  # Set to False in production
+            pool_pre_ping=True,
+            pool_size=20,  # Adjust based on your needs
+            max_overflow=10,
+            pool_recycle=3600
+        )
         self.Session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
-        
-        async def create_tables():
-            async with self.engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-        
-        asyncio.run(create_tables())
+
+    async def initialize(self):
+        """Initialize the database by creating all tables."""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     async def get_session(self):
         return self.Session()
 
     async def create_user(self, email, password):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = User(id=str(uuid.uuid4()), email=email, password=password)
                 session.add(user)
@@ -349,7 +360,7 @@ class Database:
                 await session.close()
 
     async def get_user_by_email(self, email):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.execute(select(User).filter_by(email=email))
                 user = user.scalars().first()
@@ -367,7 +378,7 @@ class Database:
                 await session.close()
 
     async def get_all_chapters(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapters = await session.execute(select(Chapter).filter_by(user_id=user_id, project_id=project_id).order_by(Chapter.chapter_number))
                 chapters = chapters.scalars().all()
@@ -379,17 +390,17 @@ class Database:
                 await session.close()
 
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Log initial chapter creation attempt
-                self.logger.info(f"Creating new chapter - Title: {title}, User: {user_id}, Project: {project_id}")
+               # self.logger.info(f"Creating new chapter - Title: {title}, User: {user_id}, Project: {project_id}")
                 
                 # Get the highest chapter number for this project if not provided
                 if chapter_number is None:
                     latest_chapter = await session.execute(select(Chapter).filter_by(project_id=project_id).order_by(Chapter.chapter_number.desc()))
                     latest_chapter = latest_chapter.scalars().first()
                     chapter_number = (latest_chapter.chapter_number + 1) if latest_chapter else 1
-                    self.logger.debug(f"Assigned chapter number: {chapter_number}")
+                    #self.logger.debug(f"Assigned chapter number: {chapter_number}")
 
                 chapter = Chapter(
                     id=str(uuid.uuid4()),
@@ -404,7 +415,7 @@ class Database:
                 session.add(chapter)
                 await session.commit()
                 
-                self.logger.info(f"Successfully created chapter - ID: {chapter.id}, Number: {chapter_number}")
+                #self.logger.info(f"Successfully created chapter - ID: {chapter.id}, Number: {chapter_number}")
                 return chapter.id
             except Exception as e:
                 await session.rollback()
@@ -414,7 +425,7 @@ class Database:
                 await session.close()
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
@@ -431,7 +442,7 @@ class Database:
                 await session.close()
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # First, delete related validity checks
                 await session.execute(delete(ValidityCheck).where(ValidityCheck.chapter_id == chapter_id, ValidityCheck.user_id == user_id, ValidityCheck.project_id == project_id))
@@ -451,7 +462,7 @@ class Database:
                 await session.close()
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
@@ -461,7 +472,7 @@ class Database:
                 await session.close()
 
     async def get_all_validity_checks(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 checks = await session.execute(select(ValidityCheck).filter_by(user_id=user_id, project_id=project_id))
                 checks = checks.scalars().all()
@@ -470,7 +481,7 @@ class Database:
                 await session.close()
 
     async def delete_validity_check(self, check_id, user_id, project_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 validity_check = await session.get(ValidityCheck, check_id)
                 if validity_check and validity_check.user_id == user_id and validity_check.project_id == project_id:
@@ -486,8 +497,10 @@ class Database:
                 await session.close()
 
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
+                # Create timezone-naive datetime objects
+                current_time = datetime.datetime.utcnow()
                 item = CodexItem(
                     id=str(uuid.uuid4()),
                     name=name,
@@ -495,7 +508,9 @@ class Database:
                     type=type,
                     subtype=subtype,
                     user_id=user_id,
-                    project_id=project_id
+                    project_id=project_id,
+                    created_at=current_time,
+                    updated_at=current_time
                 )
                 session.add(item)
                 await session.commit()
@@ -508,7 +523,7 @@ class Database:
                 await session.close()
 
     async def get_all_codex_items(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_items = await session.execute(select(CodexItem).filter_by(user_id=user_id, project_id=project_id))
                 codex_items = codex_items.scalars().all()
@@ -517,7 +532,7 @@ class Database:
                 await session.close()
 
     async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
@@ -536,7 +551,7 @@ class Database:
                 await session.close()
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
@@ -552,7 +567,7 @@ class Database:
                 await session.close()
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
@@ -562,7 +577,7 @@ class Database:
                 await session.close()
 
     async def save_api_key(self, user_id, api_key):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 if user:
@@ -576,7 +591,7 @@ class Database:
                 await session.close()
 
     async def get_api_key(self, user_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 return user.api_key if user else None
@@ -584,7 +599,7 @@ class Database:
                 await session.close()
 
     async def remove_api_key(self, user_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 if user:
@@ -598,7 +613,7 @@ class Database:
                 await session.close()
 
     async def save_model_settings(self, user_id, settings):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 if user:
@@ -612,7 +627,7 @@ class Database:
                 await session.close()
 
     async def get_model_settings(self, user_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 if user and user.model_settings:
@@ -622,14 +637,14 @@ class Database:
                     'checkLLM': 'gemini-1.5-pro-002',
                     'embeddingsModel': 'models/text-embedding-004',
                     'titleGenerationLLM': 'gemini-1.5-pro-002',
-                    'ExtractionLLM': 'gemini-1.5-pro-002',
+                    'extractionLLM': 'gemini-1.5-pro-002',
                     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
                 }
             finally:
                 await session.close()
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 check = ValidityCheck(
                     id=str(uuid.uuid4()),
@@ -657,7 +672,7 @@ class Database:
                 await session.close()
 
     async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 validity_check = await session.get(ValidityCheck, chapter_id)
                 if validity_check and validity_check.user_id == user_id:
@@ -679,24 +694,19 @@ class Database:
                 await session.close()
 
     async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
-                chat_history = await session.get(ChatHistory, (user_id, project_id))
-                
-                # Convert ChatHistoryItem objects to dictionaries
-                serializable_messages = [
-                    {"type": msg["type"], "content": msg["content"]}
-                    for msg in messages
-                ]
+                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
+                chat_history = chat_history.scalars().first()
                 
                 if chat_history:
-                    chat_history.messages = json.dumps(serializable_messages)
+                    chat_history.messages = json.dumps(messages)
                 else:
                     chat_history = ChatHistory(
                         id=str(uuid.uuid4()),
                         user_id=user_id,
                         project_id=project_id,
-                        messages=json.dumps(serializable_messages)
+                        messages=json.dumps(messages)
                     )
                     session.add(chat_history)
                 await session.commit()
@@ -708,15 +718,16 @@ class Database:
                 await session.close()
 
     async def get_chat_history(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
-                chat_history = await session.get(ChatHistory, (user_id, project_id))
+                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
+                chat_history = chat_history.scalars().first()
                 return json.loads(chat_history.messages) if chat_history else []
             finally:
                 await session.close()
 
     async def delete_chat_history(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chat_history = await session.get(ChatHistory, (user_id, project_id))
                 if chat_history:
@@ -730,7 +741,7 @@ class Database:
                 await session.close()
 
     async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Check if a preset with the same name, user_id, and project_id already exists
                 existing_preset = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id, name=name))
@@ -754,7 +765,7 @@ class Database:
                 await session.close()
 
     async def get_presets(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 presets = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id))
                 presets = presets.scalars().all()
@@ -763,7 +774,7 @@ class Database:
                 await session.close()
 
     async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
                 preset = preset.scalars().first()
@@ -780,7 +791,7 @@ class Database:
                 await session.close()
 
     async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
                 preset = preset.scalars().first()
@@ -793,7 +804,7 @@ class Database:
     # Add methods to update embedding_id for existing chapters and codex_items 
 
     async def update_chapter_embedding_id(self, chapter_id, embedding_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter:
@@ -809,7 +820,7 @@ class Database:
                 await session.close()
 
     async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 relationship = await session.execute(select(CharacterRelationship).join(
                     CodexItem, CharacterRelationship.character_id == CodexItem.id
@@ -833,7 +844,7 @@ class Database:
 
     async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
                                  description: str, user_id: str, project_id: str) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 analysis = CharacterRelationshipAnalysis(
                     id=str(uuid.uuid4()),
@@ -855,7 +866,7 @@ class Database:
                 await session.close()
 
     async def get_character_by_id(self, character_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 character = await session.execute(select(CodexItem).filter(
                     CodexItem.id == character_id,
@@ -872,7 +883,7 @@ class Database:
                 await session.close()
 
     async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 latest_chapter = await session.execute(select(Chapter).filter(
                     Chapter.project_id == project_id
@@ -886,7 +897,7 @@ class Database:
                 await session.close()
 
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 relationships = (
                     await session.execute(select(CharacterRelationship)
@@ -924,7 +935,7 @@ class Database:
                 await session.close()
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 character = await session.get(CodexItem, character_id)
                 if character and character.user_id == user_id and character.project_id == project_id:
@@ -936,7 +947,7 @@ class Database:
                 await session.close()
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 character = await session.get(CodexItem, character_id)
                 if character and character.user_id == user_id and character.project_id == project_id:
@@ -946,9 +957,8 @@ class Database:
                     raise ValueError("Character not found")
             finally:
                 await session.close()
-
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Check if the project exists and belongs to the user
                 project_exists = await session.execute(select(exists().where(and_(Project.id == project_id, Project.user_id == user_id))))
@@ -978,7 +988,7 @@ class Database:
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str],
                        user_id: str, project_id: str) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 location = Location(
                     id=str(uuid.uuid4()),
@@ -999,7 +1009,7 @@ class Database:
                 await session.close()
 
     async def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
@@ -1015,7 +1025,7 @@ class Database:
                 await session.close()
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 event = await session.get(Event, event_id)
                 if event and event.user_id == user_id and event.project_id == project_id:
@@ -1031,7 +1041,7 @@ class Database:
                 await session.close()
 
     async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter and chapter.user_id == user_id:
@@ -1048,7 +1058,7 @@ class Database:
                 await session.close()
 
     async def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.get(Chapter, chapter_id)
                 if chapter and isinstance(chapter.processed_types, list):
@@ -1058,7 +1068,7 @@ class Database:
                 await session.close()
 
     async def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 chapter = await session.execute(select(Chapter).filter_by(
                     project_id=project_id,
@@ -1073,7 +1083,7 @@ class Database:
                 await session.close()
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 event = await session.get(Event, event_id)
                 if event and event.user_id == user_id and event.project_id == project_id:
@@ -1083,7 +1093,7 @@ class Database:
                 await session.close()
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
@@ -1093,7 +1103,7 @@ class Database:
                 await session.close()
 
     async def update_codex_item_embedding_id(self, item_id, embedding_id):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_item = await session.get(CodexItem, item_id)
                 if codex_item:
@@ -1109,9 +1119,19 @@ class Database:
                 await session.close()
 
     async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
-                project = Project(id=str(uuid.uuid4()), name=name, description=description, user_id=user_id, universe_id=universe_id)
+                # Create timezone-naive datetime objects
+                current_time = datetime.datetime.utcnow()
+                project = Project(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    user_id=user_id,
+                    universe_id=universe_id,
+                    created_at=current_time,
+                    updated_at=current_time
+                )
                 session.add(project)
                 await session.commit()
                 return project.id
@@ -1123,7 +1143,7 @@ class Database:
                 await session.close()
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 projects = await session.execute(select(Project).filter_by(user_id=user_id))
                 projects = projects.scalars().all()
@@ -1132,7 +1152,7 @@ class Database:
                 await session.close()
 
     async def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
                 projects = projects.scalars().all()
@@ -1141,7 +1161,7 @@ class Database:
                 await session.close()
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
@@ -1151,7 +1171,7 @@ class Database:
                 await session.close()
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
@@ -1175,12 +1195,13 @@ class Database:
                 await session.close()
 
     async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
-                    project.universe_id = universe_id  # This can now be None
-                    project.updated_at = datetime.datetime.now(timezone.utc)
+                    project.universe_id = universe_id
+                    # Use a timezone-naive datetime
+                    project.updated_at = datetime.datetime.utcnow()
                     await session.commit()
                     return project.to_dict()
                 return None
@@ -1192,7 +1213,7 @@ class Database:
                 await session.close()
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
@@ -1208,7 +1229,7 @@ class Database:
                 await session.close()
 
     async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 universes = await session.execute(select(Universe).filter_by(user_id=user_id))
                 universes = universes.scalars().all()
@@ -1220,7 +1241,7 @@ class Database:
                 await session.close()
 
     async def create_universe(self, name: str, user_id: str) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 universe = Universe(id=str(uuid.uuid4()), name=name, user_id=user_id)
                 session.add(universe)
@@ -1234,7 +1255,7 @@ class Database:
                 await session.close()
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 universe = await session.get(Universe, universe_id)
                 if universe and universe.user_id == user_id:
@@ -1244,7 +1265,7 @@ class Database:
                 await session.close()
 
     async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 universe = await session.get(Universe, universe_id)
                 if universe and universe.user_id == user_id:
@@ -1260,7 +1281,7 @@ class Database:
                 await session.close()
 
     async def delete_universe(self, universe_id: str, user_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 universe = await session.get(Universe, universe_id)
                 if universe and universe.user_id == user_id:
@@ -1276,7 +1297,7 @@ class Database:
                 await session.close()
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 codex_items = await session.execute(select(CodexItem).join(Project).filter(
                     and_(Project.universe_id == universe_id, CodexItem.user_id == user_id)
@@ -1287,7 +1308,7 @@ class Database:
                 await session.close()
 
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Fetch all projects for the given universe
                 projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
@@ -1331,7 +1352,7 @@ class Database:
                 await session.close()
 
     async def get_character_by_name(self, name: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 character = await session.execute(select(CodexItem).filter_by(name=name, user_id=user_id, project_id=project_id, type='character'))
                 character = character.scalars().first()
@@ -1342,7 +1363,7 @@ class Database:
                 await session.close()
 
     async def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 events = await session.execute(select(Event).filter_by(project_id=project_id))
                 events = events.scalars().all()
@@ -1351,7 +1372,7 @@ class Database:
                 await session.close()
 
     async def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 locations = await session.execute(select(Location).filter_by(user_id=user_id, project_id=project_id))
                 locations = locations.scalars().all()
@@ -1360,7 +1381,7 @@ class Database:
                 await session.close()
 
     async def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 processed_chapter = await session.execute(select(ProcessedChapter).filter_by(
                     chapter_id=chapter_id, 
@@ -1372,7 +1393,7 @@ class Database:
                 await session.close()
 
     async def mark_latest_chapter_processed(self, project_id: str, function_name: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 latest_chapter = await session.execute(select(Chapter).filter(
                     Chapter.project_id == project_id
@@ -1392,7 +1413,7 @@ class Database:
                 await session.close()
 
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 character = await session.get(CodexItem, character_id)
                 if character and character.user_id == user_id and character.project_id == project_id and character.type == 'character':
@@ -1412,7 +1433,7 @@ class Database:
                 await session.close()
 
     async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 backstories = await session.execute(select(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at))
                 backstories = backstories.scalars().all()
@@ -1421,7 +1442,7 @@ class Database:
                 await session.close()
 
     async def get_characters_from_codex(self, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 characters = await session.execute(select(CodexItem).filter_by(
                     user_id=user_id, 
@@ -1434,7 +1455,7 @@ class Database:
                 await session.close()
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Use JSON containment operator @> instead of LIKE
                 chapter = await session.execute(
@@ -1455,7 +1476,7 @@ class Database:
     async def create_character_relationship(self, character_id: str, related_character_id: str, 
                                             relationship_type: str, project_id: str, 
                                             description: Optional[str] = None) -> str:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 # Ensure character IDs are not None before querying
                 if character_id is None or related_character_id is None:
@@ -1498,7 +1519,7 @@ class Database:
                 await session.close()
 
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 relationship = await session.execute(
                     select(CharacterRelationship).join(
@@ -1523,7 +1544,7 @@ class Database:
                 await session.close()
     
     async def get_location_by_name(self, name: str, user_id: str, project_id: str):
-        async with self.get_session() as session:
+        async with await self.get_session() as session:
             try:
                 location = await session.execute(
                     select(Location).filter_by(
@@ -1539,4 +1560,10 @@ class Database:
             finally:
                 await session.close()
 
+    async def dispose(self):
+        """Dispose of the engine and close all connections."""
+        if self.engine:
+            await self.engine.dispose()
+
 db_instance = Database()
+
