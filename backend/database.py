@@ -450,10 +450,6 @@ class Database:
                     await session.delete(chapter)
                     await session.commit()
                     return True
-                except Exception as e:
-                    self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
-                    raise
-                return False
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error deleting chapter: {str(e)}")
@@ -543,10 +539,6 @@ class Database:
                     codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return codex_item.to_dict()
-                except Exception as e:
-                    self.logger.error(f"Error getting codex item by ID: {str(e)}")
-                    raise
-                raise
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating codex item: {str(e)}")
@@ -643,9 +635,6 @@ class Database:
                 user = await session.get(User, user_id)
                 if user and user.model_settings:
                     return json.loads(user.model_settings)
-                except Exception as e:
-                    self.logger.error(f"Error getting model settings: {str(e)}")
-                    raise
                 return {
                     'mainLLM': 'gemini-1.5-pro-002',
                     'checkLLM': 'gemini-1.5-pro-002',
@@ -889,9 +878,6 @@ class Database:
                 if character:
                     return character.to_dict()
                 except Exception as e:
-                    self.logger.error(f"Error getting character by name: {str(e)}")
-                    raise
-                except Exception as e:
                     self.logger.error(f"Error getting character by ID: {str(e)}")
                     raise
                 raise
@@ -1113,10 +1099,6 @@ class Database:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
                     return location.to_dict()
-                except Exception as e:
-                    self.logger.error(f"Error getting location by title: {str(e)}")
-                    raise
-                raise
             except Exception as e:
                 self.logger.error(f"Error getting latest chapter: {str(e)}")
                 raise
@@ -1189,9 +1171,6 @@ class Database:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
                     return project.to_dict()
-                except Exception as e:
-                    self.logger.error(f"Error getting project: {str(e)}")
-                    raise
                 raise
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -1479,8 +1458,6 @@ class Database:
                 ))
                 characters = characters.scalars().all()
                 return [character.to_dict() for character in characters]
-            except Exception as e:
-                self.logger.error(f"Error getting event by title: {str(e)}")
                 raise
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
@@ -1573,8 +1550,6 @@ class Database:
                 event = await session.execute(select(Event).filter_by(title=title, user_id=user_id, project_id=project_id))
                 event = event.scalars().first()
                 return event.to_dict() if event else None
-            except Exception as e:
-                self.logger.error(f"Error getting location by name: {str(e)}")
                 raise
 
 
