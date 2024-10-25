@@ -372,8 +372,9 @@ class Database:
                         'model_settings': json.loads(user.model_settings) if user.model_settings else None
                     }
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting user by email: {str(e)}")
+                raise
 
     async def get_all_chapters(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
