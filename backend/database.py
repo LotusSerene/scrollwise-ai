@@ -431,6 +431,9 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error getting chapter: {str(e)}")
                 raise
+            except Exception as e:
+                self.logger.error(f"Error getting chapter: {str(e)}")
+                raise
                 raise
             except Exception as e:
                 await session.rollback()
@@ -723,6 +726,8 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error getting chat history: {str(e)}")
                 raise
+                self.logger.error(f"Error getting chat history: {str(e)}")
+                raise
             except Exception as e:
                 self.logger.error(f"Error saving chat history: {str(e)}")
                 raise
@@ -796,6 +801,9 @@ class Database:
                 preset = preset.scalars().first()
                 if preset:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting preset by name: {str(e)}")
                 raise
             except Exception as e:
                 self.logger.error(f"Error getting preset by name: {str(e)}")
@@ -1079,6 +1087,9 @@ class Database:
                 if chapter:
                     return chapter.to_dict()
                 raise
+            except Exception as e:
+                self.logger.error(f"Error getting latest chapter: {str(e)}")
+                raise
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1253,6 +1264,12 @@ class Database:
                     return universe.to_dict()
                 raise
             except Exception as e:
+                self.logger.error(f"Error updating universe: {str(e)}")
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting universe: {str(e)}")
+                raise
+            except Exception as e:
                 self.logger.error(f"Error getting universe: {str(e)}")
                 raise
                 raise
@@ -1360,6 +1377,12 @@ class Database:
                     return character.to_dict()
                 raise
             except Exception as e:
+                self.logger.error(f"Error getting character by name: {str(e)}")
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting character by ID: {str(e)}")
+                raise
+            except Exception as e:
                 self.logger.error(f"Error checking chapter processed status: {str(e)}")
                 raise
 
@@ -1456,6 +1479,8 @@ class Database:
                 ))
                 characters = characters.scalars().all()
                 return [character.to_dict() for character in characters]
+            except Exception as e:
+                self.logger.error(f"Error getting characters from codex: {str(e)}")
                 raise
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
@@ -1476,6 +1501,9 @@ class Database:
                         'id': chapter.id,
                         'content': chapter.content
                     }
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
                 raise
             except Exception as e:
                 self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
@@ -1549,6 +1577,9 @@ class Database:
                 event = event.scalars().first()
                 return event.to_dict() if event else None
                 raise
+            except Exception as e:
+                self.logger.error(f"Error getting event by title: {str(e)}")
+                raise
 
 
     async def get_location_by_title(self, title: str, user_id: str, project_id: str):
@@ -1557,6 +1588,9 @@ class Database:
                 location = await session.execute(select(Location).filter_by(title=title, user_id=user_id, project_id=project_id))
                 location = location.scalars().first()
                 return location.to_dict() if location else None
+            except Exception as e:
+                self.logger.error(f"Error getting location by title: {str(e)}")
+                raise
             except Exception as e:
                 self.logger.error(f"Error creating project: {str(e)}")
                 raise
@@ -1592,6 +1626,9 @@ class Database:
                     return relationship.to_dict()
                 raise
             except Exception as e:
+                self.logger.error(f"Error updating character relationship: {str(e)}")
+                raise
+            except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating character relationship: {str(e)}")
                 raise
@@ -1609,6 +1646,9 @@ class Database:
                 location = location.scalars().first()
                 if location:
                     return location.to_dict()
+            except Exception as e:
+                self.logger.error(f"Error getting location by ID: {str(e)}")
+                raise
                 raise
             except Exception as e:
                 self.logger.error(f"Error getting projects: {str(e)}")
