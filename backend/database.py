@@ -356,8 +356,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating user: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_user_by_email(self, email):
         async with await self.get_session() as session:
