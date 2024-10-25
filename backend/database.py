@@ -385,8 +385,6 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error fetching all chapters: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         async with await self.get_session() as session:
@@ -420,8 +418,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating chapter: {str(e)}", exc_info=True)
                 raise
-            finally:
-                await session.close()
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
         async with await self.get_session() as session:
@@ -437,8 +433,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating chapter: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
         async with await self.get_session() as session:
@@ -457,8 +451,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting chapter: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -467,8 +459,6 @@ class Database:
                 if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
                     return chapter.to_dict()
                 raise
-            finally:
-                await session.close()
 
     async def get_all_validity_checks(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -476,8 +466,9 @@ class Database:
                 checks = await session.execute(select(ValidityCheck).filter_by(user_id=user_id, project_id=project_id))
                 checks = checks.scalars().all()
                 return [check.to_dict() for check in checks]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting all validity checks: {str(e)}")
+                raise
 
     async def delete_validity_check(self, check_id, user_id, project_id):
         async with await self.get_session() as session:
@@ -492,8 +483,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting validity check: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting all codex items: {str(e)}")
+                raise
 
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
         async with await self.get_session() as session:
@@ -518,8 +510,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating codex item: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_all_codex_items(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -527,8 +517,9 @@ class Database:
                 codex_items = await session.execute(select(CodexItem).filter_by(user_id=user_id, project_id=project_id))
                 codex_items = codex_items.scalars().all()
                 return [item.to_dict() for item in codex_items]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting codex item by ID: {str(e)}")
+                raise
 
     async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -547,8 +538,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating codex item: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -575,8 +564,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting codex item: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -585,8 +572,9 @@ class Database:
                 if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
                     return codex_item.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting API key: {str(e)}")
+                raise
 
     async def save_api_key(self, user_id, api_key):
         async with await self.get_session() as session:
@@ -599,16 +587,15 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving API key: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_api_key(self, user_id):
         async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
                 return user.api_key if user else None
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting model settings: {str(e)}")
+                raise
 
     async def remove_api_key(self, user_id):
         async with await self.get_session() as session:
@@ -621,8 +608,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error removing API key: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def save_model_settings(self, user_id, settings):
         async with await self.get_session() as session:
@@ -635,8 +620,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving model settings: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_model_settings(self, user_id):
         async with await self.get_session() as session:
@@ -652,8 +635,9 @@ class Database:
                     'extractionLLM': 'gemini-1.5-pro-002',
                     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
                 }
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting validity check: {str(e)}")
+                raise
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -680,8 +664,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving validity check: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -702,8 +684,6 @@ class Database:
                         'created_at': validity_check.created_at
                     }
                 raise
-            finally:
-                await session.close()
 
     async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
         async with await self.get_session() as session:
@@ -733,8 +713,9 @@ class Database:
                 chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
                 chat_history = chat_history.scalars().first()
                 return json.loads(chat_history.messages) if chat_history else []
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error saving chat history: {str(e)}")
+                raise
 
     async def delete_chat_history(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -747,8 +728,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting chat history: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting chat history: {str(e)}")
+                raise
 
     async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
         async with await self.get_session() as session:
@@ -771,8 +753,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating preset: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_presets(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -780,8 +760,9 @@ class Database:
                 presets = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id))
                 presets = presets.scalars().all()
                 return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting presets: {str(e)}")
+                raise
 
     async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -797,8 +778,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting preset: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -808,8 +787,6 @@ class Database:
                 if preset:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
                 raise
-            finally:
-                await session.close()
 
     # Add methods to update embedding_id for existing chapters and codex_items 
 
@@ -826,8 +803,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting preset by name: {str(e)}")
+                raise
 
     async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
         async with await self.get_session() as session:
@@ -849,8 +827,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting character relationship: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
                                  description: str, user_id: str, project_id: str) -> str:
@@ -872,8 +848,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving relationship analysis: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_character_by_id(self, character_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -889,8 +863,6 @@ class Database:
                 if character:
                     return character.to_dict()
                 raise
-            finally:
-                await session.close()
 
     async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
         async with await self.get_session() as session:
@@ -903,8 +875,9 @@ class Database:
                 if latest_chapter:
                     return latest_chapter.content
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting character by ID: {str(e)}")
+                raise
 
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -941,8 +914,9 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error getting character relationships: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting latest chapter content: {str(e)}")
+                raise
 
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
@@ -959,8 +933,9 @@ class Database:
                     await session.commit()
                 else:
                     raise ValueError(f"Character with ID {character_id} not found")
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error updating character backstory: {str(e)}")
+                raise
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -973,8 +948,9 @@ class Database:
                     await session.commit()
                 else:
                     raise ValueError("Character not found")
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error deleting character backstory: {str(e)}")
+                raise
 
 
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
@@ -999,8 +975,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating event: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
         async with await self.get_session() as session:
@@ -1022,8 +996,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating location: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
         async with await self.get_session() as session:
@@ -1038,8 +1010,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting location: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
         async with await self.get_session() as session:
@@ -1054,8 +1024,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting event: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
         async with await self.get_session() as session:
@@ -1071,8 +1039,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error marking chapter as processed: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
         async with await self.get_session() as session:
@@ -1081,8 +1047,9 @@ class Database:
                 if chapter and isinstance(chapter.processed_types, list):
                     return process_type in chapter.processed_types
                 return False
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error marking chapter as processed: {str(e)}")
+                raise
 
     async def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1096,8 +1063,6 @@ class Database:
                 if chapter:
                     return chapter.to_dict()
                 raise
-            finally:
-                await session.close()
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1106,8 +1071,9 @@ class Database:
                 if event and event.user_id == user_id and event.project_id == project_id:
                     return event.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error checking chapter processed status: {str(e)}")
+                raise
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1116,8 +1082,9 @@ class Database:
                 if location and location.user_id == user_id and location.project_id == project_id:
                     return location.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting latest chapter: {str(e)}")
+                raise
 
     async def update_codex_item_embedding_id(self, item_id, embedding_id):
         async with await self.get_session() as session:
@@ -1132,8 +1099,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting event by ID: {str(e)}")
+                raise
 
     async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
         async with await self.get_session() as session:
@@ -1156,8 +1124,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating project: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting location by ID: {str(e)}")
+                raise
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1165,8 +1134,9 @@ class Database:
                 projects = await session.execute(select(Project).filter_by(user_id=user_id))
                 projects = projects.scalars().all()
                 return [project.to_dict() for project in projects]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting universes: {str(e)}")
+                raise
 
     async def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1174,8 +1144,9 @@ class Database:
                 projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
                 projects = projects.scalars().all()
                 return [project.to_dict() for project in projects]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting universe: {str(e)}")
+                raise
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1184,8 +1155,6 @@ class Database:
                 if project and project.user_id == user_id:
                     return project.to_dict()
                 raise
-            finally:
-                await session.close()
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1208,8 +1177,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating project: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1226,8 +1193,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating project universe: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
@@ -1242,8 +1207,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting project: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1254,8 +1217,6 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error fetching universes: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def create_universe(self, name: str, user_id: str) -> str:
         async with await self.get_session() as session:
@@ -1268,8 +1229,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating universe: {str(e)}")
                 raise ValueError(str(e))  # Ensure the error is a string
-            finally:
-                await session.close()
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1278,8 +1237,9 @@ class Database:
                 if universe and universe.user_id == user_id:
                     return universe.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting universe codex: {str(e)}")
+                raise
 
     async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1294,8 +1254,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating universe: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting universe knowledge base: {str(e)}")
+                raise
 
     async def delete_universe(self, universe_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
@@ -1310,8 +1271,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting universe: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting character by name: {str(e)}")
+                raise
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1321,8 +1283,9 @@ class Database:
                 ))
                 codex_items = codex_items.scalars().all()
                 return [item.to_dict() for item in codex_items]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting events: {str(e)}")
+                raise
 
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
         async with await self.get_session() as session:
@@ -1365,8 +1328,9 @@ class Database:
                 knowledge_base = {k: v for k, v in knowledge_base.items() if v}
 
                 return knowledge_base
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting locations: {str(e)}")
+                raise
 
     async def get_character_by_name(self, name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1376,8 +1340,9 @@ class Database:
                 if character:
                     return character.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error checking chapter processed status: {str(e)}")
+                raise
 
     async def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1385,8 +1350,9 @@ class Database:
                 events = await session.execute(select(Event).filter_by(project_id=project_id))
                 events = events.scalars().all()
                 return [event.to_dict() for event in events]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
+                raise
 
     async def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1394,8 +1360,9 @@ class Database:
                 locations = await session.execute(select(Location).filter_by(user_id=user_id, project_id=project_id))
                 locations = locations.scalars().all()
                 return [location.to_dict() for location in locations]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting character backstories: {str(e)}")
+                raise
 
     async def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
         async with await self.get_session() as session:
@@ -1406,8 +1373,9 @@ class Database:
                 ))
                 processed_chapter = processed_chapter.scalars().first()
                 return processed_chapter is not None
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting characters from codex: {str(e)}")
+                raise
 
     async def mark_latest_chapter_processed(self, project_id: str, function_name: str):
         async with await self.get_session() as session:
@@ -1426,8 +1394,9 @@ class Database:
                     )
                     session.add(processed_chapter)
                     await session.commit()
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
+                raise
 
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1447,8 +1416,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving character backstory: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1456,8 +1423,9 @@ class Database:
                 backstories = await session.execute(select(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at))
                 backstories = backstories.scalars().all()
                 return [backstory.to_dict() for backstory in backstories]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error updating event: {str(e)}")
+                raise
 
     async def get_characters_from_codex(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1469,8 +1437,9 @@ class Database:
                 ))
                 characters = characters.scalars().all()
                 return [character.to_dict() for character in characters]
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting event by title: {str(e)}")
+                raise
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         async with await self.get_session() as session:
@@ -1491,8 +1460,6 @@ class Database:
                         'content': chapter.content
                     }
                 raise
-            finally:
-                await session.close()
 
     async def create_character_relationship(self, character_id: str, related_character_id: str, 
                                             relationship_type: str, project_id: str, 
@@ -1536,8 +1503,9 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error creating character relationship: {str(e)}")
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting location by title: {str(e)}")
+                raise
 
     async def update_event(self, event_id: str, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1549,8 +1517,9 @@ class Database:
                     await session.commit()
                     return event.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error updating location: {str(e)}")
+                raise
 
     async def get_event_by_title(self, title: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1558,8 +1527,9 @@ class Database:
                 event = await session.execute(select(Event).filter_by(title=title, user_id=user_id, project_id=project_id))
                 event = event.scalars().first()
                 return event.to_dict() if event else None
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting location by name: {str(e)}")
+                raise
 
 
     async def get_location_by_title(self, title: str, user_id: str, project_id: str):
@@ -1568,8 +1538,9 @@ class Database:
                 location = await session.execute(select(Location).filter_by(title=title, user_id=user_id, project_id=project_id))
                 location = location.scalars().first()
                 return location.to_dict() if location else None
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error creating project: {str(e)}")
+                raise
 
     async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1581,8 +1552,6 @@ class Database:
                     await session.commit()
                     return location.to_dict()
                 raise
-            finally:
-                await session.close()
                 
 
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
@@ -1607,8 +1576,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error updating character relationship: {str(e)}")
                 raise
-            finally:
-                await session.close()
     
     async def get_location_by_name(self, name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1624,8 +1591,9 @@ class Database:
                 if location:
                     return location.to_dict()
                 raise
-            finally:
-                await session.close()
+            except Exception as e:
+                self.logger.error(f"Error getting projects: {str(e)}")
+                raise
 
     async def dispose(self):
         """Dispose of the engine and close all connections."""
