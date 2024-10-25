@@ -430,6 +430,10 @@ class Database:
                     return chapter.to_dict()
                 raise
             except Exception as e:
+                self.logger.error(f"Error getting chapter: {str(e)}")
+                raise
+                raise
+            except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error updating chapter: {str(e)}")
                 raise
@@ -446,6 +450,9 @@ class Database:
                     await session.delete(chapter)
                     await session.commit()
                     return True
+                except Exception as e:
+                    self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+                    raise
                 return False
             except Exception as e:
                 await session.rollback()
@@ -518,6 +525,9 @@ class Database:
                 codex_items = codex_items.scalars().all()
                 return [item.to_dict() for item in codex_items]
             except Exception as e:
+                self.logger.error(f"Error getting all codex items: {str(e)}")
+                raise
+            except Exception as e:
                 self.logger.error(f"Error getting codex item by ID: {str(e)}")
                 raise
 
@@ -533,6 +543,9 @@ class Database:
                     codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return codex_item.to_dict()
+                except Exception as e:
+                    self.logger.error(f"Error getting codex item by ID: {str(e)}")
+                    raise
                 raise
             except Exception as e:
                 await session.rollback()
@@ -594,6 +607,9 @@ class Database:
                 user = await session.get(User, user_id)
                 return user.api_key if user else None
             except Exception as e:
+                self.logger.error(f"Error getting API key: {str(e)}")
+                raise
+            except Exception as e:
                 self.logger.error(f"Error getting model settings: {str(e)}")
                 raise
 
@@ -627,6 +643,9 @@ class Database:
                 user = await session.get(User, user_id)
                 if user and user.model_settings:
                     return json.loads(user.model_settings)
+                except Exception as e:
+                    self.logger.error(f"Error getting model settings: {str(e)}")
+                    raise
                 return {
                     'mainLLM': 'gemini-1.5-pro-002',
                     'checkLLM': 'gemini-1.5-pro-002',
@@ -714,6 +733,9 @@ class Database:
                 chat_history = chat_history.scalars().first()
                 return json.loads(chat_history.messages) if chat_history else []
             except Exception as e:
+                self.logger.error(f"Error getting chat history: {str(e)}")
+                raise
+            except Exception as e:
                 self.logger.error(f"Error saving chat history: {str(e)}")
                 raise
 
@@ -786,6 +808,10 @@ class Database:
                 preset = preset.scalars().first()
                 if preset:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting preset by name: {str(e)}")
+                raise
                 raise
 
     # Add methods to update embedding_id for existing chapters and codex_items 
@@ -862,6 +888,12 @@ class Database:
                 
                 if character:
                     return character.to_dict()
+                except Exception as e:
+                    self.logger.error(f"Error getting character by name: {str(e)}")
+                    raise
+                except Exception as e:
+                    self.logger.error(f"Error getting character by ID: {str(e)}")
+                    raise
                 raise
 
     async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
@@ -1081,6 +1113,9 @@ class Database:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
                     return location.to_dict()
+                except Exception as e:
+                    self.logger.error(f"Error getting location by title: {str(e)}")
+                    raise
                 raise
             except Exception as e:
                 self.logger.error(f"Error getting latest chapter: {str(e)}")
@@ -1154,6 +1189,9 @@ class Database:
                 project = await session.get(Project, project_id)
                 if project and project.user_id == user_id:
                     return project.to_dict()
+                except Exception as e:
+                    self.logger.error(f"Error getting project: {str(e)}")
+                    raise
                 raise
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -1236,6 +1274,10 @@ class Database:
                 universe = await session.get(Universe, universe_id)
                 if universe and universe.user_id == user_id:
                     return universe.to_dict()
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting universe: {str(e)}")
+                raise
                 raise
             except Exception as e:
                 self.logger.error(f"Error getting universe codex: {str(e)}")
@@ -1459,6 +1501,10 @@ class Database:
                         'id': chapter.id,
                         'content': chapter.content
                     }
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
+                raise
                 raise
 
     async def create_character_relationship(self, character_id: str, related_character_id: str, 
