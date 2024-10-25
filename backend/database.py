@@ -726,8 +726,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error saving chat history: {str(e)}")
                 raise
-            finally:
-                await session.close()
 
     async def get_chat_history(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
