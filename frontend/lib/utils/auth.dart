@@ -2,7 +2,6 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'dart:convert';
 
 const String utf8Charset = 'UTF-8';
 

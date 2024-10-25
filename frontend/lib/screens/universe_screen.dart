@@ -22,7 +22,7 @@ class _UniverseScreenState extends State<UniverseScreen> {
   bool _isLoading = true;
   List<dynamic> _projects = [];
   String _selectedFilter = 'All';
-  Map<String, bool> _expandedSections = {
+  final Map<String, bool> _expandedSections = {
     'Projects': true,
     'Codex': true,
     'Knowledge Base': true,
@@ -162,59 +162,184 @@ class _UniverseScreenState extends State<UniverseScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_universeData['name'] ?? 'Universe'),
+        elevation: 0,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: DropdownButton<String>(
-                      value: _selectedFilter,
-                      onChanged: (String? newValue) {
-                        setState(() {
-                          _selectedFilter = newValue!;
-                        });
-                      },
-                      items: <String>[
-                        'All',
-                        'Projects',
-                        'Codex',
-                        'Knowledge Base'
-                      ].map<DropdownMenuItem<String>>((String value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                    ),
+          : CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _buildUniverseHeader(),
+                ),
+                SliverToBoxAdapter(
+                  child: _buildFilterChips(),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      if (_selectedFilter == 'All' ||
+                          _selectedFilter == 'Projects')
+                        _buildCollapsibleSection('Projects', _projects),
+                      if (_selectedFilter == 'All' ||
+                          _selectedFilter == 'Codex')
+                        _buildCollapsibleSection('Codex', _codexItems),
+                      if (_selectedFilter == 'All' ||
+                          _selectedFilter == 'Knowledge Base')
+                        _buildCollapsibleSection(
+                            'Knowledge Base', _knowledgeBaseItems),
+                    ]),
                   ),
-                  if (_selectedFilter == 'All' || _selectedFilter == 'Projects')
-                    _buildCollapsibleSection('Projects', _projects),
-                  if (_selectedFilter == 'All' || _selectedFilter == 'Codex')
-                    _buildCollapsibleSection('Codex', _codexItems),
-                  if (_selectedFilter == 'All' ||
-                      _selectedFilter == 'Knowledge Base')
-                    _buildCollapsibleSection(
-                        'Knowledge Base', _knowledgeBaseItems),
-                ],
-              ),
+                ),
+              ],
             ),
+    );
+  }
+
+  Widget _buildUniverseHeader() {
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.public,
+                  size: 32, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _universeData['name'] ?? 'Universe',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    Text(
+                      'Created ${DateFormat('MMM d, yyyy').format(DateTime.parse(_universeData['created_at'] ?? DateTime.now().toString()))}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (_universeData['description'] != null) ...[
+            const SizedBox(height: 16),
+            Text(
+              _universeData['description'],
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+          const SizedBox(height: 16),
+          _buildStatisticCards(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatisticCards() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildStatCard(
+            'Projects',
+            _projects.length.toString(),
+            Icons.folder_special,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildStatCard(
+            'Codex Entries',
+            _codexItems.length.toString(),
+            Icons.book,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildStatCard(
+            'Knowledge Base',
+            _knowledgeBaseItems.values
+                .fold(0, (sum, list) => sum + list.length)
+                .toString(),
+            Icons.psychology,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, IconData icon) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            Icon(icon, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          _buildFilterChip('All'),
+          const SizedBox(width: 8),
+          _buildFilterChip('Projects'),
+          const SizedBox(width: 8),
+          _buildFilterChip('Codex'),
+          const SizedBox(width: 8),
+          _buildFilterChip('Knowledge Base'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label) {
+    return FilterChip(
+      selected: _selectedFilter == label,
+      label: Text(label),
+      onSelected: (bool selected) {
+        setState(() {
+          _selectedFilter = selected ? label : 'All';
+        });
+      },
     );
   }
 
   Widget _buildCollapsibleSection(String title, dynamic items) {
     return Card(
-      margin: const EdgeInsets.all(8.0),
+      margin: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ListTile(
             title: Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            ),
+            leading: Icon(
+              _getSectionIcon(title),
+              color: Theme.of(context).colorScheme.primary,
             ),
             trailing: IconButton(
               icon: Icon(_expandedSections[title]!
@@ -231,34 +356,84 @@ class _UniverseScreenState extends State<UniverseScreen> {
             if (title == 'Knowledge Base')
               _buildKnowledgeBaseSection(items)
             else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return ListTile(
-                    title: Text(item['name'] ?? item['title'] ?? 'Untitled'),
-                    subtitle: Text(item['description'] ?? ''),
-                    onTap: () {
-                      if (title == 'Projects') {
-                        _showProjectDetails(item);
-                      } else if (title == 'Codex') {
-                        _showCodexDetails(item);
-                      }
-                    },
-                  );
-                },
-              ),
+              _buildItemsList(title, items),
         ],
       ),
     );
   }
 
+  IconData _getSectionIcon(String section) {
+    switch (section) {
+      case 'Projects':
+        return Icons.folder_special;
+      case 'Codex':
+        return Icons.book;
+      case 'Knowledge Base':
+        return Icons.psychology;
+      default:
+        return Icons.circle;
+    }
+  }
+
+  Widget _buildItemsList(String title, List<dynamic> items) {
+    if (items.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: Text(
+            'No ${title.toLowerCase()} found',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: items.length,
+      separatorBuilder: (context, index) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return ListTile(
+          title: Text(item['name'] ?? item['title'] ?? 'Untitled'),
+          subtitle: Text(
+            item['description'] ?? '',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          leading: Icon(_getItemIcon(title)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            if (title == 'Projects') {
+              _showProjectDetails(item);
+            } else if (title == 'Codex') {
+              _showCodexDetails(item);
+            }
+          },
+        );
+      },
+    );
+  }
+
+  IconData _getItemIcon(String section) {
+    switch (section) {
+      case 'Projects':
+        return Icons.folder_open;
+      case 'Codex':
+        return Icons.article;
+      default:
+        return Icons.circle;
+    }
+  }
+
   Widget _buildKnowledgeBaseSection(
       Map<String, List<dynamic>> knowledgeBaseByProject) {
     if (knowledgeBaseByProject.isEmpty) {
-      return ListTile(title: Text('No knowledge base items'));
+      return const ListTile(title: Text('No knowledge base items'));
     }
     return ListView.builder(
       shrinkWrap: true,
@@ -297,7 +472,7 @@ class _UniverseScreenState extends State<UniverseScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Type: ${item['type'] ?? 'Unknown'}'),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
                 Text(item['content'] ?? item['description'] ?? ''),
               ],
             ),
@@ -319,6 +494,6 @@ class _UniverseScreenState extends State<UniverseScreen> {
     if (text.length <= maxLength) {
       return text;
     }
-    return text.substring(0, maxLength) + '...';
+    return '${text.substring(0, maxLength)}...';
   }
 }

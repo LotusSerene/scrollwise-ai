@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/app_state.dart';
 import '../utils/auth.dart';
 import '../models/character.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +6,8 @@ import 'dart:convert';
 import '../utils/constants.dart';
 import '../widgets/character_detail_dialog.dart'; // Make sure to create this file
 import 'package:expandable/expandable.dart'; // Add this package to pubspec.yaml
+import 'package:provider/provider.dart';
+import '../providers/app_state.dart';
 
 class CharacterJourneyScreen extends StatefulWidget {
   final String projectId;
@@ -23,10 +23,21 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   List<Character> characters = [];
   Set<String> ignoredCharacters = {};
   bool isLoading = false;
+  late AppState _appState;
 
   @override
   void initState() {
     super.initState();
+    _appState = Provider.of<AppState>(context, listen: false);
+
+    // Initialize with saved state if it exists
+    final savedState = _appState.getGenerationState('character_journey');
+    if (savedState != null) {
+      setState(() {
+        ignoredCharacters = Set<String>.from(
+            savedState.lastGeneratedItem?['ignoredCharacters'] ?? {});
+      });
+    }
     _loadCharacters();
   }
 
@@ -54,12 +65,14 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   }
 
   Future<void> _updateCharacterInformation() async {
-    setState(() => isLoading = true);
+    _appState.setGenerationState('character_journey', isGenerating: true);
+
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
 
       bool anyUpdates = false;
+      List<Map<String, dynamic>> updatedCharacters = [];
 
       for (var character in characters) {
         if (!ignoredCharacters.contains(character.id)) {
@@ -83,19 +96,23 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
                   characters[index] = characters[index].copyWith(
                     backstory: responseBody['backstory']['new_backstory'],
                   );
+                  updatedCharacters.add(characters[index].toJson());
                 }
               });
               anyUpdates = true;
-            } else if (responseBody != null &&
-                responseBody['message'] != null) {
-              print(
-                  'Message for character ${character.id}: ${responseBody['message']}');
             }
-          } else {
-            print('Error updating character ${character.id}: ${response.body}');
           }
         }
       }
+
+      _appState.setGenerationState(
+        'character_journey',
+        isGenerating: false,
+        lastGeneratedItem: {
+          'updatedCharacters': updatedCharacters,
+          'ignoredCharacters': List<String>.from(ignoredCharacters),
+        },
+      );
 
       if (anyUpdates) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -103,18 +120,15 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'No new information found or no unprocessed chapters available')),
+          const SnackBar(content: Text('No new information found')),
         );
       }
     } catch (e) {
+      _appState.setGenerationState('character_journey', isGenerating: false);
       print('Error updating character information: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating character information: $e')),
       );
-    } finally {
-      setState(() => isLoading = false);
     }
   }
 
@@ -150,7 +164,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   }
 
   Future<void> _editBackstory(Character character) async {
-    final TextEditingController _backstoryController =
+    final TextEditingController backstoryController =
         TextEditingController(text: character.backstory);
 
     final String? result = await showDialog<String>(
@@ -159,7 +173,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         return AlertDialog(
           title: Text('Edit Backstory for ${character.name}'),
           content: TextField(
-            controller: _backstoryController,
+            controller: backstoryController,
             maxLines: null,
             decoration: const InputDecoration(
               hintText: 'Enter backstory...',
@@ -171,8 +185,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, _backstoryController.text),
+              onPressed: () => Navigator.pop(context, backstoryController.text),
               child: const Text('Save'),
             ),
           ],
@@ -232,93 +245,268 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: characters.length + 1,
-              itemBuilder: (context, index) {
-                if (index == characters.length) {
-                  return Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: ElevatedButton(
-                      onPressed: _updateCharacterInformation,
-                      child: const Text('Update Information'),
-                    ),
-                  );
-                }
-                final character = characters[index];
-                return Opacity(
-                  opacity: ignoredCharacters.contains(character.id) ? 0.5 : 1.0,
-                  child: Card(
-                    margin: const EdgeInsets.all(8.0),
-                    child: ExpandablePanel(
-                      header: ListTile(
-                        title: Text(character.name,
-                            style: Theme.of(context).textTheme.titleLarge),
-                        trailing: Switch(
-                          value: !ignoredCharacters.contains(character.id),
-                          onChanged: (value) {
-                            setState(() {
-                              if (value) {
-                                ignoredCharacters.remove(character.id);
-                              } else {
-                                ignoredCharacters.add(character.id);
-                              }
-                            });
-                          },
-                        ),
-                      ),
-                      collapsed: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        child: Text(
-                          character.description,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      expanded: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Description:',
-                                style: Theme.of(context).textTheme.titleMedium),
-                            Text(character.description),
-                            const SizedBox(height: 16),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Backstory:',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium),
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.edit),
-                                      onPressed: () =>
-                                          _editBackstory(character),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete),
-                                      onPressed: () =>
-                                          _deleteBackstory(character.id),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            Text(character.backstory.isNotEmpty
-                                ? character.backstory
-                                : 'No backstory available'),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(),
+            const SizedBox(height: 24),
+            Expanded(
+              child: _buildCharacterList(),
             ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _updateCharacterInformation,
+        icon: const Icon(Icons.update),
+        label: const Text('Update All'),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.timeline,
+              size: 32,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Character Journeys',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                Text(
+                  'Track character development and backstories',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
+                      ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '${characters.length} Characters | ${characters.length - ignoredCharacters.length} Active',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCharacterList() {
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (characters.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.person_off,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No Characters Found',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.5),
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: characters.length,
+      itemBuilder: (context, index) {
+        final character = characters[index];
+        return _buildCharacterCard(character);
+      },
+    );
+  }
+
+  Widget _buildCharacterCard(Character character) {
+    final isIgnored = ignoredCharacters.contains(character.id);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: isIgnored ? 0 : 2,
+      child: ExpandablePanel(
+        theme: ExpandableThemeData(
+          headerAlignment: ExpandablePanelHeaderAlignment.center,
+          iconColor: Theme.of(context).colorScheme.primary,
+          iconSize: 28,
+        ),
+        header: ListTile(
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: isIgnored
+                  ? Theme.of(context).colorScheme.surfaceContainerHighest
+                  : Theme.of(context).colorScheme.primary,
+            ),
+            child: Center(
+              child: Text(
+                character.name.substring(0, 1).toUpperCase(),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color:
+                          Colors.white, // Changed to white for better contrast
+                      fontWeight: FontWeight.bold, // Added bold weight
+                    ),
+              ),
+            ),
+          ),
+          title: Text(
+            character.name,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: isIgnored
+                      ? Theme.of(context).colorScheme.onSurface.withOpacity(0.5)
+                      : Theme.of(context).colorScheme.onSurface,
+                ),
+          ),
+          trailing: Switch.adaptive(
+            value: !isIgnored,
+            onChanged: (value) {
+              setState(() {
+                if (value) {
+                  ignoredCharacters.remove(character.id);
+                } else {
+                  ignoredCharacters.add(character.id);
+                }
+              });
+            },
+          ),
+        ),
+        collapsed: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Text(
+            character.description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
+          ),
+        ),
+        expanded: _buildExpandedContent(character),
+      ),
+    );
+  }
+
+  Widget _buildExpandedContent(Character character) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSection(
+            title: 'Description',
+            content: character.description,
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Backstory',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    tooltip: 'Edit Backstory',
+                    onPressed: () => _editBackstory(character),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete),
+                    tooltip: 'Delete Backstory',
+                    onPressed: () => _showDeleteConfirmation(character),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            character.backstory.isNotEmpty
+                ? character.backstory
+                : 'No backstory available yet',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: character.backstory.isEmpty
+                      ? Theme.of(context).colorScheme.onSurface.withOpacity(0.5)
+                      : null,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection({required String title, required String content}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        Text(content),
+      ],
+    );
+  }
+
+  void _showDeleteConfirmation(Character character) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Backstory'),
+        content: Text(
+          'Are you sure you want to delete the backstory for ${character.name}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteBackstory(character.id);
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 }

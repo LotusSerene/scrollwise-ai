@@ -21,9 +21,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 
 from agent_manager import AgentManager, PROCESS_TYPES
-from database import db_instance
+from database import db_instance, Chapter, Project, CodexItem, KnowledgeBaseItem
 from vector_store import VectorStore
 # Load environment variables
 load_dotenv()
@@ -243,6 +244,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     except JWTError as e:
         logging.error(f"Error encoding JWT: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
@@ -270,6 +274,72 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
+    """Get statistics for a project including chapter count and word count."""
+    async with get_db_session() as session:
+        try:
+            # Get chapter count
+            chapter_count = await session.scalar(
+                select(func.count(Chapter.id))
+                .where(Chapter.project_id == project_id)
+                .where(Chapter.user_id == user_id)
+            )
+
+            # Get total word count from all chapters
+            word_count = await session.scalar(
+                select(func.array_length(
+                    func.regexp_split_to_array(
+                        func.regexp_replace(Chapter.content, '\s+', ' ', 'g'),
+                        '\s'
+                    ),
+                    1
+                ))
+                .where(Chapter.project_id == project_id)
+                .where(Chapter.user_id == user_id)
+            )
+
+            return {
+                "chapter_count": chapter_count or 0,
+                "word_count": word_count or 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting project stats: {str(e)}")
+            raise
+
+async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
+    """Get statistics for a universe including project count and total entries."""
+    async with get_db_session() as session:
+        try:
+            # Get project count
+            project_count = await session.scalar(
+                select(func.count(Project.id))
+                .where(Project.universe_id == universe_id)
+                .where(Project.user_id == user_id)
+            )
+
+            # Get total entries (codex items + knowledge base items)
+            codex_count = await session.scalar(
+                select(func.count(CodexItem.id))
+                .join(Project, CodexItem.project_id == Project.id)
+                .where(Project.universe_id == universe_id)
+                .where(CodexItem.user_id == user_id)
+            )
+
+            kb_count = await session.scalar(
+                select(func.count(KnowledgeBaseItem.id))
+                .join(Project, KnowledgeBaseItem.project_id == Project.id)
+                .where(Project.universe_id == universe_id)
+                .where(KnowledgeBaseItem.user_id == user_id)
+            )
+
+            return {
+                "project_count": project_count or 0,
+                "entry_count": (codex_count or 0) + (kb_count or 0)
+            }
+        except Exception as e:
+            logger.error(f"Error getting universe stats: {str(e)}")
+            raise
 
 
 # Create API routers
@@ -322,7 +392,7 @@ async def create_universe(
 
 @universe_router.get("/{universe_id}", response_model=Dict[str, Any])
 async def get_universe(
-    universe_id: str, 
+    universe_id: str,
     current_user: User = Depends(get_current_active_user)
 ):
     async with get_db_session() as session:
@@ -330,6 +400,9 @@ async def get_universe(
             universe = await db_instance.get_universe(universe_id, current_user.id)
             if not universe:
                 raise HTTPException(status_code=404, detail="Universe not found")
+
+            stats = await get_universe_stats(universe_id, current_user.id)
+            universe.update(stats)
             return JSONResponse(content=universe)
         except Exception as e:
             logger.error(f"Error fetching universe: {str(e)}")
@@ -394,10 +467,15 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
     async with get_db_session() as session:
         try:
             universes = await db_instance.get_universes(current_user.id)
-            return JSONResponse(content=universes)
+            # Add stats to each universe
+            for universe in universes:
+                stats = await get_universe_stats(universe['id'], current_user.id)
+                universe.update(stats)
+            return universes
         except Exception as e:
             logger.error(f"Error fetching universes: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
+
     
 
 
@@ -441,9 +519,27 @@ async def register(user: User):
 
 # Chapter routes
 
-generation_tasks = defaultdict(dict)
 
+generation_tasks = {}  # Changed from defaultdict to regular dict
 
+# Update the cancel endpoint
+@chapter_router.post("/cancel")
+async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
+    task_key = f"{current_user.id}_{project_id}"
+    
+    if task_key in generation_tasks:
+        agent_manager = generation_tasks[task_key]
+        try:
+            await agent_manager.close()  # Close the agent manager
+            del generation_tasks[task_key]  # Remove from tasks dictionary
+            return {"message": "Generation cancelled successfully"}
+        except Exception as e:
+            logger.error(f"Error cancelling generation: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error cancelling generation")
+    else:
+        return {"message": "No generation in progress for this project"}
+
+# Update the generate_chapters endpoint to store the AgentManager instance
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: Request,
@@ -451,8 +547,18 @@ async def generate_chapters(
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
+    task_key = f"{current_user.id}_{project_id}"
     agent_manager = None
+    
     try:
+        # Check if generation is already in progress
+        if task_key in generation_tasks:
+            raise HTTPException(status_code=400, detail="Chapter generation already in progress for this project.")
+
+        # Create agent manager and store it
+        agent_manager = await AgentManager.create(current_user.id, project_id)
+        generation_tasks[task_key] = agent_manager
+        
         # Parse and validate the request body
         body = await request.json()
         
@@ -469,11 +575,6 @@ async def generate_chapters(
 
         user_id = current_user.id
 
-        if project_id in generation_tasks[user_id] and not generation_tasks[user_id][project_id].done():
-            raise HTTPException(status_code=400, detail="Chapter generation already in progress for this project.")
-
-        agent_manager = await AgentManager.create(user_id, project_id)
-            
         async with get_db_session() as session:
             previous_chapters = await db_instance.get_all_chapters(current_user.id, project_id)
             codex_items = await db_instance.get_all_codex_items(current_user.id, project_id)
@@ -573,13 +674,12 @@ async def generate_chapters(
                 yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
             finally:
                 # Cleanup
-                if project_id in generation_tasks[user_id]:
-                    del generation_tasks[user_id][project_id]
+                if task_key in generation_tasks:
+                    del generation_tasks[task_key]
                 if agent_manager:
                     await agent_manager.close()
 
         generation_task = generate()
-        generation_tasks[user_id][project_id] = generation_task
 
         return StreamingResponse(generation_task, media_type="application/json")
 
@@ -590,19 +690,10 @@ async def generate_chapters(
         # Ensure cleanup on error
         if agent_manager:
             await agent_manager.close()
+        if task_key in generation_tasks:
+            del generation_tasks[task_key]
         logger.error(f"Error generating chapters: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@chapter_router.post("/cancel")
-async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
-    user_id = current_user.id
-    if project_id in generation_tasks[user_id]:
-        generation_tasks[user_id][project_id].cancel()
-        del generation_tasks[user_id][project_id]
-        return {"message": "Generation cancelled"}
-    else:
-        return {"message": "No generation in progress for this project"}
 
 
 @chapter_router.get("/{chapter_id}")
@@ -789,7 +880,6 @@ async def get_codex_items(project_id: str, current_user: User = Depends(get_curr
             logger.error(f"Error fetching codex items: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
         
-# Add this endpoint to the codex_router section
 @codex_router.post("/characters/{character_id}/extract-backstory")
 async def extract_character_backstory(
     character_id: str,
@@ -802,10 +892,6 @@ async def extract_character_backstory(
         character = await db_instance.get_codex_item_by_id(character_id, current_user.id, project_id)
         if not character or character['type'] != 'character':
             raise HTTPException(status_code=404, detail="Character not found")
-
-        # Check if the chapter has already been processed
-        if await db_instance.is_chapter_processed_for_type(request.chapter_id, PROCESS_TYPES['BACKSTORY']):
-            return JSONResponse({"message": "Chapter already analyzed for characters", "alreadyAnalyzed": True})
 
         agent_manager = await AgentManager.create(current_user.id, project_id)
         
@@ -822,7 +908,7 @@ async def extract_character_backstory(
             )
             return {"message": "Backstory updated", "backstory": result.dict()}
         else:
-            return {"message": "No new backstory information found"}
+            return {"message": "No new backstory information found", "alreadyProcessed": True}
             
     except Exception as e:
         logger.error(f"Error extracting character backstory: {str(e)}")
@@ -1203,10 +1289,15 @@ async def get_projects(current_user: User = Depends(get_current_active_user)):
     async with get_db_session() as session:
         try:
             projects = await db_instance.get_projects(current_user.id)
+            # Add stats to each project
+            for project in projects:
+                stats = await get_project_stats(project['id'], current_user.id)
+                project.update(stats)
             return {"projects": projects}
         except Exception as e:
             logger.error(f"Error fetching projects: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @project_router.get("/{project_id}")
 async def get_project(project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -1251,11 +1342,6 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
             logger.error(f"Error deleting project: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/chat-history")
-async def get_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
-    agent_manager = await AgentManager.create(current_user.id, project_id)
-    chat_history = await agent_manager.get_chat_history()
-    return {"chatHistory": chat_history}
 
 @app.delete("/chat-history")
 async def delete_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -1436,7 +1522,7 @@ async def analyze_relationships(
                 return {"message": "No unprocessed chapters to analyze", "skip": True}
 
             agent_manager = await AgentManager.create(current_user.id, project_id)
-            characters = await db_instance.get_characters_from_codex(current_user.id, project_id)
+            characters = await db_instance.get_characters(current_user.id, project_id)
             character_ids = [char['id'] for char in characters]
             relationships = await agent_manager.analyze_character_relationships(character_ids)
                

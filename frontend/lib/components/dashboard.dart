@@ -159,94 +159,113 @@ class _DashboardState extends State<Dashboard> {
     }
 
     if (_error.isNotEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_error, style: const TextStyle(color: Colors.red)),
-            ElevatedButton(
-              onPressed: _fetchData,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
+      return _buildErrorState();
     }
 
     return SingleChildScrollView(
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Story Progress',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildProgressCard(
-                    'Chapters',
-                    appState.chapters.length,
-                    Icons.book,
-                    Colors.blue,
-                    () => Navigator.pushNamed(context, '/chapters',
-                            arguments: widget.projectId)
-                        .then((_) {
-                      _fetchData();
-                    }),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildProgressCard(
-                    'Codex Entries',
-                    appState.codexItems.length,
-                    Icons.list_alt,
-                    Colors.green,
-                    () => Navigator.pushNamed(context, '/codex',
-                            arguments: widget.projectId)
-                        .then((_) {
-                      _fetchData();
-                    }),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildWordCountCard(appState),
+            _buildHeader(context),
+            const SizedBox(height: 32),
+            _buildProgressSection(appState),
+            const SizedBox(height: 32),
+            _buildWordCountSection(appState),
           ],
         ),
       ),
     );
   }
 
+  Widget _buildHeader(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          Icons.analytics,
+          size: 32,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(width: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Story Progress',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            Text(
+              'Track your writing journey',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
+                  ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProgressSection(AppState appState) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildProgressCard(
+            'Chapters',
+            appState.chapters.length,
+            Icons.book,
+            Theme.of(context).colorScheme.primary,
+            () => Navigator.pushNamed(context, '/chapters',
+                    arguments: widget.projectId)
+                .then((_) => _fetchData()),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildProgressCard(
+            'Codex Entries',
+            appState.codexItems.length,
+            Icons.list_alt,
+            Theme.of(context).colorScheme.secondary,
+            () => Navigator.pushNamed(context, '/codex',
+                    arguments: widget.projectId)
+                .then((_) => _fetchData()),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildProgressCard(
       String title, int value, IconData icon, Color color, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(icon, color: color, size: 32),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Text(
                 title,
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               Text(
                 value.toString(),
-                style: TextStyle(
-                    fontSize: 24, color: color, fontWeight: FontWeight.bold),
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
             ],
           ),
@@ -255,26 +274,30 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
-  Widget _buildWordCountCard(AppState appState) {
+  Widget _buildWordCountSection(AppState appState) {
     double progress = appState.targetWordCount > 0
         ? min(_wordCount / appState.targetWordCount, 1.0)
-        : 1.0;
-    Color progressColor = Color.lerp(Colors.red, Colors.green, progress)!;
+        : 0.0;
+    Color progressColor = Color.lerp(
+      Theme.of(context).colorScheme.error,
+      Theme.of(context).colorScheme.primary,
+      progress,
+    )!;
 
     return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Word Count',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                Text(
+                  'Word Count Progress',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
                 IconButton(
                   icon: const Icon(Icons.edit),
@@ -283,30 +306,67 @@ class _DashboardState extends State<Dashboard> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            LinearProgressIndicator(
-              value: progress,
-              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
-              backgroundColor: Colors.grey[300],
-              minHeight: 10,
+            const SizedBox(height: 24),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+                backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+                minHeight: 12,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   '$_wordCount words',
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
                 Text(
                   'Target: ${appState.targetWordCount}',
-                  style: const TextStyle(fontSize: 16),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
+                      ),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _error,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _fetchData,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

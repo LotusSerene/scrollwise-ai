@@ -4,6 +4,22 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 
+class GenerationState {
+  final String type;
+  final String? subtype;
+  final String? description;
+  final bool isGenerating;
+  final dynamic lastGeneratedItem;
+
+  GenerationState({
+    required this.type,
+    this.subtype,
+    this.description,
+    this.isGenerating = false,
+    this.lastGeneratedItem,
+  });
+}
+
 class AppState extends ChangeNotifier {
   bool _isLoggedIn = false;
   String? _currentProjectId;
@@ -28,26 +44,19 @@ class AppState extends ChangeNotifier {
   int get wordCount => _wordCount;
   int get targetWordCount => _targetWordCount;
 
+  final Map<String, GenerationState> _generationStates = {
+    'chapter': GenerationState(type: 'chapter'),
+    'codex': GenerationState(type: 'codex'),
+    'timeline': GenerationState(type: 'timeline'),
+    'character_journey': GenerationState(type: 'character_journey'),
+    'character_relationships': GenerationState(type: 'character_relationships'),
+  };
+
+  GenerationState? getGenerationState(String type) => _generationStates[type];
+
   void setLoggedIn(bool value) {
     _isLoggedIn = value;
     notifyListeners();
-  }
-
-  Future<void> setCurrentProject(String? projectId) async {
-    _currentProjectId = projectId;
-    // Clear existing data when switching projects
-    _chapters = [];
-    _codexItems = [];
-    _validityChecks = [];
-    _chaptersRead = 0;
-    _codexEntries = 0;
-    _wordCount = 0;
-    _targetWordCount = 0; // Reset progress when switching projects
-    notifyListeners();
-
-    if (projectId != null) {
-      await fetchProgressData(projectId);
-    }
   }
 
   void setToken(String? token) {
@@ -224,6 +233,56 @@ class AppState extends ChangeNotifier {
       }
     } catch (error) {
       print('Error fetching codex items: $error');
+    }
+  }
+
+  void setGenerationState(
+    String type, {
+    String? subtype,
+    String? description,
+    bool? isGenerating,
+    dynamic lastGeneratedItem,
+  }) {
+    final currentState = _generationStates[type];
+    if (currentState != null) {
+      _generationStates[type] = GenerationState(
+        type: type,
+        subtype: subtype ?? currentState.subtype,
+        description: description ?? currentState.description,
+        isGenerating: isGenerating ?? currentState.isGenerating,
+        lastGeneratedItem: lastGeneratedItem ?? currentState.lastGeneratedItem,
+      );
+      notifyListeners();
+    }
+  }
+
+  void resetGenerationState(String type) {
+    _generationStates[type] = GenerationState(type: type);
+    notifyListeners();
+  }
+
+  void resetAllGenerationStates() {
+    for (var type in _generationStates.keys) {
+      _generationStates[type] = GenerationState(type: type);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setCurrentProject(String? projectId) async {
+    _currentProjectId = projectId;
+    // Clear existing data when switching projects
+    _chapters = [];
+    _codexItems = [];
+    _validityChecks = [];
+    _chaptersRead = 0;
+    _codexEntries = 0;
+    _wordCount = 0;
+    _targetWordCount = 0;
+    resetAllGenerationStates();
+    notifyListeners();
+
+    if (projectId != null) {
+      await fetchProgressData(projectId);
     }
   }
 }

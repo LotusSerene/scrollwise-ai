@@ -39,58 +39,111 @@ class _LocationDialogState extends State<LocationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title:
-          Text(widget.location == null ? 'Create Location' : 'Edit Location'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _descriptionController,
-              decoration: const InputDecoration(labelText: 'Description'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _coordinatesController,
-              decoration:
-                  const InputDecoration(labelText: 'Coordinates (optional)'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _significanceController,
-              decoration: const InputDecoration(labelText: 'Significance'),
-              maxLines: 2,
-            ),
-          ],
+    return Dialog(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.secondaryContainer,
+                    child: Icon(
+                      Icons.edit_location_alt, // Updated icon
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Text(
+                    widget.location == null
+                        ? 'Create Location'
+                        : 'Edit Location',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _nameController,
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.label),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _descriptionController,
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.description),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _coordinatesController,
+                decoration: InputDecoration(
+                  labelText: 'Coordinates (optional)',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.map),
+                  hintText: 'e.g., 40.7128° N, 74.0060° W',
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _significanceController,
+                decoration: InputDecoration(
+                  labelText: 'Significance',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  prefixIcon: const Icon(Icons.star),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save'),
+                    onPressed: () {
+                      final result = {
+                        'name': _nameController.text,
+                        'description': _descriptionController.text,
+                        'coordinates': _coordinatesController.text.isEmpty
+                            ? null
+                            : _coordinatesController.text,
+                        'significance': _significanceController.text,
+                      };
+                      Navigator.pop(context, result);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () {
-            final result = {
-              'name': _nameController.text,
-              'description': _descriptionController.text,
-              'coordinates': _coordinatesController.text.isEmpty
-                  ? null
-                  : _coordinatesController.text,
-              'significance': _significanceController.text,
-            };
-            Navigator.pop(context, result);
-          },
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }

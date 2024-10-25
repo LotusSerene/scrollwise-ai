@@ -26,6 +26,7 @@ class _CreateChapterState extends State<CreateChapter> {
       TextEditingController();
   final TextEditingController _newPresetNameController =
       TextEditingController();
+  late final PresetProvider _presetProvider;
 
   int _numChapters = 1;
   bool _isGenerating = false;
@@ -39,20 +40,19 @@ class _CreateChapterState extends State<CreateChapter> {
   @override
   void initState() {
     super.initState();
-    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
-    _updateFieldsFromPreset(presetProvider.currentPreset);
-    presetProvider.addListener(_onPresetChanged);
+    _presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    _updateFieldsFromPreset(_presetProvider.currentPreset);
+    _presetProvider.addListener(_onPresetChanged);
 
     // Fetch presets when the widget is initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      presetProvider.fetchPresets(widget.projectId);
+      _presetProvider.fetchPresets(widget.projectId);
     });
   }
 
   @override
   void dispose() {
-    Provider.of<PresetProvider>(context, listen: false)
-        .removeListener(_onPresetChanged);
+    _presetProvider.removeListener(_onPresetChanged);
     _plotController.dispose();
     _writingStyleController.dispose();
     _styleGuideController.dispose();
@@ -63,8 +63,7 @@ class _CreateChapterState extends State<CreateChapter> {
   }
 
   void _onPresetChanged() {
-    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
-    _updateFieldsFromPreset(presetProvider.currentPreset);
+    _updateFieldsFromPreset(_presetProvider.currentPreset);
   }
 
   void _updateFieldsFromPreset(Map<String, dynamic>? preset) {
@@ -228,6 +227,15 @@ class _CreateChapterState extends State<CreateChapter> {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
     if (newValue == null) {
       presetProvider.clearSelectedPreset();
+      // Reset all form fields to default values
+      setState(() {
+        _numChapters = 1;
+        _plotController.text = '';
+        _writingStyleController.text = '';
+        _styleGuideController.text = '';
+        _minWordCountController.text = '1000';
+        _additionalInstructionsController.text = '';
+      });
     } else {
       presetProvider.loadPreset(newValue, widget.projectId);
     }
@@ -241,6 +249,230 @@ class _CreateChapterState extends State<CreateChapter> {
     } catch (error) {
       Fluttertoast.showToast(msg: 'Error deleting preset: ${error.toString()}');
     }
+  }
+
+  Widget _buildPresetDropdown(PresetProvider presetProvider) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: true,
+          value: presetProvider.selectedPreset,
+          hint: Text('Select a preset',
+              style: Theme.of(context).textTheme.bodyLarge),
+          icon: const Icon(Icons.arrow_drop_down),
+          borderRadius: BorderRadius.circular(12),
+          items: [
+            const DropdownMenuItem<String>(
+              value: null,
+              child: Text('No Preset'),
+            ),
+            ...presetProvider.presets.map((String preset) {
+              return DropdownMenuItem<String>(
+                value: preset,
+                child: Row(
+                  children: [
+                    const Icon(Icons.bookmark_outline),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(preset)),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+          onChanged: _handlePresetChange,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPresetActions(PresetProvider presetProvider) {
+    return Row(
+      children: [
+        if (presetProvider.selectedPreset != null)
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Delete Preset',
+            onPressed: () => _showDeletePresetDialog(presetProvider),
+            color: Theme.of(context).colorScheme.error,
+          ),
+        IconButton(
+          icon: const Icon(Icons.save_outlined),
+          tooltip: 'Save New Preset',
+          onPressed: () => _showSavePresetDialog(),
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ],
+    );
+  }
+
+  void _showSavePresetDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.save, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('Save Preset'),
+            ],
+          ),
+          content: TextField(
+            controller: _newPresetNameController,
+            decoration: InputDecoration(
+              labelText: 'Preset Name',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              prefixIcon: const Icon(Icons.bookmark_add_outlined),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('Save'),
+              onPressed: () {
+                Navigator.pop(context);
+                _handleSavePreset();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDeletePresetDialog(PresetProvider presetProvider) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Theme.of(context).colorScheme.error),
+              const SizedBox(width: 8),
+              const Text('Delete Preset'),
+            ],
+          ),
+          content: Text(
+              'Are you sure you want to delete "${presetProvider.selectedPreset}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                presetProvider.deletePreset(
+                    presetProvider.selectedPreset!, widget.projectId);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildGeneratedChaptersSection() {
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(top: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        height: _isExpanded ? MediaQuery.of(context).size.height * 0.6 : 120,
+        child: Column(
+          children: [
+            ListTile(
+              title: Text(
+                'Generated Chapter ${_displayedChapterIndex + 1}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_generatedChapters.length > 1) ...[
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: _displayedChapterIndex > 0
+                          ? () => _navigateChapters(-1)
+                          : null,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_forward),
+                      onPressed:
+                          _displayedChapterIndex < _generatedChapters.length - 1
+                              ? () => _navigateChapters(1)
+                              : null,
+                    ),
+                  ],
+                  IconButton(
+                    icon: Icon(
+                        _isExpanded ? Icons.expand_less : Icons.expand_more),
+                    onPressed: () {
+                      setState(() => _isExpanded = !_isExpanded);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            if (_isExpanded)
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    _streamedContent,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGenerateButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: ElevatedButton.icon(
+        icon: const Icon(Icons.auto_awesome),
+        label: const Text('Generate Chapter'),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: 16,
+          ),
+          textStyle: const TextStyle(fontSize: 18),
+        ),
+        onPressed: () => _handleSubmit(context),
+      ),
+    );
+  }
+
+  void _navigateChapters(int direction) {
+    setState(() {
+      _displayedChapterIndex += direction;
+      _streamedContent = _generatedChapters[_displayedChapterIndex];
+    });
   }
 
   @override
@@ -285,100 +517,26 @@ class _CreateChapterState extends State<CreateChapter> {
                   const SizedBox(height: 20),
                   Consumer<PresetProvider>(
                     builder: (context, presetProvider, child) {
-                      return Row(
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Select Preset:',
-                                  style: TextStyle(
-                                    color: Color(0xFFf8f9fa),
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButton<String?>(
-                                  value: presetProvider.selectedPreset,
-                                  hint: Text('Select a preset'),
-                                  onChanged: _handlePresetChange,
-                                  items: [
-                                    DropdownMenuItem<String?>(
-                                      value: null,
-                                      child: Text('Select a preset'),
-                                    ),
-                                    ...presetProvider.presets
-                                        .map<DropdownMenuItem<String>>(
-                                            (String value) {
-                                      return DropdownMenuItem<String>(
-                                        value: value,
-                                        child: Text(value),
-                                      );
-                                    }).toList(),
-                                  ],
-                                ),
-                                if (presetProvider.selectedPreset != null)
-                                  ElevatedButton(
-                                    onPressed: () => _handleDeletePreset(
-                                        presetProvider.selectedPreset!),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 20, vertical: 10),
-                                      textStyle: const TextStyle(fontSize: 16),
-                                    ),
-                                    child: const Text('Delete Preset'),
-                                  ),
-                              ],
+                          const Text(
+                            'Preset Settings:',
+                            style: TextStyle(
+                              color: Color(0xFFf8f9fa),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(width: 20),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Save New Preset:',
-                                  style: TextStyle(
-                                    color: Color(0xFFf8f9fa),
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextFormField(
-                                  controller: _newPresetNameController,
-                                  decoration: const InputDecoration(
-                                    hintText: 'New preset name',
-                                    hintStyle:
-                                        TextStyle(color: Color(0xFFf8f9fa)),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderSide:
-                                          BorderSide(color: Color(0xFFced4da)),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderSide:
-                                          BorderSide(color: Color(0xFF007bff)),
-                                    ),
-                                  ),
-                                  style:
-                                      const TextStyle(color: Color(0xFFf8f9fa)),
-                                ),
-                                const SizedBox(height: 10),
-                                ElevatedButton(
-                                  onPressed: _handleSavePreset,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF007bff),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 20, vertical: 10),
-                                    textStyle: const TextStyle(fontSize: 16),
-                                  ),
-                                  child: const Text('Save Preset'),
-                                ),
-                              ],
-                            ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildPresetDropdown(presetProvider),
+                              ),
+                              const SizedBox(width: 10),
+                              _buildPresetActions(presetProvider),
+                            ],
                           ),
                         ],
                       );
@@ -420,6 +578,7 @@ class _CreateChapterState extends State<CreateChapter> {
                           controller: _plotController,
                           decoration: const InputDecoration(
                             labelText: 'Plot',
+                            alignLabelWithHint: true,
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
                             enabledBorder: OutlineInputBorder(
                               borderSide: BorderSide(color: Color(0xFFced4da)),
@@ -430,27 +589,14 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
+                          minLines: 3,
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
                           controller: _writingStyleController,
                           decoration: const InputDecoration(
                             labelText: 'Writing Style',
-                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Color(0xFFced4da)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Color(0xFF007bff)),
-                            ),
-                          ),
-                          style: const TextStyle(color: Color(0xFFf8f9fa)),
-                        ),
-                        const SizedBox(height: 15),
-                        TextFormField(
-                          controller: _styleGuideController,
-                          decoration: const InputDecoration(
-                            labelText: 'Style Guide',
+                            alignLabelWithHint: true,
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
                             enabledBorder: OutlineInputBorder(
                               borderSide: BorderSide(color: Color(0xFFced4da)),
@@ -461,6 +607,25 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
+                          minLines: 2,
+                        ),
+                        const SizedBox(height: 15),
+                        TextFormField(
+                          controller: _styleGuideController,
+                          decoration: const InputDecoration(
+                            labelText: 'Style Guide',
+                            alignLabelWithHint: true,
+                            labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFFced4da)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF007bff)),
+                            ),
+                          ),
+                          style: const TextStyle(color: Color(0xFFf8f9fa)),
+                          maxLines: null,
+                          minLines: 3,
                         ),
                         const SizedBox(height: 15),
                         TextFormField(
@@ -489,6 +654,7 @@ class _CreateChapterState extends State<CreateChapter> {
                           controller: _additionalInstructionsController,
                           decoration: const InputDecoration(
                             labelText: 'Additional Instructions',
+                            alignLabelWithHint: true,
                             labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
                             enabledBorder: OutlineInputBorder(
                               borderSide: BorderSide(color: Color(0xFFced4da)),
@@ -499,6 +665,7 @@ class _CreateChapterState extends State<CreateChapter> {
                           ),
                           style: const TextStyle(color: Color(0xFFf8f9fa)),
                           maxLines: null,
+                          minLines: 3,
                         ),
                         const SizedBox(height: 20),
                         if (_isGenerating)

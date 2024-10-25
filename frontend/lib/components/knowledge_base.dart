@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:typed_data';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -20,6 +19,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   List<dynamic> _knowledgeBaseContent = [];
   final TextEditingController _textController = TextEditingController();
   var _selectedFile;
+  bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -44,6 +45,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
     } catch (error) {
       print('Error fetching knowledge base content: $error');
       Fluttertoast.showToast(msg: 'Error fetching knowledge base content');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -151,100 +156,333 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF212529),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1A000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Knowledge Base',
-            style: TextStyle(
-              color: Color(0xFF007bff),
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+          _buildHeader(),
+          const SizedBox(height: 24),
+          _buildInputSection(),
+          const SizedBox(height: 24),
+          _buildContentList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.psychology,
+              size: 32,
+              color: Theme.of(context).colorScheme.primary,
             ),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _knowledgeBaseContent.length,
-              itemBuilder: (context, index) {
-                final item = _knowledgeBaseContent[index];
-                final content = item['content'];
-                final title = item['title'] ?? item['name'] ?? 'Untitled';
-                return Card(
-                  elevation: 3,
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  child: ListTile(
-                    title: Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Knowledge Base',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                Text(
+                  '${_knowledgeBaseContent.length} items stored',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
                       ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Type: ${item['type']}'),
-                        Text(
-                          'Content: ${content.length > 100 ? content.substring(0, 100) + '...' : content}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                    trailing: IconButton(
-                      onPressed: () => _handleDelete(item['embedding_id']),
-                      icon: const Icon(Icons.delete, color: Colors.red),
+                ),
+              ],
+            ),
+          ],
+        ),
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          onPressed: _fetchKnowledgeBaseContent,
+          tooltip: 'Refresh content',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInputSection() {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Add New Content',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _textController,
+              decoration: InputDecoration(
+                hintText: 'Enter text to add to knowledge base...',
+                prefixIcon: const Icon(Icons.text_fields),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                filled: true,
+              ),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _handleTextSubmit,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Text'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(16),
                     ),
                   ),
-                );
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final result = await FilePicker.platform.pickFiles();
+                      if (result != null) {
+                        setState(() {
+                          _selectedFile = result.files.single;
+                        });
+                        _handleFileUpload(context);
+                      }
+                    },
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Upload Document'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(16),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContentList() {
+    if (_error != null) {
+      return _buildErrorState();
+    }
+
+    if (_knowledgeBaseContent.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    return Expanded(
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: _knowledgeBaseContent.length,
+          separatorBuilder: (context, index) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final item = _knowledgeBaseContent[index];
+            return _buildContentItem(item);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContentItem(dynamic item) {
+    final content = item['content'];
+    final title = item['title'] ?? item['name'] ?? 'Untitled';
+    final type = item['type'];
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 12,
+      ),
+      leading: Icon(
+        type == 'file' ? Icons.description : Icons.text_snippet,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 4),
+          Text(
+            content.length > 100 ? '${content.substring(0, 100)}...' : content,
+            style: Theme.of(context).textTheme.bodyMedium,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Type: $type',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+          ),
+        ],
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete),
+        color: Theme.of(context).colorScheme.error,
+        onPressed: () => _showDeleteDialog(item['embedding_id']),
+        tooltip: 'Delete item',
+      ),
+      onTap: () => _showContentDetails(item),
+    );
+  }
+
+  void _showContentDetails(dynamic item) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(item['title'] ?? item['name'] ?? 'Untitled'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Type: ${item['type']}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(item['content']),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDeleteDialog(String embeddingId) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Theme.of(context).colorScheme.error),
+              const SizedBox(width: 8),
+              const Text('Delete Item'),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to delete this item? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _handleDelete(embeddingId);
               },
             ),
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _textController,
-            decoration: InputDecoration(
-              hintText: 'Add text to knowledge base',
-              prefixIcon: const Icon(Icons.text_fields),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Expanded(
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.psychology_outlined,
+              size: 64,
+              color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
             ),
-            maxLines: null,
+            const SizedBox(height: 16),
+            Text(
+              'Knowledge Base Empty',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.secondary,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add text or upload documents to get started',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: Theme.of(context).colorScheme.error,
           ),
-          const SizedBox(height: 10),
-          ElevatedButton(
-            onPressed: _handleTextSubmit,
-            child: const Text('Add Text'),
+          const SizedBox(height: 16),
+          Text(
+            _error!,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
           ),
-          const SizedBox(height: 10),
-          ElevatedButton(
-            onPressed: () async {
-              final result = await FilePicker.platform.pickFiles();
-              if (result != null) {
-                setState(() {
-                  _selectedFile = result.files.single;
-                });
-                _handleFileUpload(context);
-              } else {
-                // User canceled the picker
-              }
-            },
-            child: const Text('Upload Document'),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _fetchKnowledgeBaseContent,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
           ),
         ],
       ),

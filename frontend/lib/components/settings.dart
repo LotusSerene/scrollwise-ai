@@ -164,166 +164,229 @@ class _SettingsState extends State<Settings> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF212529),
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x1A000000),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildApiKeySection(),
+          const SizedBox(height: 32),
+          _buildModelSettingsSection(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApiKeySection() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
         ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Settings',
-              style: TextStyle(
-                color: Color(0xFF007bff),
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Card(
-              color: const Color(0xFF343a40),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'API Key',
-                      style: TextStyle(
-                        color: Color(0xFF007bff),
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (_isKeySet && !_isEditingApiKey)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('API Key: $_apiKey'),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              ElevatedButton(
-                                onPressed: () =>
-                                    setState(() => _isEditingApiKey = true),
-                                child: const Text('Edit API Key'),
-                              ),
-                              const SizedBox(width: 10),
-                              ElevatedButton(
-                                onPressed: _handleRemoveApiKey,
-                                child: const Text('Remove API Key'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      )
-                    else
-                      Column(
-                        children: [
-                          TextFormField(
-                            initialValue: _apiKey,
-                            onChanged: (value) =>
-                                setState(() => _apiKey = value),
-                            obscureText: true,
-                            decoration: const InputDecoration(
-                              labelText: 'API Key',
-                              labelStyle: TextStyle(color: Colors.white),
-                              enabledBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: Color(0xFFced4da)),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: Color(0xFF007bff)),
-                              ),
-                            ),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          const SizedBox(height: 10),
-                          ElevatedButton(
-                            onPressed: _handleSaveApiKey,
-                            child: const Text('Save API Key'),
-                          ),
-                        ],
-                      ),
-                  ],
+            Row(
+              children: [
+                Icon(
+                  Icons.key,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
-              ),
+                const SizedBox(width: 8),
+                Text(
+                  'API Key',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
-            Card(
-              color: const Color(0xFF343a40),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Model Settings',
-                      style: TextStyle(
-                        color: Color(0xFF007bff),
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+            const SizedBox(height: 16),
+            if (_isKeySet && !_isEditingApiKey)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSecureKeyDisplay(),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: () =>
+                            setState(() => _isEditingApiKey = true),
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Edit Key'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _handleRemoveApiKey,
+                        icon: const Icon(Icons.delete),
+                        label: const Text('Remove'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            else
+              Column(
+                children: [
+                  TextFormField(
+                    initialValue: _apiKey,
+                    onChanged: (value) => setState(() => _apiKey = value),
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: 'Enter API Key',
+                      hintText: 'Your API key',
+                      prefixIcon: const Icon(Icons.vpn_key),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    ..._modelSettings.entries.map((entry) {
-                      final setting = entry.key;
-                      final value = entry.value;
-                      final options = setting == 'embeddingsModel'
-                          ? _embeddingsOptions
-                          : _modelOptions;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('$setting: $value'),
-                          DropdownButtonFormField<String>(
-                            value: value,
-                            onChanged: (newValue) =>
-                                _handleModelChange(setting, newValue!),
-                            items: options.map((option) {
-                              return DropdownMenuItem<String>(
-                                value: option,
-                                child: Text(option),
-                              );
-                            }).toList(),
-                            decoration: const InputDecoration(
-                              enabledBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: Color(0xFFced4da)),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: Color(0xFF007bff)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                        ],
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed: _handleSaveApiKey,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Save Key'),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelSettingsSection() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.tune,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Model Settings',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.secondary,
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            ..._modelSettings.entries.map((entry) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _formatSettingName(entry.key),
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: entry.value,
+                    onChanged: (newValue) =>
+                        _handleModelChange(entry.key, newValue!),
+                    items: (entry.key == 'embeddingsModel'
+                            ? _embeddingsOptions
+                            : _modelOptions)
+                        .map((option) {
+                      return DropdownMenuItem<String>(
+                        value: option,
+                        child: Text(option),
                       );
                     }).toList(),
-                    ElevatedButton(
-                      onPressed: _handleSaveModelSettings,
-                      child: const Text('Save Model Settings'),
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _handleSaveModelSettings,
+                icon: const Icon(Icons.save),
+                label: const Text('Save Settings'),
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildSecureKeyDisplay() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check_circle,
+            size: 16,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'API Key is set and secured',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatSettingName(String name) {
+    return name
+        .replaceAllMapped(
+          RegExp(r'([A-Z])'),
+          (match) => ' ${match.group(1)}',
+        )
+        .split('LLM')
+        .join(' Model')
+        .trim()
+        .split(' ')
+        .map((word) => word[0].toUpperCase() + word.substring(1))
+        .join(' ');
   }
 }

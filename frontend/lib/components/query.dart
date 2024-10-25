@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -17,6 +16,7 @@ class Query extends StatefulWidget {
 
 class _QueryState extends State<Query> {
   final TextEditingController _queryController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   List<Map<String, dynamic>> _chatHistory = [];
   bool _isLoading = false;
 
@@ -127,61 +127,209 @@ class _QueryState extends State<Query> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return Column(
+      children: [
+        _buildHeader(),
+        Expanded(
+          child: _buildChatArea(),
+        ),
+        _buildInputArea(),
+      ],
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).shadowColor.withOpacity(0.1),
+            blurRadius: 4,
+          ),
+        ],
+      ),
+      child: Row(
         children: [
+          Icon(
+            Icons.psychology,
+            color: Theme.of(context).colorScheme.primary,
+            size: 24,
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: ListView.builder(
-              itemCount: _chatHistory.length,
-              itemBuilder: (context, index) {
-                final message = _chatHistory[index];
-                final isUser = message['type'] == 'human';
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Card(
-                    color: isUser ? Colors.blue : const Color.fromARGB(255, 87, 87, 87),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Container(
-                        constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.7),
-                        padding: const EdgeInsets.all(8.0),
-                        decoration: BoxDecoration(
-                          color:
-                              isUser ? Colors.lightBlue : const Color.fromARGB(255, 87, 87, 87),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(message['content']),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AI Assistant',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(
+                  'Ask questions about your story',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
                       ),
-                    ),
-                  ),
-                );
-              },
+                ),
+              ],
             ),
           ),
-          TextField(
-            controller: _queryController,
-            decoration: InputDecoration(
-              hintText: 'Enter your query...',
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.send),
-                onPressed: _submitQuery,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onSubmitted: (text) => _submitQuery(),
-          ),
-          ElevatedButton(
+          IconButton(
+            icon: const Icon(Icons.refresh),
             onPressed: _resetChatHistory,
-            child: const Text('Reset Chat History'),
+            tooltip: 'Reset conversation',
           ),
-          if (_isLoading) const LinearProgressIndicator(),
         ],
       ),
     );
+  }
+
+  Widget _buildChatArea() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: ListView.builder(
+        controller: _scrollController,
+        itemCount: _chatHistory.length,
+        reverse: false,
+        itemBuilder: (context, index) {
+          final message = _chatHistory[index];
+          final isUser = message['type'] == 'human';
+          return _buildMessageBubble(message, isUser);
+        },
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(Map<String, dynamic> message, bool isUser) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isUser) ...[
+            CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              child: const Icon(Icons.psychology, color: Colors.white),
+              radius: 16,
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isUser ? 16 : 4),
+                  bottomRight: Radius.circular(isUser ? 4 : 16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Theme.of(context).shadowColor.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Text(
+                message['content'],
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: isUser
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+              ),
+            ),
+          ),
+          if (isUser) ...[
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.secondary,
+              child: const Icon(Icons.person, color: Colors.white),
+              radius: 16,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).shadowColor.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          if (_isLoading)
+            LinearProgressIndicator(
+              backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _queryController,
+                  decoration: InputDecoration(
+                    hintText: 'Ask a question...',
+                    filled: true,
+                    fillColor: Theme.of(context).colorScheme.surfaceVariant,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                  onSubmitted: (_) => _submitQuery(),
+                  maxLines: null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              FloatingActionButton(
+                onPressed: _submitQuery,
+                child: Icon(
+                  _isLoading ? Icons.hourglass_empty : Icons.send,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _queryController.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 }

@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:typed_data';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:provider/provider.dart';
-import '../providers/app_state.dart';
 
 class Codex extends StatefulWidget {
   final String projectId;
@@ -268,163 +265,301 @@ class _CodexState extends State<Codex> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error.isNotEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_error, style: const TextStyle(color: Colors.red)),
-            ElevatedButton(
-              onPressed: _fetchCodexItems,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
     final filteredItems = _getFilteredItems();
 
-    return Stack(
+    return Column(
       children: [
-        Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search codex items...',
-                  prefixIcon: const Icon(Icons.search),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
+        _buildHeader(),
+        _buildSearchAndFilters(),
+        Expanded(
+          child: _error.isNotEmpty
+              ? _buildErrorState()
+              : _buildCodexList(filteredItems),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      child: Row(
+        children: [
+          Icon(
+            Icons.book,
+            size: 32,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Codex',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              Text(
+                'Organize your world\'s knowledge',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6),
+                    ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchAndFilters() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).shadowColor.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search codex items...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              filled: true,
+              fillColor: Theme.of(context).colorScheme.surface,
+            ),
+            onChanged: (value) => setState(() {}),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: _buildTypeDropdown()),
+              if (_selectedTypeFilter == 'worldbuilding') ...[
+                const SizedBox(width: 16),
+                Expanded(child: _buildSubtypeDropdown()),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypeDropdown() {
+    return DropdownButtonFormField<String>(
+      value: _selectedTypeFilter,
+      decoration: InputDecoration(
+        labelText: 'Type',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      ),
+      items: [
+        _buildDropdownItem('all', 'All Types', Icons.category),
+        _buildDropdownItem('lore', 'Lore', Icons.book),
+        _buildDropdownItem('worldbuilding', 'World Building', Icons.public),
+        _buildDropdownItem('item', 'Items', Icons.inventory_2),
+        _buildDropdownItem('character', 'Characters', Icons.person),
+      ],
+      onChanged: (String? newValue) {
+        setState(() {
+          _selectedTypeFilter = newValue!;
+          _selectedSubtypeFilter = 'all';
+        });
+      },
+    );
+  }
+
+  DropdownMenuItem<String> _buildDropdownItem(
+      String value, String label, IconData icon) {
+    return DropdownMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCodexList(List<dynamic> items) {
+    return items.isEmpty
+        ? _buildEmptyState()
+        : ListView.builder(
+            itemCount: items.length,
+            padding: const EdgeInsets.all(16),
+            itemBuilder: (context, index) {
+              final item = items[index];
+              return _buildCodexCard(item);
+            },
+          );
+  }
+
+  Widget _buildCodexCard(dynamic item) {
+    final isSelected = _selectedItems.contains(item['id']);
+    final IconData typeIcon = _getTypeIcon(item['type']);
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isSelected
+            ? BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              )
+            : BorderSide.none,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _isSelectionMode
+            ? () => _toggleItemSelection(item['id'])
+            : () => _showCodexItemDetails(context, item),
+        onLongPress: () => _toggleItemSelection(item['id']),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              if (_isSelectionMode)
+                Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Checkbox(
+                    value: isSelected,
+                    onChanged: (_) => _toggleItemSelection(item['id']),
                   ),
                 ),
-                onChanged: (value) => setState(() {}),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  typeIcon,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedTypeFilter,
-                      onChanged: (String? newValue) {
-                        setState(() {
-                          _selectedTypeFilter = newValue!;
-                          _selectedSubtypeFilter = 'all';
-                        });
-                      },
-                      items: <String>[
-                        'all',
-                        'lore',
-                        'worldbuilding',
-                        'item',
-                        'character'
-                      ].map<DropdownMenuItem<String>>((String value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      decoration: InputDecoration(
-                        labelText: 'Type',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (_selectedTypeFilter == 'worldbuilding') ...[
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedSubtypeFilter,
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedSubtypeFilter = newValue!;
-                          });
-                        },
-                        items: <String>[
-                          'all',
-                          'history',
-                          'culture',
-                          'geography'
-                        ].map<DropdownMenuItem<String>>((String value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        decoration: InputDecoration(
-                          labelText: 'Subtype',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item['name'],
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
                           ),
-                        ),
-                      ),
                     ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView.builder(
-                itemCount: filteredItems.length,
-                padding: const EdgeInsets.all(16),
-                itemBuilder: (context, index) {
-                  final item = filteredItems[index];
-                  final isSelected = _selectedItems.contains(item['id']);
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      title: Text(
-                        item['name'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      subtitle: Text(
+                    if (item['description'].isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
                         item['description'],
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.7),
+                            ),
                       ),
-                      onTap: _isSelectionMode
-                          ? () => _toggleItemSelection(item['id'])
-                          : () => _showCodexItemDetails(context, item),
-                      onLongPress: () => _toggleItemSelection(item['id']),
-                      tileColor:
-                          isSelected ? Colors.blue.withOpacity(0.1) : null,
-                      leading: _isSelectionMode
-                          ? Checkbox(
-                              value: isSelected,
-                              onChanged: (_) =>
-                                  _toggleItemSelection(item['id']),
-                            )
-                          : null,
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _buildChip(item['type']),
+                        if (item['subtype'] != null) ...[
+                          const SizedBox(width: 8),
+                          _buildChip(item['subtype']),
+                        ],
+                      ],
                     ),
-                  );
-                },
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        if (_isSelectionMode)
-          Positioned(
-            bottom: 16,
-            right: 16,
-            child: FloatingActionButton.extended(
-              onPressed: _deleteSelectedItems,
-              label: const Text('Delete Selected'),
-              icon: const Icon(Icons.delete),
-              backgroundColor: Colors.red,
-            ),
+            ],
           ),
-      ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSecondaryContainer,
+            ),
+      ),
+    );
+  }
+
+  IconData _getTypeIcon(String type) {
+    switch (type) {
+      case 'lore':
+        return Icons.book;
+      case 'worldbuilding':
+        return Icons.public;
+      case 'item':
+        return Icons.inventory_2;
+      case 'character':
+        return Icons.person;
+      default:
+        return Icons.article;
+    }
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(_error, style: const TextStyle(color: Colors.red)),
+          ElevatedButton(
+            onPressed: _fetchCodexItems,
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Text('No items found.',
+          style: Theme.of(context).textTheme.bodyMedium),
     );
   }
 
@@ -454,5 +589,29 @@ class _CodexState extends State<Codex> {
         SnackBar(content: Text('Error deleting codex item: $e')),
       );
     }
+  }
+
+  Widget _buildSubtypeDropdown() {
+    return DropdownButtonFormField<String>(
+      value: _selectedSubtypeFilter,
+      decoration: InputDecoration(
+        labelText: 'Subtype',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      ),
+      items: [
+        _buildDropdownItem('all', 'All Subtypes', Icons.category),
+        _buildDropdownItem('history', 'History', Icons.history),
+        _buildDropdownItem('culture', 'Culture', Icons.people),
+        _buildDropdownItem('geography', 'Geography', Icons.landscape),
+      ],
+      onChanged: (String? newValue) {
+        setState(() {
+          _selectedSubtypeFilter = newValue!;
+        });
+      },
+    );
   }
 }

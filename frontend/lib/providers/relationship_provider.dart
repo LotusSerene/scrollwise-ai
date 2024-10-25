@@ -9,7 +9,7 @@ class RelationshipProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   String? _message;
-  Map<String, dynamic> _graphData = {};
+  final Map<String, dynamic> _graphData = {};
   List<Relationship> _relationships = [];
 
   bool get isLoading => _isLoading;

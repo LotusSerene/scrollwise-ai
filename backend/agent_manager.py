@@ -34,12 +34,8 @@ from langchain_core.globals import set_llm_cache
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain.chains.summarize import load_summarize_chain
-from langchain.docstore.document import Document
 import asyncio
 from models import ChapterValidation, CodexItem, CriterionScore
-
-# Add asyncio for thread-safe operations
-import asyncio
 
 # Add at the top with other imports
 PROCESS_TYPES = {
@@ -194,7 +190,7 @@ class AgentManager:
         self.agents.clear()
         self.complex_tasks.clear()
         self.lock = None
-
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
         async with self.lock:
             if model in self._llm_cache:
@@ -242,9 +238,6 @@ class AgentManager:
                 max_bucket_size=15
             )
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    async def _initialize_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        return await self._get_llm(model)
 
     async def generate_chapter_stream(
         self,
@@ -622,22 +615,67 @@ class AgentManager:
             raise
 
     async def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
-        if self.vector_store is None:
-            await self.initialize()
-        return await self.vector_store.similarity_search(query, k=k)
+        """
+        Query the knowledge base using the vector store.
+        
+        Args:
+            query: The search query string
+            k: Number of results to return (default=5)
+            
+        Returns:
+            List of Document objects containing the search results
+        """
+        try:
+            # Create a filter dict for the vector store query
+            filter_dict = {
+                "user_id": self.user_id,
+                "project_id": self.project_id
+            }
+            
+            # Use the vector store's query method with the filter
+            results = await self.vector_store.similarity_search(
+                query_text=query,
+                filter=filter_dict,
+                k=k
+            )
+            
+            return results
+        except Exception as e:
+            self.logger.error(f"Error in query_knowledge_base: {str(e)}")
+            raise
 
     async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
-        #self.logger.debug(f"Generating response for query: {query}")
-        qa_llm = await self._initialize_llm(self.model_settings['knowledgeBaseQueryLLM'])
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
+        qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
         
-        # Create a history-aware retriever
-        condense_question_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-        ])
-        history_aware_retriever = create_history_aware_retriever(qa_llm, retriever, condense_question_prompt)
+        # Create a history-aware retriever function
+        async def retrieve_with_history(query: str) -> List[Document]:
+            # Use the condense question prompt to get the standalone question
+            condense_question_prompt = ChatPromptTemplate.from_messages([
+                ("system", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+            ])
+            
+            # Prepare chat history
+            messages = []
+            for message in chat_history:
+                if isinstance(message, dict):
+                    if message.get('type') == 'human':
+                        messages.append(HumanMessage(content=message['content']))
+                    elif message.get('type') == 'ai':
+                        messages.append(AIMessage(content=message['content']))
+                elif isinstance(message, (HumanMessage, AIMessage)):
+                    messages.append(message)
+                    
+            # Get the standalone question
+            chain = condense_question_prompt | qa_llm | StrOutputParser()
+            standalone_question = await chain.ainvoke({
+                "input": query,
+                "chat_history": messages
+            })
+            
+            # Use similarity search instead of retriever
+            return await self.vector_store.similarity_search(standalone_question, k=5)
 
         # Create the QA chain
         qa_prompt = ChatPromptTemplate.from_messages([
@@ -646,12 +684,14 @@ class AgentManager:
             ("human", "{input}"),
             ("human", "Context: {context}"),
         ])
-        qa_chain = create_stuff_documents_chain(qa_llm, qa_prompt)
-
-        # Create the retrieval chain
-        retrieval_chain = create_retrieval_chain(history_aware_retriever, qa_chain)
-
-        # Prepare chat history
+        
+        # Get relevant documents using our history-aware retriever
+        documents = await retrieve_with_history(query)
+        
+        # Format documents for the context
+        context = "\n\n".join(doc.page_content for doc in documents)
+        
+        # Prepare chat history for QA
         messages = []
         for message in chat_history:
             if isinstance(message, dict):
@@ -661,42 +701,24 @@ class AgentManager:
                     messages.append(AIMessage(content=message['content']))
             elif isinstance(message, (HumanMessage, AIMessage)):
                 messages.append(message)
-
-        # Invoke the chain
-        result = await retrieval_chain.ainvoke({
+        
+        # Get the answer
+        chain = qa_prompt | qa_llm | StrOutputParser()
+        answer = await chain.ainvoke({
             "input": query,
-            "chat_history": messages
+            "chat_history": messages,
+            "context": context
         })
-
-        answer = result['answer']
-        source_documents = result.get('source_documents', [])
-
-        #self.logger.info(f"Generated response. Number of source documents: {len(source_documents)}")
 
         # Format the response with source information
         response = f"{answer}\n\n\n"
-        for i, doc in enumerate(source_documents, 1):
+        for i, doc in enumerate(documents, 1):
             response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
 
         return response
 
     def _construct_query_context(self, relevant_docs: List[Document]) -> str:
         context = "\n".join([doc.page_content for doc in relevant_docs])
-        
-        # Add codex items information
-        codex_items = db_instance.get_all_codex_items(self.user_id, self.project_id)
-        if codex_items:
-            context += "\n\nCodex Items:\n"
-            for codex_item in codex_items:
-                context += f"{codex_item['name']}: {codex_item['description']}\n"
-        
-        # Add chapters information (you might want to limit this to avoid token limits)
-        chapters = db_instance.get_all_chapters(self.user_id, self.project_id)
-        if chapters:
-            context += "\n\nChapters:\n"
-            for chapter in chapters:
-                context += f"Chapter {chapter['id']}: {chapter['title']}\n"
-        
         return self._truncate_context(context)
 
     def _truncate_context(self, context: str) -> str:
@@ -755,7 +777,7 @@ class AgentManager:
             Return only the title, without "Chapter X:" prefix.
             """)
             
-            llm = await self._initialize_llm(self.model_settings['titleGenerationLLM'])  # Add await here
+            llm = await self._get_llm(self.model_settings['titleGenerationLLM'])  # Add await here
             chain = prompt | llm | StrOutputParser()
             
             title = await chain.ainvoke({
@@ -947,7 +969,7 @@ class AgentManager:
 
                 {format_instructions}
                 """)
-                Codexllm = await self._initialize_llm(self.model_settings['extractionLLM'])
+                Codexllm = await self._get_llm(self.model_settings['extractionLLM'])
                 
                 extraction_chain = prompt | Codexllm | fixing_parser
 
@@ -1055,7 +1077,7 @@ class AgentManager:
                 """)
 
             parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-            llmRelationship = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmRelationship = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmRelationship | parser
 
             character_descriptions = "\n".join(
@@ -1126,7 +1148,7 @@ class AgentManager:
         #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
         try:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
-            llm = await self._initialize_llm(self.model_settings['mainLLM'])
+            llm = await self._get_llm(self.model_settings['mainLLM'])
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=llm)
             
             # Fetch all existing codex items for the user and project
@@ -1167,7 +1189,7 @@ class AgentManager:
             {format_instructions}
             """)
             
-            llm = await self._initialize_llm(self.model_settings['mainLLM'])
+            llm = await self._get_llm(self.model_settings['mainLLM'])
             chain = prompt | llm | fixing_parser
             
             result = await chain.ainvoke({
@@ -1206,8 +1228,13 @@ class AgentManager:
                 self.user_id,
                 PROCESS_TYPES['BACKSTORY']
             )
+            
+            # If no unprocessed chapters, return early with empty result
             if not chapter_data:
-                raise ValueError("No unprocessed chapter found for backstory extraction")
+                return CharacterBackstoryExtraction(
+                    character_id=character_id,
+                    new_backstory=""
+                )
 
             chapter_id = chapter_data['id']
             chapter_content = chapter_data['content']
@@ -1229,7 +1256,7 @@ class AgentManager:
             """)
             
             parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
-            llmBackstory = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmBackstory = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmBackstory | parser
             
             result = await chain.ainvoke({
@@ -1249,11 +1276,11 @@ class AgentManager:
 
  
     async def summarize_project(self) -> str:
-        #self.logger.debug(f"Generating project summary for project: {self.project_id}")
         try:
-            characters = self.vector_store.search_characters("", k=100)
-            events = self.vector_store.search_events("", k=100)
-            locations = self.vector_store.search_locations("", k=100)
+            # Use the wrapper method instead of direct vector store calls
+            characters = await self.query_knowledge_base("type:character", k=100)
+            events = await self.query_knowledge_base("type:event", k=100)
+            locations = await self.query_knowledge_base("type:location", k=100)
             
             prompt = ChatPromptTemplate.from_template("""
             Create a concise summary of the project based on the following information:
@@ -1271,15 +1298,14 @@ class AgentManager:
             Limit your response to 500 words.
             """)
             
-            chain = prompt | self.check_llm| StrOutputParser()
+            chain = prompt | self.check_llm | StrOutputParser()
             
             result = await chain.ainvoke({
-                "characters": json.dumps(characters, indent=2),
-                "events": json.dumps(events, indent=2),
-                "locations": json.dumps(locations, indent=2)
+                "characters": json.dumps([doc.page_content for doc in characters], indent=2),
+                "events": json.dumps([doc.page_content for doc in events], indent=2),
+                "locations": json.dumps([doc.page_content for doc in locations], indent=2)
             })
             
-            #self.logger.debug(f"Generated project summary: {result}")
             return result
         except Exception as e:
             self.logger.error(f"Error generating project summary: {str(e)}")
@@ -1314,7 +1340,7 @@ class AgentManager:
 
         """)
 
-        llmExtend = await self._initialize_llm(self.model_settings['mainLLM'])
+        llmExtend = await self._get_llm(self.model_settings['mainLLM'])
         chain =  prompt | llmExtend | StrOutputParser()
 
         while current_word_count < expected_word_count:
@@ -1329,7 +1355,7 @@ class AgentManager:
                 "words_to_add": words_to_add
             })
 
-            chapter_content += "\n" + extended_content
+            chapter_content += "\n" + "Extended:" +extended_content
             current_word_count = len(re.findall(r'\w+', chapter_content))
 
             # Add a safety check to prevent infinite loops
@@ -1417,7 +1443,7 @@ class AgentManager:
             Only include locations that are explicitly mentioned or described in the chapter.
             Be specific and detailed in the descriptions.
             """)
-            llmLocation = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmLocation = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmLocation | StrOutputParser()
             
             result = await chain.ainvoke({"chapter_content": chapter_content})
@@ -1490,7 +1516,7 @@ class AgentManager:
             {format_instructions}
             """)
 
-            llmAnalysis = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmAnalysis = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmAnalysis | fixing_parser
 
             result = await chain.ainvoke({
@@ -1504,7 +1530,7 @@ class AgentManager:
                 # Get character ID for the first involved character (if any)
                 character_id = None
                 if event.involved_characters:
-                    character = await db_instance.get_character_by_name(event.involved_characters[0], self.user_id, self.project_id)
+                    character = await db_instance.get_characters(self.user_id, self.project_id, name=event.involved_characters[0])
                     if character:
                         character_id = character['id']
 
@@ -1567,7 +1593,7 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
-            llmEvent = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmEvent = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmEvent | parser
 
             analyses = []
@@ -1605,7 +1631,7 @@ class AgentManager:
             """)
 
             parser = PydanticOutputParser(pydantic_object=LocationConnection)
-            llmLocationConnection = await self._initialize_llm(self.model_settings['extractionLLM'])
+            llmLocationConnection = await self._get_llm(self.model_settings['extractionLLM'])
             chain = prompt | llmLocationConnection | parser
 
             connections = []

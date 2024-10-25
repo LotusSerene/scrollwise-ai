@@ -38,31 +38,31 @@ class _EditRelationshipDialogState extends State<EditRelationshipDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Edit Relationship'),
+      title: const Text('Edit Relationship'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
               'Between: ${widget.relationship.character1_name} and ${widget.relationship.character2_name}'),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           TextField(
             controller: _relationshipTypeController,
-            decoration: InputDecoration(labelText: 'Relationship Type'),
+            decoration: const InputDecoration(labelText: 'Relationship Type'),
           ),
           TextField(
             controller: _descriptionController,
-            decoration: InputDecoration(labelText: 'Description'),
+            decoration: const InputDecoration(labelText: 'Description'),
             maxLines: 3,
           ),
         ],
       ),
       actions: [
         TextButton(
-          child: Text('Cancel'),
+          child: const Text('Cancel'),
           onPressed: () => Navigator.of(context).pop(),
         ),
         ElevatedButton(
-          child: Text('Save'),
+          child: const Text('Save'),
           onPressed: () {
             final updatedRelationship = Relationship(
               id: widget.relationship.id,

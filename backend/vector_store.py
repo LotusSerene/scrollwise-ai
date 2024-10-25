@@ -64,79 +64,89 @@ class VectorStore:
         #)
 
     async def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None) -> str:
-        if metadata is None:
-            metadata = {}
-        metadata["user_id"] = self.user_id
-        metadata["project_id"] = self.project_id
-        
-        try:
-            loop = asyncio.get_running_loop()
-            ids = await loop.run_in_executor(None, self.vector_store.add_texts, [text], [metadata])
-            embedding_id = ids[0]
-            return embedding_id
-        except Exception as e:
-            self.logger.error(f"Error adding content to knowledge base: {str(e)}", exc_info=True)
-            raise
+        """Add single text to the vector store."""
+        ids = await self.add_texts([text], [metadata] if metadata is not None else None)
+        return ids[0]
 
     async def delete_from_knowledge_base(self, embedding_id: str):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: self.vector_store._collection.delete(ids=[embedding_id]))
 
-    async def update_in_knowledge_base(self, embedding_id: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
+    async def update_in_knowledge_base(self, doc_id: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
+        """Single unified method for updating documents."""
         try:
-            if new_content or new_metadata:
-                loop = asyncio.get_running_loop()
-                
-                # Fetch the current metadata
-                current_metadata = await loop.run_in_executor(None, lambda: self.vector_store._collection.get(ids=[embedding_id]))
-                current_metadata = current_metadata['metadatas'][0]
-                
-                if new_metadata is None:
-                    new_metadata = {}
+            if not (new_content or new_metadata):
+                self.logger.warning(f"No new content or metadata provided for update. Doc ID: {doc_id}")
+                return
+
+            loop = asyncio.get_running_loop()
+            
+            # Fetch current metadata
+            current_metadata = await loop.run_in_executor(None, lambda: self.vector_store._collection.get(ids=[doc_id]))
+            current_metadata = current_metadata['metadatas'][0]
+            
+            # Update metadata
+            if new_metadata:
                 new_metadata["user_id"] = self.user_id
                 new_metadata["project_id"] = self.project_id
-
-                # Update the current metadata with new values, removing keys if the new value is None
                 for key, value in new_metadata.items():
                     if value is None:
-                        current_metadata.pop(key, None)  # Remove the key if it exists
+                        current_metadata.pop(key, None)
                     else:
                         current_metadata[key] = value
 
-                # If new content is provided, compute new embeddings
-                if new_content:
-                    new_embeddings = await loop.run_in_executor(None, self.embeddings.embed_documents, [new_content])
-                else:
-                    new_embeddings = None
+            # Compute new embeddings if content changed
+            new_embeddings = await loop.run_in_executor(None, self.embeddings.embed_documents, [new_content]) if new_content else None
 
-                # Update the existing embedding in Chroma
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.vector_store._collection.update(
-                        ids=[embedding_id],
-                        embeddings=new_embeddings[0] if new_embeddings else None,
-                        documents=[new_content] if new_content else None,
-                        metadatas=[current_metadata]
-                    )
+            # Update document
+            await loop.run_in_executor(
+                None,
+                lambda: self.vector_store._collection.update(
+                    ids=[doc_id],
+                    embeddings=new_embeddings[0] if new_embeddings else None,
+                    documents=[new_content] if new_content else None,
+                    metadatas=[current_metadata]
                 )
-
-                #self.logger.info(f"Updated content... Embedding ID: {embedding_id}")
-            else:
-                self.logger.warning(f"No new content or metadata provided for update. Embedding ID: {embedding_id}")
+            )
         except Exception as e:
-            self.logger.error(f"Error updating embedding ID: {embedding_id}. Error: {str(e)}")
+            self.logger.error(f"Error updating doc ID: {doc_id}. Error: {str(e)}")
             raise
 
-    async def similarity_search(self, query: str, k: int = 5) -> List[Document]:
-        loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(
-            None,
-            self.vector_store.similarity_search,
-            query,
-            k,
-            {"user_id": self.user_id, "project_id": self.project_id}
-        )
-        return results
+    async def similarity_search(self, query_text: str, k: int = 4, filter: Dict[str, Any] = None) -> List[Document]:
+        try:
+            loop = asyncio.get_running_loop()
+
+            # Prepare the filter
+            if filter is None:
+                filter = {}
+            
+            # Combine all filter conditions into a single 'and' operator
+            combined_filter = {
+                "$and": [
+                    {"user_id": {"$eq": self.user_id}},
+                    {"project_id": {"$eq": self.project_id}}
+                ]
+            }
+            
+            # Add any additional filter conditions
+            for key, value in filter.items():
+                combined_filter["$and"].append({key: {"$eq": value}})
+
+            # Perform the similarity search
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.vector_store.similarity_search(
+                    query_text,
+                    k=k,
+                    filter=combined_filter
+                )
+            )
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Error in similarity_search: {str(e)}")
+            raise
 
     async def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         loop = asyncio.get_running_loop()
@@ -191,11 +201,6 @@ class VectorStore:
         else:
             return {}
 
-    def as_retriever(self, search_kwargs: Dict[str, Any] = None):
-        if search_kwargs is None:
-            search_kwargs = {"k": 5}
-        return self.vector_store.as_retriever(search_kwargs=search_kwargs)
-
     async def update_document(
         self, doc_id: str, new_content: str, metadata: Dict[str, Any] = None
     ):
@@ -227,13 +232,14 @@ class VectorStore:
             )
         return None
 
-    async def add_texts(
-        self, texts: List[str], metadatas: List[Dict[str, Any]] = None
-    ) -> List[str]:
+    async def add_texts(self, texts: List[str], metadatas: List[Dict[str, Any]] = None) -> List[str]:
+        """Add multiple texts to the vector store."""
         if metadatas is None:
             metadatas = [{}] * len(texts)
         for metadata in metadatas:
             metadata["user_id"] = self.user_id
+            metadata["project_id"] = self.project_id
+        
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.vector_store.add_texts, texts, metadatas)
 
@@ -242,4 +248,7 @@ class VectorStore:
         if hasattr(self, '_client') and hasattr(self._client, 'close'):
             self._client.close()
         # Add any other cleanup steps here
+
+
+
 

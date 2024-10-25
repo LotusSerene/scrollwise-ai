@@ -70,7 +70,14 @@ class PresetProvider with ChangeNotifier {
 
   void clearSelectedPreset() {
     _selectedPreset = null;
-    _currentPreset = null;
+    _currentPreset = {
+      'numChapters': 1,
+      'plot': '',
+      'writingStyle': '',
+      'styleGuide': '',
+      'minWordCount': 1000,
+      'additionalInstructions': '',
+    };
     notifyListeners();
   }
 

@@ -4,7 +4,6 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-// Import DashboardScreen
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -28,14 +27,13 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {
-            'username': _emailController.text,
-            'password': _passwordController.text,
-          }
-        );
+        final response =
+            await http.post(Uri.parse('$apiUrl/auth/token'), headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }, body: {
+          'username': _emailController.text,
+          'password': _passwordController.text,
+        });
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -72,15 +70,17 @@ class _LoginScreenState extends State<LoginScreen> {
         final response = await http.post(
           Uri.parse('$apiUrl/auth/register'), // Corrected endpoint
           headers: {'Content-Type': 'application/json'}, // Use JSON for body
-          body: json.encode({ // Encode body as JSON
+          body: json.encode({
+            // Encode body as JSON
             'username': _emailController.text,
             'password': _passwordController.text,
           }),
         );
 
-        if (response.statusCode == 201) { 
+        if (response.statusCode == 201) {
           // Successful registration
-          Fluttertoast.showToast(msg: 'Registration successful! You can now log in.');
+          Fluttertoast.showToast(
+              msg: 'Registration successful! You can now log in.');
           // Optionally clear the form fields:
           _emailController.clear();
           _passwordController.clear();
@@ -99,79 +99,196 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login')),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Card(
-          elevation: 8,
+      body: Center(
+        child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email'),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(labelText: 'Password'),
-                    obscureText: true,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your password';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 30),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _handleSubmit,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 50, vertical: 15),
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(context),
+                const SizedBox(height: 48),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outline
+                          .withOpacity(0.2),
                     ),
-                    child: _isLoading
-                        ? const CircularProgressIndicator(
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          )
-                        : const Text('Login', style: TextStyle(fontSize: 18)),
                   ),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _handleRegister,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 50, vertical: 15),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Welcome Back',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sign in to continue to Storyteller',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.6),
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 32),
+                          _buildEmailField(),
+                          const SizedBox(height: 16),
+                          _buildPasswordField(),
+                          const SizedBox(height: 24),
+                          _buildLoginButton(),
+                          const SizedBox(height: 16),
+                          _buildRegisterButton(),
+                          if (_isLoading) ...[
+                            const SizedBox(height: 24),
+                            const LinearProgressIndicator(),
+                          ],
+                        ],
+                      ),
                     ),
-                    child: _isLoading
-                        ? const CircularProgressIndicator(
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          )
-                        : const Text('Register',
-                            style: TextStyle(fontSize: 18)),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 24),
+                _buildFooter(context),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    return Column(
+      children: [
+        Icon(
+          Icons.auto_stories,
+          size: 64,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Storyteller',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailField() {
+    return TextFormField(
+      controller: _emailController,
+      decoration: InputDecoration(
+        labelText: 'Email',
+        hintText: 'Enter your email',
+        prefixIcon: const Icon(Icons.email_outlined),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+      keyboardType: TextInputType.emailAddress,
+      textInputAction: TextInputAction.next,
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Please enter your email';
+        }
+        if (!value.contains('@')) {
+          return 'Please enter a valid email';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildPasswordField() {
+    return TextFormField(
+      controller: _passwordController,
+      decoration: InputDecoration(
+        labelText: 'Password',
+        hintText: 'Enter your password',
+        prefixIcon: const Icon(Icons.lock_outline),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+      obscureText: true,
+      textInputAction: TextInputAction.done,
+      onFieldSubmitted: (_) => _handleSubmit(),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Please enter your password';
+        }
+        if (value.length < 6) {
+          return 'Password must be at least 6 characters';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildLoginButton() {
+    return FilledButton.icon(
+      onPressed: _isLoading ? null : _handleSubmit,
+      icon: const Icon(Icons.login),
+      label: const Text('Sign In'),
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+    );
+  }
+
+  Widget _buildRegisterButton() {
+    return OutlinedButton.icon(
+      onPressed: _isLoading ? null : _handleRegister,
+      icon: const Icon(Icons.person_add_outlined),
+      label: const Text('Create Account'),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+    );
+  }
+
+  Widget _buildFooter(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        TextButton.icon(
+          onPressed: () {
+            // Add help functionality
+          },
+          icon: const Icon(Icons.help_outline, size: 18),
+          label: const Text('Need Help?'),
+        ),
+        const SizedBox(width: 24),
+        TextButton.icon(
+          onPressed: () {
+            // Add privacy policy
+          },
+          icon: const Icon(Icons.privacy_tip_outlined, size: 18),
+          label: const Text('Privacy Policy'),
+        ),
+      ],
     );
   }
 }

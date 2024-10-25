@@ -245,158 +245,41 @@ class _EditorState extends State<Editor> {
     return Consumer<AppState>(
       builder: (context, appState, child) {
         return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF212529),
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x1A000000),
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.all(24),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Chapter list section
-              Expanded(
-                flex: 1,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF343a40),
-                    borderRadius: BorderRadius.circular(8),
+              // Chapters sidebar
+              SizedBox(
+                width: 300,
+                child: Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Chapters',
-                        style: TextStyle(
-                          color: Color(0xFF007bff),
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: _error != null
-                            ? Center(
-                                child: Text(_error!,
-                                    style: TextStyle(color: Colors.red)))
-                            : ListView.builder(
-                                itemCount: appState.chapters.length,
-                                itemBuilder: (context, index) {
-                                  final chapter = appState.chapters[index];
-                                  return ListTile(
-                                    title: Text(
-                                      chapter['title'],
-                                      style:
-                                          const TextStyle(color: Colors.white),
-                                    ),
-                                    tileColor: _selectedChapter == chapter
-                                        ? Colors.grey[700]
-                                        : null,
-                                    onTap: () => _handleChapterClick(chapter),
-                                    trailing: IconButton(
-                                      onPressed: () =>
-                                          _handleDeleteChapter(chapter['id']),
-                                      icon: const Icon(Icons.delete,
-                                          color: Colors.red),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                      const SizedBox(height: 10),
-                      ElevatedButton(
-                        onPressed: _handleCreateChapter,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF007bff),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
-                          textStyle: const TextStyle(fontSize: 16),
-                        ),
-                        child: const Text('Create New Chapter'),
-                      ),
+                      _buildChapterHeader(),
+                      _buildChapterList(appState),
+                      _buildCreateChapterButton(),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(width: 20),
-              // Chapter content editor section
+              const SizedBox(width: 24),
+              // Editor main content
               Expanded(
-                flex: 2,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF343a40),
-                    borderRadius: BorderRadius.circular(8),
+                child: Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        _selectedChapter != null
-                            ? 'Edit Chapter: ${_selectedChapter['title']}'
-                            : 'Create New Chapter',
-                        style: const TextStyle(
-                          color: Color(0xFF007bff),
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_error != null)
-                        Text(
-                          _error!,
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _chapterTitleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Title',
-                          labelStyle: TextStyle(color: Colors.white),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFFced4da)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Color(0xFF007bff)),
-                          ),
-                        ),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      const SizedBox(height: 15),
-                      Expanded(
-                        child: TextField(
-                          controller: _chapterContentController,
-                          maxLines: null,
-                          expands: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Content',
-                            labelStyle: TextStyle(color: Colors.white),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Color(0xFFced4da)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Color(0xFF007bff)),
-                            ),
-                          ),
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                      const SizedBox(height: 15),
-                      ElevatedButton(
-                        onPressed: _handleSaveChapter,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF007bff),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
-                          textStyle: const TextStyle(fontSize: 16),
-                        ),
-                        child:
-                            Text(_selectedChapter != null ? 'Save' : 'Create'),
-                      ),
+                      _buildEditorHeader(),
+                      _buildEditorContent(),
                     ],
                   ),
                 ),
@@ -405,6 +288,262 @@ class _EditorState extends State<Editor> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildChapterHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.book,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Chapters',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChapterList(AppState appState) {
+    if (_error != null) {
+      return _buildErrorState();
+    }
+
+    return Expanded(
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: appState.chapters.length,
+        itemBuilder: (context, index) {
+          final chapter = appState.chapters[index];
+          final isSelected = _selectedChapter != null &&
+              _selectedChapter['id'] == chapter['id'];
+
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
+            title: Text(
+              chapter['title'],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              '${_getWordCount(chapter['content'])} words',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            leading: Icon(
+              Icons.article,
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+            ),
+            trailing: IconButton(
+              icon: Icon(
+                Icons.delete,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => _showDeleteDialog(chapter['id']),
+            ),
+            selected: isSelected,
+            selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            onTap: () => _handleChapterClick(chapter),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCreateChapterButton() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ElevatedButton.icon(
+        onPressed: _handleCreateChapter,
+        icon: const Icon(Icons.add),
+        label: const Text('New Chapter'),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.all(16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditorHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _selectedChapter != null ? Icons.edit : Icons.add_circle,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _selectedChapter != null ? 'Edit Chapter' : 'Create New Chapter',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const Spacer(),
+          ElevatedButton.icon(
+            onPressed: _handleSaveChapter,
+            icon: const Icon(Icons.save),
+            label: Text(_selectedChapter != null ? 'Save' : 'Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditorContent() {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() => _error = null),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            TextField(
+              controller: _chapterTitleController,
+              decoration: InputDecoration(
+                labelText: 'Chapter Title',
+                hintText: 'Enter chapter title...',
+                prefixIcon: const Icon(Icons.title),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: TextField(
+                controller: _chapterContentController,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                decoration: InputDecoration(
+                  labelText: 'Chapter Content',
+                  hintText: 'Start writing your chapter...',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  int _getWordCount(String text) {
+    return text.split(' ').where((word) => word.isNotEmpty).length;
+  }
+
+  void _showDeleteDialog(String chapterId) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Theme.of(context).colorScheme.error),
+              const SizedBox(width: 8),
+              const Text('Delete Chapter'),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to delete this chapter? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _handleDeleteChapter(chapterId);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline,
+                color: Theme.of(context).colorScheme.error, size: 48),
+            const SizedBox(height: 16),
+            Text(_error ?? 'An error occurred',
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+        ),
+      ),
     );
   }
 }

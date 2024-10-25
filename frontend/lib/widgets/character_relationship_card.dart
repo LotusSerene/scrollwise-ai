@@ -28,69 +28,151 @@ class CharacterRelationshipCard extends StatelessWidget {
         .toList();
 
     if (characterRelationships.isEmpty) {
-      return SizedBox.shrink();
+      return const SizedBox.shrink();
     }
 
     return Card(
-      margin: EdgeInsets.all(8),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      elevation: 2,
       child: ExpandablePanel(
+        theme: ExpandableThemeData(
+          headerAlignment: ExpandablePanelHeaderAlignment.center,
+          iconColor: Theme.of(context).colorScheme.primary,
+        ),
         header: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Theme.of(context)
+                .colorScheme
+                .surfaceContainerHighest, // More subtle background
+            child: Icon(
+              Icons.person,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant, // More subtle icon color
+              size: 20, // Slightly smaller icon
+            ),
+          ),
           title: Text(
             characterName,
-            style: Theme.of(context).textTheme.titleLarge,
+            style: Theme.of(context).textTheme.titleMedium,
           ),
-        ),
-        collapsed: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Text(
+          subtitle: Text(
             '${characterRelationships.length} relationship(s)',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
+        collapsed: const SizedBox.shrink(),
         expanded: Column(
           children: characterRelationships.map((relationship) {
-            final otherCharacterName =
-                relationship.getOtherCharacterName(characterId);
-            return ListTile(
-              title: Row(
-                children: [
-                  Expanded(
-                    child: Text('With: $otherCharacterName'),
-                  ),
-                  Text(
-                    relationship.relationshipType,
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              subtitle: Text(relationship.description),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.edit),
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (BuildContext context) {
-                          return EditRelationshipDialog(
-                            relationship: relationship,
-                            onEditRelationship: onEditRelationship,
-                          );
-                        },
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.delete),
-                    onPressed: () => onDeleteRelationship(relationship.id),
-                  ),
-                ],
-              ),
-            );
+            return _buildRelationshipTile(context, relationship);
           }).toList(),
         ),
+      ),
+    );
+  }
+
+  Widget _buildRelationshipTile(
+      BuildContext context, Relationship relationship) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: Theme.of(context).dividerColor,
+            width: 0.5,
+          ),
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 8,
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.connect_without_contact,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    relationship.getOtherCharacterName(characterId),
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              relationship.relationshipType,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+          ],
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(relationship.description),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                Icons.edit,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              onPressed: () => _showEditDialog(context, relationship),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.delete,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => _showDeleteDialog(context, relationship),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditDialog(BuildContext context, Relationship relationship) {
+    showDialog(
+      context: context,
+      builder: (context) => EditRelationshipDialog(
+        relationship: relationship,
+        onEditRelationship: onEditRelationship,
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, Relationship relationship) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Relationship'),
+        content:
+            const Text('Are you sure you want to delete this relationship?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              onDeleteRelationship(relationship.id);
+              Navigator.pop(context);
+            },
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }

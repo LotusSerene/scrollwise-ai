@@ -23,7 +23,7 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Create Relationship'),
+      title: const Text('Create Relationship'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -35,7 +35,7 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
                     child: Text(c['name'].toString())))
                 .toList(),
             onChanged: (value) => setState(() => _character1 = value),
-            decoration: InputDecoration(labelText: 'Character 1'),
+            decoration: const InputDecoration(labelText: 'Character 1'),
           ),
           DropdownButtonFormField<String>(
             value: _character2,
@@ -45,21 +45,20 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
                     child: Text(c['name'].toString())))
                 .toList(),
             onChanged: (value) => setState(() => _character2 = value),
-            decoration: InputDecoration(labelText: 'Character 2'),
+            decoration: const InputDecoration(labelText: 'Character 2'),
           ),
           TextField(
             onChanged: (value) => setState(() => _relationshipType = value),
-            decoration: InputDecoration(labelText: 'Relationship Type'),
+            decoration: const InputDecoration(labelText: 'Relationship Type'),
           ),
         ],
       ),
       actions: [
         TextButton(
-          child: Text('Cancel'),
+          child: const Text('Cancel'),
           onPressed: () => Navigator.of(context).pop(),
         ),
         ElevatedButton(
-          child: Text('Create'),
           onPressed: _character1 != null &&
                   _character2 != null &&
                   _relationshipType.isNotEmpty
@@ -69,6 +68,7 @@ class _CreateRelationshipDialogState extends State<CreateRelationshipDialog> {
                   Navigator.of(context).pop();
                 }
               : null,
+          child: const Text('Create'),
         ),
       ],
     );

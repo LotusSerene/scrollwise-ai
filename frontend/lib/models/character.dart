@@ -45,4 +45,13 @@ class Character {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'backstory': backstory,
+    };
+  }
 }

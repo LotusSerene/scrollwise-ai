@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
 import '../components/create_chapter.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import '../utils/constants.dart';
-import '../utils/auth.dart';
 import '../providers/preset_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -28,41 +24,29 @@ class _CreateScreenState extends State<CreateScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create')),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Consumer<PresetProvider>(
-                builder: (context, presetProvider, child) {
-                  if (presetProvider.isLoading) {
-                    return CircularProgressIndicator();
-                  }
-                  return DropdownButton<String>(
-                    value: presetProvider.selectedPreset,
-                    hint: Text('Select a preset'),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        presetProvider.loadPreset(newValue, widget.projectId);
-                      }
-                    },
-                    items: presetProvider.presets
-                        .map<DropdownMenuItem<String>>((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-              SizedBox(height: 16),
-              CreateChapter(projectId: widget.projectId),
+      appBar: AppBar(
+        elevation: 0,
+        title: Row(
+          children: [
+            Icon(Icons.create_new_folder,
+                color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 12),
+            const Text('Create New Chapter'),
+          ],
+        ),
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.surface,
+              Theme.of(context).colorScheme.surface.withOpacity(0.8),
             ],
           ),
         ),
+        child: CreateChapter(projectId: widget.projectId),
       ),
     );
   }

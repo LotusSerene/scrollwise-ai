@@ -8,6 +8,7 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../providers/app_state.dart';
 
 class CharacterRelationshipsScreen extends StatefulWidget {
   final String projectId;
@@ -24,10 +25,22 @@ class _CharacterRelationshipsScreenState
     extends State<CharacterRelationshipsScreen> {
   List<Map<String, dynamic>> characters = [];
   Set<String> selectedCharacters = {};
+  late AppState _appState;
 
   @override
   void initState() {
     super.initState();
+    _appState = Provider.of<AppState>(context, listen: false);
+
+    // Initialize with saved state if it exists
+    final savedState = _appState.getGenerationState('character_relationships');
+    if (savedState != null) {
+      setState(() {
+        selectedCharacters = Set<String>.from(
+            savedState.lastGeneratedItem?['selectedCharacters'] ?? {});
+      });
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final relationshipProvider =
           Provider.of<RelationshipProvider>(context, listen: false);
@@ -88,16 +101,32 @@ class _CharacterRelationshipsScreenState
   void _analyzeRelationships() {
     if (selectedCharacters.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please select at least two characters')),
+        const SnackBar(content: Text('Please select at least two characters')),
       );
       return;
     }
+
+    _appState.setGenerationState(
+      'character_relationships',
+      isGenerating: true,
+      lastGeneratedItem: {
+        'selectedCharacters': List<String>.from(selectedCharacters)
+      },
+    );
 
     List<String> characterIds = selectedCharacters.toList();
 
     Provider.of<RelationshipProvider>(context, listen: false)
         .analyzeRelationships(characterIds, widget.projectId)
         .then((_) {
+      _appState.setGenerationState(
+        'character_relationships',
+        isGenerating: false,
+        lastGeneratedItem: {
+          'selectedCharacters': List<String>.from(selectedCharacters),
+        },
+      );
+
       final relationshipProvider =
           Provider.of<RelationshipProvider>(context, listen: false);
       if (relationshipProvider.message != null) {
@@ -120,77 +149,165 @@ class _CharacterRelationshipsScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: _analyzeRelationships,
-            child: Text('Analyze Relationships'),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(),
+            const SizedBox(height: 24),
+            _buildCharacterSelection(),
+            const SizedBox(height: 24),
+            _buildRelationshipsList(),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showCreateRelationshipDialog(context),
+        icon: const Icon(Icons.add),
+        label: const Text('New Relationship'),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Character Relationships',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            Text(
+              'Manage and analyze character connections',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
+                  ),
+            ),
+          ],
+        ),
+        ElevatedButton.icon(
+          onPressed: _analyzeRelationships,
+          icon: const Icon(Icons.psychology),
+          label: const Text('Analyze'),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
-          Expanded(
-            flex: 1,
-            child: ListView(
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCharacterSelection() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.people,
+                    color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Select Characters to Analyze',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: characters.map((character) {
-                return CheckboxListTile(
-                  title: Text(character['name'] ?? ''),
-                  value: selectedCharacters.contains(character['id']),
-                  onChanged: (bool? value) {
+                final isSelected = selectedCharacters.contains(character['id']);
+                return FilterChip(
+                  selected: isSelected,
+                  label: Text(character['name'] ?? ''),
+                  onSelected: (bool value) {
                     setState(() {
-                      if (value == true) {
+                      if (value) {
                         selectedCharacters.add(character['id'] ?? '');
                       } else {
                         selectedCharacters.remove(character['id'] ?? '');
                       }
                     });
                   },
+                  avatar: Icon(
+                    Icons.person,
+                    size: 18,
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.onPrimary
+                        : Theme.of(context).colorScheme.primary,
+                  ),
                 );
               }).toList(),
             ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Consumer<RelationshipProvider>(
-              builder: (context, relationshipProvider, child) {
-                if (relationshipProvider.isLoading) {
-                  return Center(child: CircularProgressIndicator());
-                }
-
-                if (relationshipProvider.error != null) {
-                  return Center(
-                      child: Text('Error: ${relationshipProvider.error}'));
-                }
-
-                final relationships = relationshipProvider.relationships;
-
-                return ListView.builder(
-                  itemCount: characters.length,
-                  itemBuilder: (context, index) {
-                    final character = characters[index];
-                    final characterRelationships = relationships
-                        .where((r) =>
-                            r.character1_id == character['id'] ||
-                            r.character2_id == character['id'])
-                        .toList();
-
-                    return CharacterRelationshipCard(
-                      characterId: character['id'] ?? '',
-                      characterName: character['name'] ?? '',
-                      relationships: characterRelationships,
-                      onDeleteRelationship: (relationshipId) {
-                        relationshipProvider.deleteRelationship(
-                            relationshipId, widget.projectId);
-                      },
-                      onEditRelationship: _handleEditRelationship,
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCreateRelationshipDialog(context),
-        child: Icon(Icons.add),
+    );
+  }
+
+  Widget _buildRelationshipsList() {
+    return Expanded(
+      child: Consumer<RelationshipProvider>(
+        builder: (context, relationshipProvider, child) {
+          if (relationshipProvider.isLoading) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          if (relationshipProvider.error != null) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error: ${relationshipProvider.error}',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: characters.length,
+            itemBuilder: (context, index) {
+              final character = characters[index];
+              return CharacterRelationshipCard(
+                characterId: character['id'] ?? '',
+                characterName: character['name'] ?? '',
+                relationships: relationshipProvider.relationships,
+                onDeleteRelationship: (relationshipId) {
+                  relationshipProvider.deleteRelationship(
+                    relationshipId,
+                    widget.projectId,
+                  );
+                },
+                onEditRelationship: _handleEditRelationship,
+              );
+            },
+          );
+        },
       ),
     );
   }
