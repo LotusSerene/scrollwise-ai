@@ -355,7 +355,7 @@ class Database:
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error creating user: {str(e)}")
-                raise
+                raise Exception("Chapter not found")
 
     async def get_user_by_email(self, email):
         async with await self.get_session() as session:
@@ -371,7 +371,6 @@ class Database:
                         'api_key': user.api_key,
                         'model_settings': json.loads(user.model_settings) if user.model_settings else None
                     }
-                raise
             except Exception as e:
                 self.logger.error(f"Error getting user by email: {str(e)}")
                 raise
@@ -837,7 +836,8 @@ class Database:
                     await session.delete(relationship)
                     await session.commit()
                     return True
-                return False
+                else:
+                    raise Exception("Relationship not found")
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error deleting character relationship: {str(e)}")
@@ -877,10 +877,8 @@ class Database:
                 
                 if character:
                     return character.to_dict()
-                except Exception as e:
-                    self.logger.error(f"Error getting character by ID: {str(e)}")
-                    raise
-                raise
+                else:
+                    raise Exception("Character not found")
 
     async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
         async with await self.get_session() as session:
