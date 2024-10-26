@@ -138,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Sign in to continue to Storyteller',
+                            'Sign in to continue to ScrollWise',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
@@ -180,14 +180,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildHeader(BuildContext context) {
     return Column(
       children: [
-        Icon(
-          Icons.auto_stories,
-          size: 64,
-          color: Theme.of(context).colorScheme.primary,
+        Image.asset(
+          'assets/images/logo.png',
+          width: 64,
+          height: 64,
         ),
         const SizedBox(height: 16),
         Text(
-          'Storyteller',
+          'ScrollWise AI',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.bold,

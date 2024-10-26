@@ -260,8 +260,8 @@ class _QueryState extends State<Query> {
           if (!isUser) ...[
             CircleAvatar(
               backgroundColor: Theme.of(context).colorScheme.primary,
-              child: const Icon(Icons.psychology, color: Colors.white),
               radius: 16,
+              child: const Icon(Icons.psychology, color: Colors.white),
             ),
             const SizedBox(width: 8),
           ],
@@ -300,8 +300,8 @@ class _QueryState extends State<Query> {
             const SizedBox(width: 8),
             CircleAvatar(
               backgroundColor: Theme.of(context).colorScheme.secondary,
-              child: const Icon(Icons.person, color: Colors.white),
               radius: 16,
+              child: const Icon(Icons.person, color: Colors.white),
             ),
           ],
         ],
@@ -327,7 +327,7 @@ class _QueryState extends State<Query> {
         children: [
           if (isLoading)
             LinearProgressIndicator(
-              backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
                 Theme.of(context).colorScheme.primary,
               ),
@@ -342,7 +342,7 @@ class _QueryState extends State<Query> {
                   decoration: InputDecoration(
                     hintText: 'Ask a question...',
                     filled: true,
-                    fillColor: Theme.of(context).colorScheme.surfaceVariant,
+                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
                       borderSide: BorderSide.none,

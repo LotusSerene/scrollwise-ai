@@ -338,15 +338,19 @@ class AppState extends ChangeNotifier {
     String? streamedContent,
     List<String>? generatedChapters,
   }) {
-    if (isGenerating != null)
+    if (isGenerating != null) {
       _chapterCreationState['isGenerating'] = isGenerating;
-    if (currentChapter != null)
+    }
+    if (currentChapter != null) {
       _chapterCreationState['currentChapter'] = currentChapter;
+    }
     if (progress != null) _chapterCreationState['progress'] = progress;
-    if (streamedContent != null)
+    if (streamedContent != null) {
       _chapterCreationState['streamedContent'] = streamedContent;
-    if (generatedChapters != null)
+    }
+    if (generatedChapters != null) {
       _chapterCreationState['generatedChapters'] = generatedChapters;
+    }
     notifyListeners();
   }
 
@@ -411,10 +415,12 @@ class AppState extends ChangeNotifier {
     bool? isGenerating,
     dynamic generatedItem,
   }) {
-    if (isGenerating != null)
+    if (isGenerating != null) {
       _codexGenerationState['isGenerating'] = isGenerating;
-    if (generatedItem != null)
+    }
+    if (generatedItem != null) {
       _codexGenerationState['generatedItem'] = generatedItem;
+    }
     notifyListeners();
   }
 
@@ -447,13 +453,16 @@ class AppState extends ChangeNotifier {
     Set<String>? selectedCharacters,
     dynamic lastAnalyzedCharacters,
   }) {
-    if (isGenerating != null)
+    if (isGenerating != null) {
       _characterRelationshipsState['isGenerating'] = isGenerating;
-    if (selectedCharacters != null)
+    }
+    if (selectedCharacters != null) {
       _characterRelationshipsState['selectedCharacters'] = selectedCharacters;
-    if (lastAnalyzedCharacters != null)
+    }
+    if (lastAnalyzedCharacters != null) {
       _characterRelationshipsState['lastAnalyzedCharacters'] =
           lastAnalyzedCharacters;
+    }
     notifyListeners();
   }
 
@@ -485,12 +494,15 @@ class AppState extends ChangeNotifier {
     Set<String>? ignoredCharacters,
     dynamic lastGeneratedItem,
   }) {
-    if (isGenerating != null)
+    if (isGenerating != null) {
       _characterJourneyState['isGenerating'] = isGenerating;
-    if (ignoredCharacters != null)
+    }
+    if (ignoredCharacters != null) {
       _characterJourneyState['ignoredCharacters'] = ignoredCharacters;
-    if (lastGeneratedItem != null)
+    }
+    if (lastGeneratedItem != null) {
       _characterJourneyState['lastGeneratedItem'] = lastGeneratedItem;
+    }
     notifyListeners();
   }
 
@@ -526,10 +538,12 @@ class AppState extends ChangeNotifier {
     int? activeTab,
   }) {
     if (isGenerating != null) _timelineState['isGenerating'] = isGenerating;
-    if (lastGeneratedItem != null)
+    if (lastGeneratedItem != null) {
       _timelineState['lastGeneratedItem'] = lastGeneratedItem;
-    if (isAlreadyAnalyzed != null)
+    }
+    if (isAlreadyAnalyzed != null) {
       _timelineState['isAlreadyAnalyzed'] = isAlreadyAnalyzed;
+    }
     if (activeTab != null) _timelineState['activeTab'] = activeTab;
     notifyListeners();
   }

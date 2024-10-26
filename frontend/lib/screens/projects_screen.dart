@@ -730,14 +730,15 @@ class _ProjectsScreenState extends State<ProjectsScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const Icon(
-                  Icons.auto_stories,
+                Image.asset(
+                  'assets/images/logo.png',
+                  width: 48,
+                  height: 48,
                   color: Colors.white,
-                  size: 48,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Storyteller',
+                  'ScrollWise AI',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,

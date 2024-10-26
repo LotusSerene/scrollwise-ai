@@ -312,7 +312,7 @@ class _DashboardState extends State<Dashboard> {
               child: LinearProgressIndicator(
                 value: progress,
                 valueColor: AlwaysStoppedAnimation<Color>(progressColor),
-                backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 minHeight: 12,
               ),
             ),

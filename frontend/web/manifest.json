@@ -1,17 +1,17 @@
 {
-    "name": "flutterfrontend",
-    "short_name": "flutterfrontend",
+    "name": "ScrollWise AI",
+    "short_name": "ScrollWise",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "description": "Your AI Writing Assistant",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
         {
-            "src": "icons/Icon-192.png",
-            "sizes": "192x192",
+            "src": "icons/Icon-128.png",
+            "sizes": "128x128",
             "type": "image/png"
         },
         {
@@ -20,8 +20,8 @@
             "type": "image/png"
         },
         {
-            "src": "icons/Icon-maskable-192.png",
-            "sizes": "192x192",
+            "src": "icons/Icon-maskable-128.png",
+            "sizes": "128x128",
             "type": "image/png",
             "purpose": "maskable"
         },

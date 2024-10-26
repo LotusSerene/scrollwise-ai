@@ -1,54 +1,63 @@
 import 'package:flutter/material.dart';
 
 class PrivacyPolicyDialog extends StatelessWidget {
+  const PrivacyPolicyDialog({super.key});
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Privacy Policy'),
+      title: const Text('Privacy Policy'),
       content: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Last updated: 26.10.2024',
+            const Text(
+              'Last updated: 26.03.2024',
               style: TextStyle(fontStyle: FontStyle.italic),
             ),
-            SizedBox(height: 16),
-            Text(
-              'At Storyteller, we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, and safeguard your data when you use our application.',
+            const SizedBox(height: 16),
+            const Text(
+              'At ScrollWise AI, we prioritize the protection of your privacy and personal information. This Privacy Policy outlines how we collect, use, and safeguard your data when using our application.',
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             _buildSection(
               'Information We Collect',
-              'We collect the following types of information:\n'
-                  '• Personal information (email address, username)\n'
-                  '• Project and story-related content\n'
-                  '• API keys for third-party services\n'
-                  '• Usage data and preferences',
+              'We collect and process the following types of information:\n'
+                  '• Account information (email address, username)\n'
+                  '• Writing content (chapters, stories, projects)\n'
+                  '• AI-generated content (suggestions, analysis)\n'
+                  '• Project settings and preferences\n'
+                  '• Vector embeddings of your content for AI processing',
             ),
             _buildSection(
               'How We Use Your Information',
-              'We use your information to:\n'
-                  '• Provide and improve our services\n'
-                  '• Generate and manage your story content\n'
-                  '• Analyze and process your writing\n'
-                  '• Communicate with you about our services',
+              'Your information is used to:\n'
+                  '• Provide our writing assistance services\n'
+                  '• Generate and manage story content\n'
+                  '• Create and maintain vector embeddings for AI analysis\n'
+                  '• Process your writing through AI models\n'
+                  '• Save your preferences and settings',
             ),
             _buildSection(
               'Data Storage and Security',
-              'We store your data securely using encryption and follow industry-standard practices to protect your information from unauthorized access or disclosure.',
+              'We implement industry-standard security measures to protect your data. Your content is stored securely using encryption, and we regularly update our security practices to maintain data protection.',
             ),
             _buildSection(
-              'Third-Party Services',
-              'We may use third-party services (such as AI models) to process your data. These services are bound by their own privacy policies and our agreements with them.',
+              'AI Processing',
+              'Our application uses artificial intelligence to process your writing. While we strive to maintain privacy, please be mindful that AI processing involves sending your content to our secure servers and third-party AI providers.',
             ),
             _buildSection(
               'Your Rights',
-              'You have the right to access, correct, or delete your personal information. You can also request a copy of your data or ask us to restrict its processing.',
+              'You have the right to:\n'
+                  '• Access your personal data\n'
+                  '• Request data correction or deletion\n'
+                  '• Export your content\n'
+                  '• Opt-out of certain data processing\n'
+                  '• Withdraw consent at any time',
             ),
             _buildSection(
-              'Changes to This Policy',
-              'We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page.',
+              'Changes to Policy',
+              'We may update this Privacy Policy as our services evolve. Significant changes will be notified through the application, and continued use after changes constitutes acceptance.',
             ),
             _buildSection(
               'Contact Us',
@@ -59,7 +68,7 @@ class PrivacyPolicyDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          child: Text('Close'),
+          child: const Text('Close'),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ],
@@ -70,12 +79,12 @@ class PrivacyPolicyDialog extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(height: 16),
+        const SizedBox(height: 16),
         Text(
           title,
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        SizedBox(height: 8),
+        const SizedBox(height: 8),
         Text(content),
       ],
     );

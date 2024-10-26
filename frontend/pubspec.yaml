@@ -1,5 +1,5 @@
-name: gemini_frontend
-description: A new Flutter project.
+name: scrollwise_ai
+description: ScrollWise AI is a web application designed to help writers create and manage their stories in a comprehensive way.
 
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -44,6 +44,9 @@ dependencies:
   flutter_dotenv: ^5.0.2
   provider: ^6.1.2
   flutter_secure_storage: ^9.2.2
+  expandable: ^5.0.1
+  flutter_speed_dial: ^3.0.0
+  url_launcher: ^6.2.5
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +58,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -69,7 +73,8 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-    - .env 
+    - assets/.env
+    - assets/images/logo.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 
@@ -98,3 +103,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    background_color: "#hexcolor"
+    theme_color: "#hexcolor"
+  image_path: "assets/icon/icon.png"
