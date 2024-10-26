@@ -98,6 +98,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _analyzeChapters() async {
+    setState(() => isLoading = true); // Add loading state at start
     _appState.setGenerationState('timeline', isGenerating: true);
 
     try {
@@ -142,12 +143,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         await _loadData();
         _showSuccess('Analysis completed successfully');
       } else {
-        _appState.setGenerationState('timeline', isGenerating: false);
         _showError('Error analyzing chapters');
       }
     } catch (e) {
-      _appState.setGenerationState('timeline', isGenerating: false);
       _showError('Error analyzing chapters: $e');
+    } finally {
+      setState(() => isLoading = false); // Add loading state cleanup
+      _appState.setGenerationState('timeline', isGenerating: false);
     }
   }
 

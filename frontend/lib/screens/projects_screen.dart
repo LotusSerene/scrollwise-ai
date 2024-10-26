@@ -104,7 +104,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       print('Timeout Exception: $e');
       if (!_mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text('Request timed out. Please try again.'),
           behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
         ),
@@ -113,7 +113,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       print('Socket Exception: $e');
       if (!_mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text('Network error. Please check your connection.'),
           behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
         ),
@@ -182,7 +182,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
             _selectedUniverseId = null;
           });
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Text('Project created successfully'),
               behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
             ),
@@ -247,7 +247,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text('Universe updated successfully'),
             behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
           ),
@@ -276,7 +276,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text('Universe deleted successfully'),
             behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
           ),
@@ -371,7 +371,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           }
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text('Project updated successfully'),
             behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
           ),
@@ -679,6 +679,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         }
 
         final universes = snapshot.data ?? [];
+        // Fix the syntax error in handling universe_id
         String? currentUniverseId = project['universe_id']?.toString();
 
         return PopupMenuButton<String?>(
@@ -822,9 +823,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
                       }
                       final universes = snapshot.data ?? [];
                       return DropdownButtonFormField<String?>(
-                        value: _selectedUniverseId != null
-                            ? _selectedUniverseId
-                            : 'no_universe',
+                        value: _selectedUniverseId ?? 'no_universe',
                         decoration: const InputDecoration(
                           labelText: 'Universe (Optional)',
                           prefixIcon: Icon(Icons.public),

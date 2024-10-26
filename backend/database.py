@@ -14,6 +14,8 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from sqlalchemy import exists, alias
 from models import ChapterValidation
+from cryptography.fernet import Fernet
+from base64 import b64encode, b64decode
 
 
 load_dotenv()
@@ -323,6 +325,14 @@ class Database:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
+        # Initialize encryption key
+        encryption_key = os.getenv('ENCRYPTION_KEY')
+        if not encryption_key:
+            # Generate a new key if none exists
+            encryption_key = Fernet.generate_key()
+        
+        self.fernet = Fernet(encryption_key)
+        
         db_url = os.getenv('DATABASE_URL')
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set")
@@ -368,12 +378,21 @@ class Database:
                 user = await session.execute(select(User).filter_by(email=email))
                 user = user.scalars().first()
                 if user:
+                    # Decrypt API key if it exists
+                    api_key = None
+                    if user.api_key:
+                        try:
+                            encrypted_key = b64decode(user.api_key)
+                            api_key = self.fernet.decrypt(encrypted_key).decode()
+                        except Exception as e:
+                            self.logger.error(f"Error decrypting API key: {str(e)}")
+                    
                     return {
                         'id': user.id,
                         'username': user.email,
                         'hashed_password': user.password,
                         'email': user.email,
-                        'api_key': user.api_key,
+                        'api_key': api_key,
                         'model_settings': json.loads(user.model_settings) if user.model_settings else None
                     }
             except Exception as e:
@@ -584,7 +603,9 @@ class Database:
             try:
                 user = await session.get(User, user_id)
                 if user:
-                    user.api_key = api_key
+                    # Encrypt the API key before saving
+                    encrypted_key = self.fernet.encrypt(api_key.encode())
+                    user.api_key = b64encode(encrypted_key).decode()
                     await session.commit()
             except Exception as e:
                 await session.rollback()
@@ -595,7 +616,12 @@ class Database:
         async with await self.get_session() as session:
             try:
                 user = await session.get(User, user_id)
-                return user.api_key if user else None
+                if user and user.api_key:
+                    # Decrypt the API key before returning
+                    encrypted_key = b64decode(user.api_key)
+                    decrypted_key = self.fernet.decrypt(encrypted_key)
+                    return decrypted_key.decode()
+                return None
             except Exception as e:
                 self.logger.error(f"Error getting API key: {str(e)}")
                 raise

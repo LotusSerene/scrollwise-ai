@@ -1355,7 +1355,7 @@ class AgentManager:
                 "words_to_add": words_to_add
             })
 
-            chapter_content += "\n" + "Extended:" +extended_content
+            chapter_content += "\n" + extended_content
             current_word_count = len(re.findall(r'\w+', chapter_content))
 
             # Add a safety check to prevent infinite loops
