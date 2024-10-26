@@ -1086,6 +1086,351 @@ class Database:
                 self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
                 raise
 
+    async def get_model_settings(self, user_id):
+        async with await self.get_session() as session:
+            try:
+                user = await session.get(User, user_id)
+                if user and user.model_settings:
+                    return json.loads(user.model_settings)
+                return {
+                    'mainLLM': 'gemini-1.5-pro-002',
+                    'checkLLM': 'gemini-1.5-pro-002',
+                    'embeddingsModel': 'models/text-embedding-004',
+                    'titleGenerationLLM': 'gemini-1.5-pro-002',
+                    'extractionLLM': 'gemini-1.5-pro-002',
+                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+                }
+            except Exception as e:
+                self.logger.error(f"Error getting validity check: {str(e)}")
+                raise
+
+    async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                check = ValidityCheck(
+                    id=str(uuid.uuid4()),
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    is_valid=is_valid,
+                    overall_score=overall_score,
+                    general_feedback=general_feedback,
+                    style_guide_adherence_score=style_guide_adherence_score,
+                    style_guide_adherence_explanation=style_guide_adherence_explanation,
+                    continuity_score=continuity_score,
+                    continuity_explanation=continuity_explanation,
+                    areas_for_improvement=areas_for_improvement,
+                    user_id=user_id,
+                    project_id=project_id
+                )
+                session.add(check)
+                await session.commit()
+                return check.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving validity check: {str(e)}")
+                raise
+
+    async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                validity_check = await session.get(ValidityCheck, chapter_id)
+                if validity_check and validity_check.user_id == user_id:
+                    return {
+                        'id': validity_check.id,
+                        'chapter_title': validity_check.chapter_title,
+                        'is_valid': validity_check.is_valid,
+                        'overall_score': validity_check.overall_score,
+                        'general_feedback': validity_check.general_feedback,
+                        'style_guide_adherence_score': validity_check.style_guide_adherence_score,
+                        'style_guide_adherence_explanation': validity_check.style_guide_adherence_explanation,
+                        'continuity_score': validity_check.continuity_score,
+                        'continuity_explanation': validity_check.continuity_explanation,
+                        'areas_for_improvement': validity_check.areas_for_improvement,
+                        'created_at': validity_check.created_at
+                    }
+                raise Exception("Validity check not found")  # Add a specific exception message
+            except Exception as e:
+                self.logger.error(f"Error getting validity check: {str(e)}")
+                raise
+
+    async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
+        async with await self.get_session() as session:
+            try:
+                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
+                chat_history = chat_history.scalars().first()
+                
+                if chat_history:
+                    chat_history.messages = json.dumps(messages)
+                else:
+                    chat_history = ChatHistory(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        project_id=project_id,
+                        messages=json.dumps(messages)
+                    )
+                    session.add(chat_history)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving chat history: {str(e)}")
+                raise
+
+    async def get_chat_history(self, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
+                chat_history = chat_history.scalars().first()
+                return json.loads(chat_history.messages) if chat_history else []
+            except Exception as e:
+                self.logger.error(f"Error getting chat history: {str(e)}")
+                raise
+
+
+    async def delete_chat_history(self, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                chat_history = await session.get(ChatHistory, (user_id, project_id))
+                if chat_history:
+                    await session.delete(chat_history)
+                    await session.commit()
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting chat history: {str(e)}")
+                raise
+
+
+    async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
+        async with await self.get_session() as session:
+            try:
+                # Check if a preset with the same name, user_id, and project_id already exists
+                existing_preset = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id, name=name))
+                existing_preset = existing_preset.scalars().first()
+                if existing_preset:
+                    raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
+                
+                preset = Preset(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, name=name, data=data)
+                session.add(preset)
+                await session.commit()
+                return preset.id
+            except ValueError as ve:
+                await session.rollback()
+                self.logger.error(f"Error creating preset: {str(ve)}")
+                raise
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating preset: {str(e)}")
+                raise
+
+    async def get_presets(self, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                presets = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id))
+                presets = presets.scalars().all()
+                return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
+            except Exception as e:
+                self.logger.error(f"Error getting presets: {str(e)}")
+                raise
+
+    async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
+                preset = preset.scalars().first()
+                if preset:
+                    await session.delete(preset)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting preset: {str(e)}")
+                raise
+
+    async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
+                preset = preset.scalars().first()
+                if preset:
+                    return {"id": preset.id, "name": preset.name, "data": preset.data}
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting preset by name: {str(e)}")
+                raise
+
+
+    # Add methods to update embedding_id for existing chapters and codex_items 
+
+    async def update_chapter_embedding_id(self, chapter_id, embedding_id):
+        async with await self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter:
+                    chapter.embedding_id = embedding_id
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+                raise
+
+    async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                relationship = await session.execute(select(CharacterRelationship).join(
+                    CodexItem, CharacterRelationship.character_id == CodexItem.id
+                ).filter(
+                    CharacterRelationship.id == relationship_id,
+                    CodexItem.project_id == project_id,
+                    CodexItem.user_id == user_id
+                ))
+                relationship = relationship.scalars().first()
+                if relationship:
+                    await session.delete(relationship)
+                    await session.commit()
+                    return True
+                else:
+                    raise Exception("Relationship not found")
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting character relationship: {str(e)}")
+                raise
+
+    async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
+                                 description: str, user_id: str, project_id: str) -> str:
+        async with await self.get_session() as session:
+            try:
+                analysis = CharacterRelationshipAnalysis(
+                    id=str(uuid.uuid4()),
+                    character1_id=character1_id,
+                    character2_id=character2_id,
+                    relationship_type=relationship_type,
+                    description=description,
+                    user_id=user_id,
+                    project_id=project_id
+                )
+                session.add(analysis)
+                await session.commit()
+                return analysis.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error saving relationship analysis: {str(e)}")
+                raise
+
+
+    async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
+        async with await self.get_session() as session:
+            try:
+                latest_chapter = await session.execute(select(Chapter).filter(
+                    Chapter.project_id == project_id
+                ).order_by(Chapter.chapter_number.desc()))
+                latest_chapter = latest_chapter.scalars().first()
+                
+                if latest_chapter:
+                    return latest_chapter.content
+                raise
+            except Exception as e:
+                self.logger.error(f"Error getting character by ID: {str(e)}")
+                raise
+
+    async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                relationships = (
+                    await session.execute(select(CharacterRelationship)
+                    .join(
+                        CodexItem,
+                        CharacterRelationship.character_id == CodexItem.id
+                    )
+                    .filter(
+                        CodexItem.project_id == project_id,
+                        CodexItem.user_id == user_id
+                    ))
+                ).scalars().all()
+
+                result = []
+                for rel in relationships:
+                    character1 = await session.get(CodexItem, rel.character_id)
+                    character2 = await session.get(CodexItem, rel.related_character_id)
+                    
+                    if character1 and character2:
+                        result.append({
+                            'id': rel.id,
+                            'character1_id': rel.character_id,
+                            'character2_id': rel.related_character_id,
+                            'character1_name': character1.name,
+                            'character2_name': character2.name,
+                            'relationship_type': rel.relationship_type,
+                            'description': rel.description or ''  # Add this line
+                        })
+
+                return result
+            except Exception as e:
+                self.logger.error(f"Error getting character relationships: {str(e)}")
+                raise
+
+
+
+    async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                character = await session.get(CodexItem, character_id)
+                if character:
+                    if character.user_id != user_id:
+                        raise ValueError(f"User {user_id} is not authorized to update character {character_id}")
+                    if character.project_id != project_id:
+                        raise ValueError(f"Character {character_id} does not belong to project {project_id}")
+                    character.backstory = backstory
+                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                else:
+                    raise ValueError(f"Character with ID {character_id} not found")
+            except Exception as e:
+                self.logger.error(f"Error updating character backstory: {str(e)}")
+                raise
+
+    async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
+        async with await self.get_session() as session:
+            try:
+                character = await session.get(CodexItem, character_id)
+                if character and character.user_id == user_id and character.project_id == project_id:
+                    character.backstory = None
+                    # Use a timezone-naive datetime
+                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                else:
+                    raise ValueError("Character not found")
+            except Exception as e:
+                self.logger.error(f"Error deleting character backstory: {str(e)}")
+                raise
+
+
+    async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
+        async with await self.get_session() as session:
+            try:
+                event = Event(
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    description=description,
+                    date=date,
+                    character_id=character_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    location_id=location_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(event)
+                await session.commit()
+                return event.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating event: {str(e)}")
+                raise
+
+
+
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
             try:
