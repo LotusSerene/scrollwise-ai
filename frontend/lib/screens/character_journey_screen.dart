@@ -21,23 +21,15 @@ class CharacterJourneyScreen extends StatefulWidget {
 
 class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   List<Character> characters = [];
-  Set<String> ignoredCharacters = {};
   bool isLoading = false;
-  late AppState _appState;
 
   @override
   void initState() {
     super.initState();
-    _appState = Provider.of<AppState>(context, listen: false);
+    final appState = Provider.of<AppState>(context, listen: false);
 
-    // Initialize with saved state if it exists
-    final savedState = _appState.getGenerationState('character_journey');
-    if (savedState != null) {
-      setState(() {
-        ignoredCharacters = Set<String>.from(
-            savedState.lastGeneratedItem?['ignoredCharacters'] ?? {});
-      });
-    }
+    // Initialize with saved state
+    final savedState = appState.characterJourneyState;
     _loadCharacters();
   }
 
@@ -65,7 +57,10 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   }
 
   Future<void> _updateCharacterInformation() async {
-    _appState.setGenerationState('character_journey', isGenerating: true);
+    final appState = Provider.of<AppState>(context, listen: false);
+    final ignoredCharacters =
+        appState.characterJourneyState['ignoredCharacters'] as Set<String>;
+    appState.updateCharacterJourneyProgress(isGenerating: true);
 
     try {
       final headers = await getAuthHeaders();
@@ -105,8 +100,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         }
       }
 
-      _appState.setGenerationState(
-        'character_journey',
+      appState.updateCharacterJourneyProgress(
         isGenerating: false,
         lastGeneratedItem: {
           'updatedCharacters': updatedCharacters,
@@ -124,7 +118,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         );
       }
     } catch (e) {
-      _appState.setGenerationState('character_journey', isGenerating: false);
+      appState.updateCharacterJourneyProgress(isGenerating: false);
       print('Error updating character information: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating character information: $e')),
@@ -258,54 +252,57 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _updateCharacterInformation,
-        icon: const Icon(Icons.update),
-        label: const Text('Update All'),
+      floatingActionButton: Consumer<AppState>(
+        builder: (context, appState, child) {
+          final isGenerating =
+              appState.characterJourneyState['isGenerating'] as bool;
+          return FloatingActionButton.extended(
+            onPressed: isGenerating ? null : _updateCharacterInformation,
+            icon: isGenerating
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Icon(Icons.update),
+            label: Text(isGenerating ? 'Updating...' : 'Update All'),
+          );
+        },
       ),
     );
   }
 
   Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        final ignoredCharacters =
+            appState.characterJourneyState['ignoredCharacters'] as Set<String>;
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Icon(
-              Icons.timeline,
-              size: 32,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 16),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Character Journeys',
+                  'Character Journey',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
+                const SizedBox(height: 16),
                 Text(
-                  'Track character development and backstories',
+                  '${characters.length} Characters | ${characters.length - ignoredCharacters.length} Active',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withOpacity(0.6),
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                 ),
               ],
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        Text(
-          '${characters.length} Characters | ${characters.length - ignoredCharacters.length} Active',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -351,73 +348,93 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   }
 
   Widget _buildCharacterCard(Character character) {
-    final isIgnored = ignoredCharacters.contains(character.id);
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        final ignoredCharacters =
+            appState.characterJourneyState['ignoredCharacters'] as Set<String>;
+        final isIgnored = ignoredCharacters.contains(character.id);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: isIgnored ? 0 : 2,
-      child: ExpandablePanel(
-        theme: ExpandableThemeData(
-          headerAlignment: ExpandablePanelHeaderAlignment.center,
-          iconColor: Theme.of(context).colorScheme.primary,
-          iconSize: 28,
-        ),
-        header: ListTile(
-          leading: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: isIgnored
-                  ? Theme.of(context).colorScheme.surfaceContainerHighest
-                  : Theme.of(context).colorScheme.primary,
+        return Card(
+          margin: const EdgeInsets.only(bottom: 16),
+          elevation: isIgnored ? 0 : 2,
+          child: ExpandablePanel(
+            theme: ExpandableThemeData(
+              headerAlignment: ExpandablePanelHeaderAlignment.center,
+              iconColor: Theme.of(context).colorScheme.primary,
+              iconSize: 28,
             ),
-            child: Center(
-              child: Text(
-                character.name.substring(0, 1).toUpperCase(),
+            header: ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: isIgnored
+                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      : Theme.of(context).colorScheme.primary,
+                ),
+                child: Center(
+                  child: Text(
+                    character.name.substring(0, 1).toUpperCase(),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors
+                              .white, // Changed to white for better contrast
+                          fontWeight: FontWeight.bold, // Added bold weight
+                        ),
+                  ),
+                ),
+              ),
+              title: Text(
+                character.name,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color:
-                          Colors.white, // Changed to white for better contrast
-                      fontWeight: FontWeight.bold, // Added bold weight
+                      color: isIgnored
+                          ? Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.5)
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+              ),
+              trailing: Switch.adaptive(
+                value: !isIgnored,
+                onChanged: (value) {
+                  final newIgnoredCharacters =
+                      Set<String>.from(ignoredCharacters);
+                  if (value) {
+                    newIgnoredCharacters.remove(character.id);
+                  } else {
+                    newIgnoredCharacters.add(character.id);
+                  }
+                  appState.updateCharacterJourneyProgress(
+                    ignoredCharacters: newIgnoredCharacters,
+                  );
+                },
+                thumbColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.hovered)) {
+                    return Theme.of(context).colorScheme.onPrimary;
+                  }
+                  return null;
+                }),
+              ),
+            ),
+            collapsed: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                character.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7),
                     ),
               ),
             ),
+            expanded: _buildExpandedContent(character),
           ),
-          title: Text(
-            character.name,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: isIgnored
-                      ? Theme.of(context).colorScheme.onSurface.withOpacity(0.5)
-                      : Theme.of(context).colorScheme.onSurface,
-                ),
-          ),
-          trailing: Switch.adaptive(
-            value: !isIgnored,
-            onChanged: (value) {
-              setState(() {
-                if (value) {
-                  ignoredCharacters.remove(character.id);
-                } else {
-                  ignoredCharacters.add(character.id);
-                }
-              });
-            },
-          ),
-        ),
-        collapsed: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Text(
-            character.description,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                ),
-          ),
-        ),
-        expanded: _buildExpandedContent(character),
-      ),
+        );
+      },
     );
   }
 

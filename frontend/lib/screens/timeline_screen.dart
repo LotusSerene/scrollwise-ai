@@ -27,24 +27,25 @@ class _TimelineScreenState extends State<TimelineScreen>
   List<Event> events = [];
   List<Location> locations = [];
   bool isLoading = false;
-  bool isAlreadyAnalyzed = false;
   late TabController _tabController;
-  late AppState _appState;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _appState = Provider.of<AppState>(context, listen: false);
+    final appState = Provider.of<AppState>(context, listen: false);
 
-    // Initialize with saved state if it exists
-    final savedState = _appState.getGenerationState('timeline');
-    if (savedState != null && savedState.lastGeneratedItem != null) {
-      setState(() {
-        isAlreadyAnalyzed =
-            savedState.lastGeneratedItem['alreadyAnalyzed'] ?? false;
-      });
-    }
+    // Initialize tab controller with saved state
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: appState.timelineState['activeTab'] ?? 0,
+    );
+
+    // Add listener to save tab state
+    _tabController.addListener(() {
+      appState.updateTimelineProgress(activeTab: _tabController.index);
+    });
+
     _loadData();
   }
 
@@ -66,7 +67,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body)['events'];
         setState(() {
-          events = data.map((json) => Event.fromJson(json)).toList();
+          events = data.map((json) => Event.fromJson(json)).toList()
+            ..sort((a, b) => a.date.compareTo(b.date)); // Sort by date
         });
       }
     } catch (e) {
@@ -98,20 +100,19 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _analyzeChapters() async {
-    setState(() => isLoading = true); // Add loading state at start
-    _appState.setGenerationState('timeline', isGenerating: true);
+    final appState = Provider.of<AppState>(context, listen: false);
+    setState(() => isLoading = true);
+    appState.updateTimelineProgress(isGenerating: true);
 
     try {
       final headers = await getAuthHeaders();
 
-      // Analyze events
       final eventResponse = await http.post(
         Uri.parse(
             '$apiUrl/events/analyze-chapter?project_id=${widget.projectId}'),
         headers: headers,
       );
 
-      // Analyze locations
       final locationResponse = await http.post(
         Uri.parse(
             '$apiUrl/locations/analyze-chapter?project_id=${widget.projectId}'),
@@ -130,15 +131,11 @@ class _TimelineScreenState extends State<TimelineScreen>
           'locationData': locationData,
         };
 
-        _appState.setGenerationState(
-          'timeline',
+        appState.updateTimelineProgress(
           isGenerating: false,
           lastGeneratedItem: analysisResult,
+          isAlreadyAnalyzed: analysisResult['alreadyAnalyzed'],
         );
-
-        setState(() {
-          isAlreadyAnalyzed = analysisResult['alreadyAnalyzed'];
-        });
 
         await _loadData();
         _showSuccess('Analysis completed successfully');
@@ -148,8 +145,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     } catch (e) {
       _showError('Error analyzing chapters: $e');
     } finally {
-      setState(() => isLoading = false); // Add loading state cleanup
-      _appState.setGenerationState('timeline', isGenerating: false);
+      setState(() => isLoading = false);
+      appState.updateTimelineProgress(isGenerating: false);
     }
   }
 
@@ -486,13 +483,13 @@ class _TimelineScreenState extends State<TimelineScreen>
               leading: CircleAvatar(
                 backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                 child: Icon(
-                  Icons.event_available, // Updated icon for events
+                  Icons.event_available,
                   color: Theme.of(context).colorScheme.onPrimaryContainer,
                 ),
               ),
-              title: Text(
+              title: _buildStyledText(
                 event.title,
-                style: Theme.of(context).textTheme.titleMedium,
+                Theme.of(context).textTheme.titleMedium,
               ),
               subtitle: Text(
                 DateFormat.yMMMd().format(event.date),
@@ -501,11 +498,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
             collapsed: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
+              child: _buildStyledText(
                 event.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium,
+                Theme.of(context).textTheme.bodyMedium,
               ),
             ),
             expanded: _buildExpandedEventContent(event),
@@ -528,7 +523,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
           ),
           const SizedBox(height: 8),
-          Text(event.description),
+          _buildStyledText(
+            event.description,
+            Theme.of(context).textTheme.bodyMedium,
+          ),
           if (event.impact != null && event.impact!.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(
@@ -538,7 +536,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
             ),
             const SizedBox(height: 8),
-            Text(event.impact!),
+            _buildStyledText(
+              event.impact!,
+              Theme.of(context).textTheme.bodyMedium,
+            ),
           ],
           const SizedBox(height: 16),
           Row(
@@ -595,9 +596,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                   color: Theme.of(context).colorScheme.onSecondaryContainer,
                 ),
               ),
-              title: Text(
+              title: _buildStyledText(
                 location.name,
-                style: Theme.of(context).textTheme.titleMedium,
+                Theme.of(context).textTheme.titleMedium,
               ),
               subtitle: location.coordinates != null
                   ? Text(
@@ -608,11 +609,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
             collapsed: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
+              child: _buildStyledText(
                 location.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium,
+                Theme.of(context).textTheme.bodyMedium,
               ),
             ),
             expanded: _buildExpandedLocationContent(location),
@@ -635,7 +634,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
           ),
           const SizedBox(height: 8),
-          Text(location.description),
+          _buildStyledText(
+            location.description,
+            Theme.of(context).textTheme.bodyMedium,
+          ),
           if (location.significance != null &&
               location.significance!.isNotEmpty) ...[
             const SizedBox(height: 16),
@@ -646,7 +648,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
             ),
             const SizedBox(height: 8),
-            Text(location.significance!),
+            _buildStyledText(
+              location.significance!,
+              Theme.of(context).textTheme.bodyMedium,
+            ),
           ],
           if (location.coordinates != null) ...[
             const SizedBox(height: 16),
@@ -726,6 +731,74 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ],
       ),
+    );
+  }
+
+  // Add this helper method to create styled text
+  Widget _buildStyledText(String text, TextStyle? baseStyle) {
+    final List<TextSpan> spans = [];
+    String remaining = text;
+
+    // Handle bold text first
+    while (remaining.contains('**')) {
+      final startIndex = remaining.indexOf('**');
+      final endIndex = remaining.indexOf('**', startIndex + 2);
+
+      if (endIndex == -1) break;
+
+      // Add text before the bold marker
+      if (startIndex > 0) {
+        spans.add(TextSpan(
+          text: remaining.substring(0, startIndex),
+          style: baseStyle,
+        ));
+      }
+
+      // Add bold text
+      spans.add(TextSpan(
+        text: remaining.substring(startIndex + 2, endIndex),
+        style: baseStyle?.copyWith(fontWeight: FontWeight.bold),
+      ));
+
+      remaining = remaining.substring(endIndex + 2);
+    }
+
+    // Handle italic text in the remaining text
+    while (remaining.contains('*')) {
+      final startIndex = remaining.indexOf('*');
+      final endIndex = remaining.indexOf('*', startIndex + 1);
+
+      if (endIndex == -1) break;
+
+      // Add text before the italic marker
+      if (startIndex > 0) {
+        spans.add(TextSpan(
+          text: remaining.substring(0, startIndex),
+          style: baseStyle,
+        ));
+      }
+
+      // Add italic text
+      spans.add(TextSpan(
+        text: remaining.substring(startIndex + 1, endIndex),
+        style: baseStyle?.copyWith(fontStyle: FontStyle.italic),
+      ));
+
+      remaining = remaining.substring(endIndex + 1);
+    }
+
+    // Add any remaining text
+    if (remaining.isNotEmpty) {
+      spans.add(TextSpan(
+        text: remaining,
+        style: baseStyle,
+      ));
+    }
+
+    return RichText(
+      text: TextSpan(children: spans),
+      overflow: TextOverflow.ellipsis,
+      maxLines: 2,
     );
   }
 }

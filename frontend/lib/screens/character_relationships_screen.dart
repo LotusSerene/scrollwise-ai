@@ -99,6 +99,10 @@ class _CharacterRelationshipsScreenState
   }
 
   void _analyzeRelationships() {
+    final appState = Provider.of<AppState>(context, listen: false);
+    final selectedCharacters = Set<String>.from(
+        appState.characterRelationshipsState['selectedCharacters'] ?? {});
+
     if (selectedCharacters.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select at least two characters')),
@@ -106,25 +110,18 @@ class _CharacterRelationshipsScreenState
       return;
     }
 
-    _appState.setGenerationState(
-      'character_relationships',
+    // Update state before starting analysis
+    appState.updateCharacterRelationshipsProgress(
       isGenerating: true,
-      lastGeneratedItem: {
-        'selectedCharacters': List<String>.from(selectedCharacters)
-      },
+      lastAnalyzedCharacters: List<String>.from(selectedCharacters),
     );
 
-    List<String> characterIds = selectedCharacters.toList();
-
     Provider.of<RelationshipProvider>(context, listen: false)
-        .analyzeRelationships(characterIds, widget.projectId)
+        .analyzeRelationships(selectedCharacters.toList(), widget.projectId)
         .then((_) {
-      _appState.setGenerationState(
-        'character_relationships',
+      // Update state after analysis is complete
+      appState.updateCharacterRelationshipsProgress(
         isGenerating: false,
-        lastGeneratedItem: {
-          'selectedCharacters': List<String>.from(selectedCharacters),
-        },
       );
 
       final relationshipProvider =
@@ -134,6 +131,14 @@ class _CharacterRelationshipsScreenState
           SnackBar(content: Text(relationshipProvider.message!)),
         );
       }
+    }).catchError((error) {
+      // Handle errors and update state
+      appState.updateCharacterRelationshipsProgress(
+        isGenerating: false,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error analyzing relationships: $error')),
+      );
     });
   }
 
@@ -148,29 +153,38 @@ class _CharacterRelationshipsScreenState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 24),
-            _buildCharacterSelection(),
-            const SizedBox(height: 24),
-            _buildRelationshipsList(),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCreateRelationshipDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('New Relationship'),
-      ),
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        final isGenerating =
+            appState.characterRelationshipsState['isGenerating'] as bool;
+
+        return Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(isGenerating),
+                const SizedBox(height: 24),
+                _buildCharacterSelection(),
+                const SizedBox(height: 24),
+                _buildRelationshipsList(),
+              ],
+            ),
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: isGenerating
+                ? null
+                : () => _showCreateRelationshipDialog(context),
+            icon: const Icon(Icons.add),
+            label: const Text('New Relationship'),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(bool isGenerating) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -193,9 +207,15 @@ class _CharacterRelationshipsScreenState
           ],
         ),
         ElevatedButton.icon(
-          onPressed: _analyzeRelationships,
-          icon: const Icon(Icons.psychology),
-          label: const Text('Analyze'),
+          onPressed: isGenerating ? null : _analyzeRelationships,
+          icon: isGenerating
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.psychology),
+          label: Text(isGenerating ? 'Analyzing...' : 'Analyze'),
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
@@ -205,55 +225,70 @@ class _CharacterRelationshipsScreenState
   }
 
   Widget _buildCharacterSelection() {
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        final selectedCharacters = appState
+            .characterRelationshipsState['selectedCharacters'] as Set<String>;
+        final isGenerating =
+            appState.characterRelationshipsState['isGenerating'] as bool;
+
+        return Card(
+          elevation: 2,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.people,
-                    color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  'Select Characters to Analyze',
-                  style: Theme.of(context).textTheme.titleMedium,
+                Row(
+                  children: [
+                    Icon(Icons.people,
+                        color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Select Characters to Analyze',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: characters.map((character) {
+                    final isSelected =
+                        selectedCharacters.contains(character['id']);
+                    return FilterChip(
+                      selected: isSelected,
+                      label: Text(character['name'] ?? ''),
+                      onSelected: isGenerating
+                          ? null
+                          : (bool value) {
+                              final newSelection =
+                                  Set<String>.from(selectedCharacters);
+                              if (value) {
+                                newSelection.add(character['id'] ?? '');
+                              } else {
+                                newSelection.remove(character['id'] ?? '');
+                              }
+                              appState.updateCharacterRelationshipsProgress(
+                                selectedCharacters: newSelection,
+                              );
+                            },
+                      avatar: Icon(
+                        Icons.person,
+                        size: 18,
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.onPrimary
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: characters.map((character) {
-                final isSelected = selectedCharacters.contains(character['id']);
-                return FilterChip(
-                  selected: isSelected,
-                  label: Text(character['name'] ?? ''),
-                  onSelected: (bool value) {
-                    setState(() {
-                      if (value) {
-                        selectedCharacters.add(character['id'] ?? '');
-                      } else {
-                        selectedCharacters.remove(character['id'] ?? '');
-                      }
-                    });
-                  },
-                  avatar: Icon(
-                    Icons.person,
-                    size: 18,
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.onPrimary
-                        : Theme.of(context).colorScheme.primary,
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

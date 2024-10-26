@@ -162,11 +162,15 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         };
+
+        // Only include universe_id in the request body if it's not 'no_universe'
         final requestBody = {
           'name': _projectNameController.text,
           'description': _projectDescriptionController.text,
-          'universe_id': _selectedUniverseId,
+          if (_selectedUniverseId != 'no_universe')
+            'universe_id': _selectedUniverseId,
         };
+
         final response = await http.post(
           Uri.parse('$apiUrl/projects'),
           headers: headers,
@@ -774,6 +778,9 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   }
 
   void _showProjectDialog() {
+    // Reset the selected universe ID when opening the dialog
+    _selectedUniverseId = 'no_universe';
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -822,28 +829,29 @@ class _ProjectsScreenState extends State<ProjectsScreen>
                         return const CircularProgressIndicator();
                       }
                       final universes = snapshot.data ?? [];
-                      return DropdownButtonFormField<String?>(
-                        value: _selectedUniverseId ?? 'no_universe',
+                      return DropdownButtonFormField<String>(
+                        // Changed to non-nullable String
+                        value: _selectedUniverseId ??
+                            'no_universe', // Default to 'no_universe'
                         decoration: const InputDecoration(
                           labelText: 'Universe (Optional)',
                           prefixIcon: Icon(Icons.public),
                         ),
                         items: [
-                          const DropdownMenuItem<String?>(
+                          const DropdownMenuItem<String>(
                             value: 'no_universe',
                             child: Text('No Universe'),
                           ),
                           ...universes.map((universe) {
-                            return DropdownMenuItem<String?>(
-                              value: universe['id'],
+                            return DropdownMenuItem<String>(
+                              value: universe['id'].toString(),
                               child: Text(universe['name']),
                             );
                           }).toList(),
                         ],
                         onChanged: (String? value) {
                           setState(() {
-                            _selectedUniverseId =
-                                value == 'no_universe' ? null : value;
+                            _selectedUniverseId = value ?? 'no_universe';
                           });
                         },
                       );

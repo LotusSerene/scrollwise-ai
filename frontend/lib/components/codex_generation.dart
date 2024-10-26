@@ -18,13 +18,7 @@ class CodexGeneration extends StatefulWidget {
 
 class _CodexGenerationState extends State<CodexGeneration> {
   final _formKey = GlobalKey<FormState>();
-  late AppState _appState;
-
-  String _selectedType =
-      'worldbuilding'; // This should match one of the values in _types
-  String? _selectedSubtype;
-  String _description = '';
-  dynamic _generatedItem;
+  final TextEditingController _descriptionController = TextEditingController();
 
   final List<String> _types = ['worldbuilding', 'character', 'item', 'lore'];
   final Map<String, List<String>> _subtypes = {
@@ -37,37 +31,36 @@ class _CodexGenerationState extends State<CodexGeneration> {
   @override
   void initState() {
     super.initState();
-    _appState = Provider.of<AppState>(context, listen: false);
+    final appState = Provider.of<AppState>(context, listen: false);
 
-    // Initialize with saved state if it exists
-    final savedState = _appState.getGenerationState('codex');
-    if (savedState != null) {
-      // Make sure the saved type exists in _types before setting it
-      if (_types.contains(savedState.type)) {
-        _selectedType = savedState.type;
-      }
-      _selectedSubtype = savedState.subtype;
-      _description = savedState.description ?? '';
-      _generatedItem = savedState.lastGeneratedItem;
-    }
+    // Initialize with saved state
+    _descriptionController.text = appState.codexGenerationState['description'];
+
+    // Add listener to update state when text changes
+    _descriptionController.addListener(() {
+      appState.updateCodexGenerationField(
+          'description', _descriptionController.text);
+    });
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
   }
 
   Future<void> _handleSubmit() async {
     if (_formKey.currentState!.validate()) {
-      _appState.setGenerationState(
-        'codex',
-        subtype: _selectedSubtype,
-        description: _description,
-        isGenerating: true,
-      );
+      final appState = Provider.of<AppState>(context, listen: false);
+      appState.updateCodexGenerationProgress(isGenerating: true);
 
       try {
         final headers = {...await getAuthHeaders()};
 
         final requestBody = {
-          'codex_type': _selectedType,
-          'subtype': _selectedSubtype,
-          'description': _description,
+          'codex_type': appState.codexGenerationState['type'],
+          'subtype': appState.codexGenerationState['subtype'],
+          'description': appState.codexGenerationState['description'],
         };
 
         final response = await http.post(
@@ -78,19 +71,18 @@ class _CodexGenerationState extends State<CodexGeneration> {
 
         if (response.statusCode == 200) {
           final data = json.decode(utf8.decode(response.bodyBytes));
-          _appState.setGenerationState(
-            'codex',
-            lastGeneratedItem: data['item'],
+          appState.updateCodexGenerationProgress(
             isGenerating: false,
+            generatedItem: data['item'],
           );
           Fluttertoast.showToast(msg: 'Codex item generated successfully');
         } else {
-          _appState.setGenerationState('codex', isGenerating: false);
+          appState.updateCodexGenerationProgress(isGenerating: false);
           Fluttertoast.showToast(
               msg: 'Error generating codex item: ${response.body}');
         }
       } catch (error) {
-        _appState.setGenerationState('codex', isGenerating: false);
+        appState.updateCodexGenerationProgress(isGenerating: false);
         print('Error generating codex item: $error');
         Fluttertoast.showToast(msg: 'Error generating codex item: $error');
       }
@@ -101,9 +93,9 @@ class _CodexGenerationState extends State<CodexGeneration> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
-        final generationState = appState.getGenerationState('codex');
-        final isGenerating = generationState?.isGenerating ?? false;
-        final generatedItem = generationState?.lastGeneratedItem;
+        final generationState = appState.codexGenerationState;
+        final isGenerating = generationState['isGenerating'];
+        final generatedItem = generationState['generatedItem'];
 
         return Padding(
           padding: const EdgeInsets.all(24),
@@ -113,20 +105,22 @@ class _CodexGenerationState extends State<CodexGeneration> {
               // Generation Form
               Expanded(
                 flex: 1,
-                child: Card(
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeader(),
-                        const SizedBox(height: 24),
-                        _buildGenerationForm(isGenerating),
-                      ],
+                child: SingleChildScrollView(
+                  child: Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildHeader(),
+                          const SizedBox(height: 24),
+                          _buildGenerationForm(isGenerating),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -136,7 +130,9 @@ class _CodexGenerationState extends State<CodexGeneration> {
               if (generatedItem != null)
                 Expanded(
                   flex: 1,
-                  child: _buildGeneratedResult(generatedItem),
+                  child: SingleChildScrollView(
+                    child: _buildGeneratedResult(generatedItem),
+                  ),
                 ),
             ],
           ),
@@ -177,71 +173,80 @@ class _CodexGenerationState extends State<CodexGeneration> {
   }
 
   Widget _buildGenerationForm(bool isGenerating) {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildTypeDropdown(),
-          const SizedBox(height: 16),
-          if (_selectedType == 'worldbuilding') ...[
-            _buildSubtypeDropdown(),
-            const SizedBox(height: 16),
-          ],
-          _buildDescriptionField(),
-          const SizedBox(height: 24),
-          _buildGenerateButton(isGenerating),
-        ],
-      ),
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        return Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildTypeDropdown(),
+              const SizedBox(height: 16),
+              if (appState.codexGenerationState['type'] == 'worldbuilding') ...[
+                _buildSubtypeDropdown(),
+                const SizedBox(height: 16),
+              ],
+              _buildDescriptionField(),
+              const SizedBox(height: 24),
+              _buildGenerateButton(isGenerating),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildTypeDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _selectedType,
-      decoration: InputDecoration(
-        labelText: 'Type',
-        prefixIcon: const Icon(Icons.category),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      items: _types.map((type) {
-        return DropdownMenuItem<String>(
-          value: type,
-          key: ValueKey(type), // Add a unique key for each item
-          child: Text(type.capitalize()),
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        return DropdownButtonFormField<String>(
+          value: appState.codexGenerationState['type'],
+          decoration: InputDecoration(
+            labelText: 'Type',
+            prefixIcon: const Icon(Icons.category),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          items: _types.map((type) {
+            return DropdownMenuItem<String>(
+              value: type,
+              key: ValueKey(type), // Add a unique key for each item
+              child: Text(type.capitalize()),
+            );
+          }).toList(),
+          onChanged: (value) {
+            appState.updateCodexGenerationField('type', value);
+            appState.updateCodexGenerationField('subtype', null);
+          },
         );
-      }).toList(),
-      onChanged: (value) {
-        setState(() {
-          _selectedType = value!;
-          _selectedSubtype = null;
-        });
       },
     );
   }
 
   Widget _buildSubtypeDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _selectedSubtype,
-      decoration: InputDecoration(
-        labelText: 'Subtype',
-        prefixIcon: const Icon(Icons.subdirectory_arrow_right),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      items: _subtypes[_selectedType]!.map((subtype) {
-        return DropdownMenuItem<String>(
-          value: subtype,
-          child: Text(subtype.capitalize()),
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        return DropdownButtonFormField<String>(
+          value: appState.codexGenerationState['subtype'],
+          decoration: InputDecoration(
+            labelText: 'Subtype',
+            prefixIcon: const Icon(Icons.subdirectory_arrow_right),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          items:
+              _subtypes[appState.codexGenerationState['type']]!.map((subtype) {
+            return DropdownMenuItem<String>(
+              value: subtype,
+              child: Text(subtype.capitalize()),
+            );
+          }).toList(),
+          onChanged: (value) {
+            appState.updateCodexGenerationField('subtype', value);
+          },
         );
-      }).toList(),
-      onChanged: (value) {
-        setState(() {
-          _selectedSubtype = value;
-        });
       },
     );
   }
@@ -257,11 +262,7 @@ class _CodexGenerationState extends State<CodexGeneration> {
         ),
       ),
       maxLines: 4,
-      onChanged: (value) {
-        setState(() {
-          _description = value;
-        });
-      },
+      controller: _descriptionController,
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Please enter a description';
@@ -323,18 +324,12 @@ class _CodexGenerationState extends State<CodexGeneration> {
               children: [
                 OutlinedButton.icon(
                   onPressed: () {
-                    _appState.resetGenerationState('codex');
+                    final appState =
+                        Provider.of<AppState>(context, listen: false);
+                    appState.resetCodexGenerationState();
                   },
                   icon: const Icon(Icons.refresh),
                   label: const Text('Generate Another'),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    // Add to codex implementation
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add to Codex'),
                 ),
               ],
             ),

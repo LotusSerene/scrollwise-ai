@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import '../widgets/privacy_policy_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -283,7 +284,10 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(width: 24),
         TextButton.icon(
           onPressed: () {
-            // Add privacy policy
+            showDialog(
+              context: context,
+              builder: (BuildContext context) => PrivacyPolicyDialog(),
+            );
           },
           icon: const Icon(Icons.privacy_tip_outlined, size: 18),
           label: const Text('Privacy Policy'),

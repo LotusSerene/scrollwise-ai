@@ -581,10 +581,10 @@ async def generate_chapters(
 
         async def generate():
             try:
+                generated_chapter_ids = []
                 for i in range(body['numChapters']):
                     chapter_number = len(previous_chapters) + i + 1
-                    yield json.dumps({'type': 'start', 'chapterNumber': chapter_number}) + '\n'
-
+                    
                     chapter_content = ""
                     async for chunk in agent_manager.generate_chapter_stream(
                         chapter_number=chapter_number,
@@ -596,82 +596,82 @@ async def generate_chapters(
                     ):
                         if isinstance(chunk, dict) and 'content' in chunk:
                             chapter_content += chunk['content']
-                            yield json.dumps(chunk) + '\n'
 
-                            # Handle validity check if present
-                            if 'validity_check' in chunk and 'chapter_title' in chunk:
-                                # Create the chapter
-                                chapter_id = await db_instance.create_chapter(
-                                    title=chunk['chapter_title'],
-                                    content=chapter_content,
-                                    user_id=current_user.id,
-                                    project_id=project_id,
-                                    chapter_number=chapter_number
-                                )
+                        if isinstance(chunk, dict) and 'type' in chunk and chunk['type'] == 'complete':
+                            # Create the chapter
+                            chapter_id = await db_instance.create_chapter(
+                                title=chunk.get('chapter_title', f"Chapter {chapter_number}"),
+                                content=chapter_content,
+                                user_id=current_user.id,
+                                project_id=project_id,
+                                chapter_number=chapter_number
+                            )
+                            generated_chapter_ids.append(chapter_id)
 
-                                # Add the chapter to the knowledge base
-                                embedding_id = await agent_manager.add_to_knowledge_base(
-                                    "chapter",
-                                    chapter_content,
-                                    {
-                                        "title": chunk['chapter_title'],
-                                        "id": chapter_id,
-                                        "type": "chapter",
-                                        "chapter_number": chapter_number
-                                    }
-                                )
+                            # Add the chapter to the knowledge base
+                            embedding_id = await agent_manager.add_to_knowledge_base(
+                                "chapter",
+                                chapter_content,
+                                {
+                                    "title": chunk.get('chapter_title', f"Chapter {chapter_number}"),
+                                    "id": chapter_id,
+                                    "type": "chapter",
+                                    "chapter_number": chapter_number
+                                }
+                            )
 
-                                # Update the chapter with the embedding_id
-                                await db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
+                            # Update the chapter with the embedding_id
+                            await db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
 
-                                # Save the validity check
+                            # Save the validity check
+                            if 'validity_check' in chunk:
                                 await agent_manager.save_validity_feedback(
                                     result=chunk['validity_check'],
                                     chapter_number=chapter_number,
                                     chapter_id=chapter_id
                                 )
 
-                                # Process new codex items if present
-                                if 'new_codex_items' in chunk:
-                                    for item in chunk['new_codex_items']:
-                                        try:
-                                            # First create the codex item and wait for the result
-                                            item_id = await db_instance.create_codex_item(
-                                                name=item['name'],
-                                                description=item['description'],
-                                                type=item['type'],
-                                                subtype=item.get('subtype'),
-                                                user_id=current_user.id,
-                                                project_id=project_id
-                                            )
+                            # Process new codex items if present
+                            if 'new_codex_items' in chunk:
+                                for item in chunk['new_codex_items']:
+                                    try:
+                                        # First create the codex item and wait for the result
+                                        item_id = await db_instance.create_codex_item(
+                                            name=item['name'],
+                                            description=item['description'],
+                                            type=item['type'],
+                                            subtype=item.get('subtype'),
+                                            user_id=current_user.id,
+                                            project_id=project_id
+                                        )
 
-                                            # Now use the actual item_id (not a coroutine) in the metadata
-                                            metadata = {
-                                                "name": item['name'],
-                                                "id": str(item_id),  # Ensure ID is a string
-                                                "type": item['type'],
-                                                "subtype": item.get('subtype')
-                                            }
+                                        # Now use the actual item_id (not a coroutine) in the metadata
+                                        metadata = {
+                                            "name": item['name'],
+                                            "id": str(item_id),  # Ensure ID is a string
+                                            "type": item['type'],
+                                            "subtype": item.get('subtype')
+                                        }
 
-                                            # Add to knowledge base with the proper metadata
-                                            embedding_id = await agent_manager.add_to_knowledge_base(
-                                                "codex_item",
-                                                item['description'],
-                                                metadata
-                                            )
+                                        # Add to knowledge base with the proper metadata
+                                        embedding_id = await agent_manager.add_to_knowledge_base(
+                                            "codex_item",
+                                            item['description'],
+                                            metadata
+                                        )
 
-                                            # Update the embedding ID
-                                            await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
+                                        # Update the embedding ID
+                                        await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
-                                        except Exception as e:
-                                            logger.error(f"Error processing codex item: {str(e)}")
-                                            continue
+                                    except Exception as e:
+                                        logger.error(f"Error processing codex item: {str(e)}")
+                                        continue
 
-                    yield json.dumps({'type': 'done'}) + '\n'
+                return {"generated_chapter_ids": generated_chapter_ids}
 
             except Exception as e:
                 logger.error(f"Error in generate function: {str(e)}", exc_info=True)
-                yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
+                return {"error": str(e)}
             finally:
                 # Cleanup
                 if task_key in generation_tasks:
@@ -679,9 +679,7 @@ async def generate_chapters(
                 if agent_manager:
                     await agent_manager.close()
 
-        generation_task = generate()
-
-        return StreamingResponse(generation_task, media_type="application/json")
+        return await generate()
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}")

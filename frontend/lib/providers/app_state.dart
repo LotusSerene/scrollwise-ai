@@ -279,10 +279,292 @@ class AppState extends ChangeNotifier {
     _wordCount = 0;
     _targetWordCount = 0;
     resetAllGenerationStates();
+    resetChapterCreationState();
+    resetCodexGenerationState();
+    resetCharacterRelationshipsState();
+    resetCharacterJourneyState();
+    resetTimelineState();
+    resetQueryState();
     notifyListeners();
 
     if (projectId != null) {
       await fetchProgressData(projectId);
     }
+  }
+
+  // Add new fields for chapter creation
+  Map<String, dynamic> _chapterCreationState = {
+    'numChapters': 1,
+    'plot': '',
+    'writingStyle': '',
+    'styleGuide': '',
+    'minWordCount': '1000',
+    'additionalInstructions': '',
+    'isGenerating': false,
+    'currentChapter': 0,
+    'progress': 0.0,
+    'streamedContent': '',
+    'generatedChapters': <String>[],
+  };
+
+  Map<String, dynamic> get chapterCreationState => _chapterCreationState;
+
+  void updateChapterCreationField(String field, dynamic value) {
+    _chapterCreationState[field] = value;
+    notifyListeners();
+  }
+
+  void resetChapterCreationState() {
+    _chapterCreationState = {
+      'numChapters': 1,
+      'plot': '',
+      'writingStyle': '',
+      'styleGuide': '',
+      'minWordCount': '1000',
+      'additionalInstructions': '',
+      'isGenerating': false,
+      'currentChapter': 0,
+      'progress': 0.0,
+      'streamedContent': '',
+      'generatedChapters': <String>[],
+    };
+    notifyListeners();
+  }
+
+  void updateGenerationProgress({
+    bool? isGenerating,
+    int? currentChapter,
+    double? progress,
+    String? streamedContent,
+    List<String>? generatedChapters,
+  }) {
+    if (isGenerating != null)
+      _chapterCreationState['isGenerating'] = isGenerating;
+    if (currentChapter != null)
+      _chapterCreationState['currentChapter'] = currentChapter;
+    if (progress != null) _chapterCreationState['progress'] = progress;
+    if (streamedContent != null)
+      _chapterCreationState['streamedContent'] = streamedContent;
+    if (generatedChapters != null)
+      _chapterCreationState['generatedChapters'] = generatedChapters;
+    notifyListeners();
+  }
+
+  void completeChapterGeneration() {
+    // Called when generation completes successfully
+    updateGenerationProgress(
+      isGenerating: false,
+      progress: 1.0,
+    );
+
+    // Optionally clear other fields while keeping the generated chapters
+    _chapterCreationState['plot'] = '';
+    _chapterCreationState['writingStyle'] = '';
+    _chapterCreationState['styleGuide'] = '';
+    _chapterCreationState['minWordCount'] = '1000';
+    _chapterCreationState['additionalInstructions'] = '';
+    _chapterCreationState['currentChapter'] = 0;
+    _chapterCreationState['streamedContent'] = '';
+
+    notifyListeners();
+  }
+
+  void cancelChapterGeneration() {
+    // Called when generation is cancelled
+    updateGenerationProgress(
+      isGenerating: false,
+      progress: 0.0,
+      currentChapter: 0,
+      streamedContent: '',
+    );
+    notifyListeners();
+  }
+
+  // Add codex generation state
+  Map<String, dynamic> _codexGenerationState = {
+    'type': 'worldbuilding',
+    'subtype': null,
+    'description': '',
+    'isGenerating': false,
+    'generatedItem': null,
+  };
+
+  Map<String, dynamic> get codexGenerationState => _codexGenerationState;
+
+  void updateCodexGenerationField(String field, dynamic value) {
+    _codexGenerationState[field] = value;
+    notifyListeners();
+  }
+
+  void resetCodexGenerationState() {
+    _codexGenerationState = {
+      'type': 'worldbuilding',
+      'subtype': null,
+      'description': '',
+      'isGenerating': false,
+      'generatedItem': null,
+    };
+    notifyListeners();
+  }
+
+  void updateCodexGenerationProgress({
+    bool? isGenerating,
+    dynamic generatedItem,
+  }) {
+    if (isGenerating != null)
+      _codexGenerationState['isGenerating'] = isGenerating;
+    if (generatedItem != null)
+      _codexGenerationState['generatedItem'] = generatedItem;
+    notifyListeners();
+  }
+
+  // Add character relationships state
+  Map<String, dynamic> _characterRelationshipsState = {
+    'selectedCharacters': <String>{},
+    'isGenerating': false,
+    'lastAnalyzedCharacters': null,
+  };
+
+  Map<String, dynamic> get characterRelationshipsState =>
+      _characterRelationshipsState;
+
+  void updateCharacterRelationshipsField(String field, dynamic value) {
+    _characterRelationshipsState[field] = value;
+    notifyListeners();
+  }
+
+  void resetCharacterRelationshipsState() {
+    _characterRelationshipsState = {
+      'selectedCharacters': <String>{},
+      'isGenerating': false,
+      'lastAnalyzedCharacters': null,
+    };
+    notifyListeners();
+  }
+
+  void updateCharacterRelationshipsProgress({
+    bool? isGenerating,
+    Set<String>? selectedCharacters,
+    dynamic lastAnalyzedCharacters,
+  }) {
+    if (isGenerating != null)
+      _characterRelationshipsState['isGenerating'] = isGenerating;
+    if (selectedCharacters != null)
+      _characterRelationshipsState['selectedCharacters'] = selectedCharacters;
+    if (lastAnalyzedCharacters != null)
+      _characterRelationshipsState['lastAnalyzedCharacters'] =
+          lastAnalyzedCharacters;
+    notifyListeners();
+  }
+
+  // Add character journey state
+  Map<String, dynamic> _characterJourneyState = {
+    'ignoredCharacters': <String>{},
+    'isGenerating': false,
+    'lastGeneratedItem': null,
+  };
+
+  Map<String, dynamic> get characterJourneyState => _characterJourneyState;
+
+  void updateCharacterJourneyField(String field, dynamic value) {
+    _characterJourneyState[field] = value;
+    notifyListeners();
+  }
+
+  void resetCharacterJourneyState() {
+    _characterJourneyState = {
+      'ignoredCharacters': <String>{},
+      'isGenerating': false,
+      'lastGeneratedItem': null,
+    };
+    notifyListeners();
+  }
+
+  void updateCharacterJourneyProgress({
+    bool? isGenerating,
+    Set<String>? ignoredCharacters,
+    dynamic lastGeneratedItem,
+  }) {
+    if (isGenerating != null)
+      _characterJourneyState['isGenerating'] = isGenerating;
+    if (ignoredCharacters != null)
+      _characterJourneyState['ignoredCharacters'] = ignoredCharacters;
+    if (lastGeneratedItem != null)
+      _characterJourneyState['lastGeneratedItem'] = lastGeneratedItem;
+    notifyListeners();
+  }
+
+  // Add timeline state
+  Map<String, dynamic> _timelineState = {
+    'isGenerating': false,
+    'lastGeneratedItem': null,
+    'isAlreadyAnalyzed': false,
+    'activeTab': 0,
+  };
+
+  Map<String, dynamic> get timelineState => _timelineState;
+
+  void updateTimelineField(String field, dynamic value) {
+    _timelineState[field] = value;
+    notifyListeners();
+  }
+
+  void resetTimelineState() {
+    _timelineState = {
+      'isGenerating': false,
+      'lastGeneratedItem': null,
+      'isAlreadyAnalyzed': false,
+      'activeTab': 0,
+    };
+    notifyListeners();
+  }
+
+  void updateTimelineProgress({
+    bool? isGenerating,
+    dynamic lastGeneratedItem,
+    bool? isAlreadyAnalyzed,
+    int? activeTab,
+  }) {
+    if (isGenerating != null) _timelineState['isGenerating'] = isGenerating;
+    if (lastGeneratedItem != null)
+      _timelineState['lastGeneratedItem'] = lastGeneratedItem;
+    if (isAlreadyAnalyzed != null)
+      _timelineState['isAlreadyAnalyzed'] = isAlreadyAnalyzed;
+    if (activeTab != null) _timelineState['activeTab'] = activeTab;
+    notifyListeners();
+  }
+
+  // Add query state
+  Map<String, dynamic> _queryState = {
+    'chatHistory': <Map<String, dynamic>>[],
+    'isLoading': false,
+    'lastQuery': null,
+  };
+
+  Map<String, dynamic> get queryState => _queryState;
+
+  void updateQueryField(String field, dynamic value) {
+    _queryState[field] = value;
+    notifyListeners();
+  }
+
+  void resetQueryState() {
+    _queryState = {
+      'chatHistory': <Map<String, dynamic>>[],
+      'isLoading': false,
+      'lastQuery': null,
+    };
+    notifyListeners();
+  }
+
+  void updateQueryProgress({
+    List<Map<String, dynamic>>? chatHistory,
+    bool? isLoading,
+    String? lastQuery,
+  }) {
+    if (chatHistory != null) _queryState['chatHistory'] = chatHistory;
+    if (isLoading != null) _queryState['isLoading'] = isLoading;
+    if (lastQuery != null) _queryState['lastQuery'] = lastQuery;
+    notifyListeners();
   }
 }

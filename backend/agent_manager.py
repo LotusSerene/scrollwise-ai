@@ -192,7 +192,7 @@ class AgentManager:
         self.lock = None
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        async with self.lock:
+        async with asyncio.Lock():
             if model in self._llm_cache:
                 return self._llm_cache[model]
 

@@ -19,6 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
+  
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,8 +32,12 @@
 
   <title>flutterfrontend</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- Remove the old service worker registration -->
+  <script src="flutter.js" defer></script>
 </head>
 <body>
+  <!-- Replace with the new bootstrap script -->
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

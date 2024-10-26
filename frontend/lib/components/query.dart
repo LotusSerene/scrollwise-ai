@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-
+import 'package:provider/provider.dart';
+import '../providers/app_state.dart';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 
@@ -17,16 +18,23 @@ class Query extends StatefulWidget {
 class _QueryState extends State<Query> {
   final TextEditingController _queryController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  List<Map<String, dynamic>> _chatHistory = [];
-  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
+    final appState = Provider.of<AppState>(context, listen: false);
+
+    // Initialize with saved state
+    if (appState.queryState['lastQuery'] != null) {
+      _queryController.text = appState.queryState['lastQuery'];
+    }
+
     _loadChatHistory();
   }
 
   Future<void> _loadChatHistory() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
@@ -36,10 +44,9 @@ class _QueryState extends State<Query> {
       );
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-        setState(() {
-          _chatHistory =
-              List<Map<String, dynamic>>.from(jsonResponse['chatHistory']);
-        });
+        final chatHistory =
+            List<Map<String, dynamic>>.from(jsonResponse['chatHistory']);
+        appState.updateQueryProgress(chatHistory: chatHistory);
       }
     } catch (error) {
       // Handle error
@@ -49,10 +56,18 @@ class _QueryState extends State<Query> {
   Future<void> _submitQuery() async {
     if (_queryController.text.isEmpty) return;
 
-    setState(() {
-      _isLoading = true;
-      _chatHistory.add({'type': 'human', 'content': _queryController.text});
-    });
+    final appState = Provider.of<AppState>(context, listen: false);
+    final currentHistory =
+        List<Map<String, dynamic>>.from(appState.queryState['chatHistory']);
+
+    appState.updateQueryProgress(
+      isLoading: true,
+      chatHistory: [
+        ...currentHistory,
+        {'type': 'human', 'content': _queryController.text}
+      ],
+      lastQuery: _queryController.text,
+    );
 
     try {
       final headers = await getAuthHeaders();
@@ -63,78 +78,123 @@ class _QueryState extends State<Query> {
         headers: headers,
         body: utf8.encode(json.encode({
           'query': _queryController.text,
-          'chatHistory': _chatHistory,
+          'chatHistory': appState.queryState['chatHistory'],
         })),
       );
 
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-        setState(() {
-          _chatHistory.add({'type': 'ai', 'content': jsonResponse['response']});
-          _queryController.clear();
-          _isLoading = false;
+        final newHistory = List<Map<String, dynamic>>.from([
+          ...appState.queryState['chatHistory'],
+          {'type': 'ai', 'content': jsonResponse['response']},
+        ]);
+
+        appState.updateQueryProgress(
+          isLoading: false,
+          chatHistory: newHistory,
+          lastQuery: '',
+        );
+        _queryController.clear();
+
+        // Add this to scroll to bottom after updating
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
         });
 
         // Save chat history
         await _saveChatHistory();
       } else {
         // Remove the user's message if the request failed
-        setState(() {
-          _chatHistory.removeLast();
-          _isLoading = false;
-        });
-        // Handle error
+        appState.updateQueryProgress(
+          isLoading: false,
+          chatHistory: currentHistory,
+        );
       }
     } catch (error) {
-      // Remove the user's message if the request failed
-      setState(() {
-        _chatHistory.removeLast();
-        _isLoading = false;
-      });
-      // Handle error
+      appState.updateQueryProgress(
+        isLoading: false,
+        chatHistory: currentHistory,
+      );
     }
   }
 
   Future<void> _saveChatHistory() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
       await http.post(
         Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
         headers: headers,
-        body: json.encode({'chatHistory': _chatHistory}),
+        // Use appState.queryState['chatHistory'] instead of _chatHistory
+        body: json.encode({'chatHistory': appState.queryState['chatHistory']}),
       );
     } catch (error) {
-      // Handle error
       print('Error saving chat history: $error');
     }
   }
 
   Future<void> _resetChatHistory() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+
     try {
       final headers = await getAuthHeaders();
       await http.delete(
         Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
-      setState(() {
-        _chatHistory = [];
-      });
+      appState.updateQueryProgress(
+        chatHistory: [],
+        lastQuery: null,
+      );
     } catch (error) {
       // Handle error
     }
   }
 
+  Widget _buildChatArea() {
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        final chatHistory = appState.queryState['chatHistory'];
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ListView.builder(
+            controller: _scrollController,
+            itemCount: chatHistory.length,
+            reverse: false,
+            itemBuilder: (context, index) {
+              final message = chatHistory[index];
+              final isUser = message['type'] == 'human';
+              return _buildMessageBubble(message, isUser);
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildHeader(),
-        Expanded(
-          child: _buildChatArea(),
-        ),
-        _buildInputArea(),
-      ],
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        return Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: _buildChatArea(),
+            ),
+            _buildInputArea(appState.queryState['isLoading']),
+          ],
+        );
+      },
     );
   }
 
@@ -185,22 +245,6 @@ class _QueryState extends State<Query> {
             tooltip: 'Reset conversation',
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildChatArea() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: ListView.builder(
-        controller: _scrollController,
-        itemCount: _chatHistory.length,
-        reverse: false,
-        itemBuilder: (context, index) {
-          final message = _chatHistory[index];
-          final isUser = message['type'] == 'human';
-          return _buildMessageBubble(message, isUser);
-        },
       ),
     );
   }
@@ -265,7 +309,7 @@ class _QueryState extends State<Query> {
     );
   }
 
-  Widget _buildInputArea() {
+  Widget _buildInputArea(bool isLoading) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -281,7 +325,7 @@ class _QueryState extends State<Query> {
       ),
       child: Column(
         children: [
-          if (_isLoading)
+          if (isLoading)
             LinearProgressIndicator(
               backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
               valueColor: AlwaysStoppedAnimation<Color>(
@@ -294,6 +338,7 @@ class _QueryState extends State<Query> {
               Expanded(
                 child: TextField(
                   controller: _queryController,
+                  enabled: !isLoading,
                   decoration: InputDecoration(
                     hintText: 'Ask a question...',
                     filled: true,
@@ -307,15 +352,16 @@ class _QueryState extends State<Query> {
                       vertical: 12,
                     ),
                   ),
-                  onSubmitted: (_) => _submitQuery(),
+                  onSubmitted:
+                      isLoading ? null : (_) => _submitQuery(), // Add this line
                   maxLines: null,
                 ),
               ),
               const SizedBox(width: 8),
               FloatingActionButton(
-                onPressed: _submitQuery,
+                onPressed: isLoading ? null : _submitQuery,
                 child: Icon(
-                  _isLoading ? Icons.hourglass_empty : Icons.send,
+                  isLoading ? Icons.hourglass_empty : Icons.send,
                   color: Colors.white,
                 ),
               ),
