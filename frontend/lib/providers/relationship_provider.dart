@@ -19,44 +19,35 @@ class RelationshipProvider extends ChangeNotifier {
   List<Relationship> get relationships => _relationships;
 
   Future<void> analyzeRelationships(
-      List<String> characters, String projectId) async {
-    _isLoading = true;
-    _error = null;
-    _message = null;
-    notifyListeners();
-
+      List<String> characterIds, String projectId) async {
     try {
       final headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/json';
-
       final response = await http.post(
         Uri.parse('$apiUrl/relationships/analyze?project_id=$projectId'),
-        headers: headers,
-        body: json.encode(characters),
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        },
+        body: json
+            .encode(characterIds), // Send the character IDs in the request body
       );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['skip'] == true) {
-          _message = 'No unprocessed chapters to analyze';
-        } else if (data['relationships'] != null) {
-          _relationships = (data['relationships'] as List)
-              .map((json) =>
-                  Relationship.fromJson(Map<String, dynamic>.from(json)))
-              .toList();
-          _message = 'Relationships analyzed successfully';
+        if (data['alreadyAnalyzed'] == true) {
+          _message = data['message'];
         } else {
-          _message = 'No relationships found';
+          await getRelationships(
+              projectId); // Refresh relationships after analysis
         }
+        notifyListeners();
       } else {
-        final errorBody = json.decode(response.body);
-        _error = errorBody['detail'] ?? 'Failed to analyze relationships';
+        throw Exception('Failed to analyze relationships');
       }
     } catch (e) {
-      _error = 'An error occurred: $e';
-    } finally {
-      _isLoading = false;
+      _error = e.toString();
       notifyListeners();
+      rethrow;
     }
   }
 

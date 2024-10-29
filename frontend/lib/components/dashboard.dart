@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import 'dart:math';
 import 'package:flutter/services.dart';
+import '../utils/text_utils.dart';
 
 class Dashboard extends StatefulWidget {
   final String projectId;
@@ -82,7 +83,7 @@ class _DashboardState extends State<Dashboard> {
 
           _wordCount = 0;
           for (var chapter in chapterJsonResponse['chapters']) {
-            _wordCount += chapter['content'].split(' ').length as int;
+            _wordCount += getWordCount(chapter['content']);
           }
 
           widget.onProgressChanged(chapterJsonResponse['chapters'].length,
@@ -312,7 +313,8 @@ class _DashboardState extends State<Dashboard> {
               child: LinearProgressIndicator(
                 value: progress,
                 valueColor: AlwaysStoppedAnimation<Color>(progressColor),
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                backgroundColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
                 minHeight: 12,
               ),
             ),

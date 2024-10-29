@@ -1,6 +1,6 @@
 # backend/agent_manager.py
 import os
-from typing import Dict, Any, List, Tuple, Optional, AsyncGenerator
+from typing import Dict, Any, List, Tuple, Optional, AsyncGenerator, Union
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
@@ -35,15 +35,57 @@ from langchain_core.rate_limiters import InMemoryRateLimiter
 from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain.chains.summarize import load_summarize_chain
 import asyncio
-from models import ChapterValidation, CodexItem, CriterionScore
+from langchain.callbacks.base import BaseCallbackHandler
+from datetime import timedelta
+from models import ChapterValidation, CodexItem, CriterionScore, CodexItemType, WorldbuildingSubtype
 
 # Add at the top with other imports
 PROCESS_TYPES = {
-    'LOCATIONS': 'analyze_locations',
-    'EVENTS': 'analyze_events',
-    'RELATIONSHIPS': 'analyze_relationships',
-    'BACKSTORY': 'extract_backstory'
+    'BACKSTORY': 'backstory',
+    'RELATIONSHIPS': 'relationships',
+    'LOCATIONS': 'locations',
+    'EVENTS': 'events',
 }
+
+class StreamingRateLimiter(BaseCallbackHandler):
+    def __init__(self, rpm_limit, tpm_limit, rpd_limit):
+        self.rpm_limit = rpm_limit
+        self.tpm_limit = tpm_limit
+        self.rpd_limit = rpd_limit
+        self.request_count = 0
+        self.token_count = 0
+        self.daily_request_count = 0
+        self.last_reset = datetime.now()
+        self.last_day_reset = datetime.now().date()
+
+    async def on_llm_start(self, serialized, prompts, **kwargs):
+        await self.limit(sum(len(prompt.split()) for prompt in prompts))
+
+    async def on_llm_new_token(self, token: str, **kwargs):
+        await self.limit(1)  # Assuming each token is counted individually
+
+    async def limit(self, token_count):
+        current_time = datetime.now()
+        
+        if current_time - self.last_reset >= timedelta(minutes=1):
+            self.request_count = 0
+            self.token_count = 0
+            self.last_reset = current_time
+
+        if current_time.date() > self.last_day_reset:
+            self.daily_request_count = 0
+            self.last_day_reset = current_time.date()
+
+        if (self.request_count >= self.rpm_limit or 
+            self.token_count + token_count > self.tpm_limit or 
+            self.daily_request_count >= self.rpd_limit):
+            wait_time = 60 - (current_time - self.last_reset).total_seconds()
+            await asyncio.sleep(max(0, wait_time))
+            return await self.limit(token_count)
+
+        self.token_count += token_count
+        self.request_count += 1
+        self.daily_request_count += 1
 
 class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
@@ -80,10 +122,35 @@ class RelationshipAnalysisList(BaseModel):
 class EventAnalysis(BaseModel):
     events: List[EventDescription] = Field(..., description="List of events found in the chapter")
 
-class LocationDescription(BaseModel):
-    name: str = Field(..., description="Name of the location")
-    description: str = Field(..., description="Detailed description of the location")
-    significance: str = Field(..., description="Significance of the location in the story")
+
+
+class LocationConnection(BaseModel):
+    id: str
+    location1_id: str
+    location2_id: str
+    location1_name: str
+    location2_name: str
+    connection_type: str
+    description: str
+    travel_route: Optional[str] = None
+    cultural_exchange: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+class LocationConnectionAnalysis(BaseModel):
+    connections: List[LocationConnection] = Field(..., description="List of location connections")
+
+
+class LocationAnalysis(BaseModel):
+    location_name: str
+    location_id: str
+    significance_analysis: str
+    connected_locations: List[str]
+    notable_events: List[str]
+    character_associations: List[str]
+
+class LocationAnalysisList(BaseModel):
+    locations: List[LocationAnalysis]
 
 class TaskState(BaseModel):
     task_type: str
@@ -103,29 +170,41 @@ class ComplexTask(BaseModel):
     status: str = "pending"
     result: Optional[Any] = None
 
-class LocationAnalysis(BaseModel):
-    location_id: str
-    significance_analysis: str
-    connected_locations: List[str]
-    notable_events: List[str]
-    character_associations: List[str]
 
-class EventConnectionAnalysis(BaseModel):
-    event_id: str
-    impact_analysis: str
-    connected_events: List[str]
-    involved_characters: List[str]
-    location_significance: str
-
-class LocationConnection(BaseModel):
-    location1_id: str
-    location2_id: str
+class EventConnection(BaseModel):
+    event1_id: str
+    event2_id: str
     connection_type: str
     description: str
-    travel_routes: Optional[str] = None
-    cultural_influences: Optional[str] = None
+    impact: str
+    characters_involved: Optional[str] = ""  # Make it optional with empty string default
+    location_relation: str
 
-# Add at the top with other imports
+class EventConnectionAnalysis(BaseModel):
+    connections: List[EventConnection]
+
+class KnowledgeBaseQuery(BaseModel):
+    """Query the knowledge base for relevant information"""
+    query: str = Field(
+        ..., 
+        description="The search query to find relevant information"
+    )
+    type_filter: Optional[List[str]] = Field(
+        None, 
+        description="Types of entries to search for (e.g., ['character', 'worldbuilding', 'item', 'lore'])"
+    )
+    limit: int = Field(
+        default=5, 
+        description="Maximum number of entries to retrieve",
+        ge=1,
+        le=20
+    )
+
+    def run(self, query: str, type_filter: Optional[List[str]] = None, limit: int = 5) -> str:
+        return f"Querying knowledge base with: {query}, types: {type_filter}, limit: {limit}"
+
+
+
 agent_managers: Dict[Tuple[str, str], 'AgentManager'] = {}
 class AgentManager:
     _llm_cache = TTLCache(maxsize=100, ttl=3600)  # Class-level cache for LLM instances
@@ -145,7 +224,7 @@ class AgentManager:
         self.task_states = {}
         self.agents = {}
         self.complex_tasks = {}
-        self.lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
     @classmethod
     async def create(cls, user_id: str, project_id: str):
         instance = cls(user_id, project_id)
@@ -155,14 +234,13 @@ class AgentManager:
     async def initialize(self):
         self.api_key = await self._get_api_key()
         self.model_settings = await self._get_model_settings()
-        self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings['mainLLM'] else 1048576
+        self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings else 1048576
         self.MAX_OUTPUT_TOKENS = 8192
         self.chat_history = await db_instance.get_chat_history(self.user_id, self.project_id)
         if self.chat_history is None:
             self.chat_history = []  # Initialize as an empty list if no history exists
 
         self.setup_caching()
-        self.setup_rate_limiter()
         self.llm = await self._get_llm(self.model_settings['mainLLM'])
         self.check_llm = await self._get_llm(self.model_settings['checkLLM'])
         self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
@@ -189,12 +267,18 @@ class AgentManager:
         self.task_states.clear()
         self.agents.clear()
         self.complex_tasks.clear()
-        self.lock = None
+        self._lock = None  # Update to _lock
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        async with asyncio.Lock():
+        async with self._lock:
             if model in self._llm_cache:
                 return self._llm_cache[model]
+
+            rate_limiter = StreamingRateLimiter(
+                rpm_limit=2 if 'pro' in self.model_settings else 15,
+                tpm_limit=32000 if 'pro' in self.model_settings else 1000000,
+                rpd_limit=50 if 'pro' in self.model_settings else 1500
+            )
 
             llm = ChatGoogleGenerativeAI(
                 model=model,
@@ -203,12 +287,19 @@ class AgentManager:
                 max_output_tokens=self.MAX_OUTPUT_TOKENS,
                 max_input_tokens=self.MAX_INPUT_TOKENS,
                 caching=True,
-                rate_limiter=self.rate_limiter,
                 streaming=True,
+                callbacks=[rate_limiter]
             )
 
             self._llm_cache[model] = llm
             return llm
+
+    async def process_large_request(self, messages):
+        llm = await self._get_llm(self.model_settings['mainLLM'])
+        full_response = ""
+        async for chunk in await llm.astream(messages):
+            full_response += chunk.content
+        return full_response
 
     def _get_api_key(self) -> str:
         api_key = db_instance.get_api_key(self.user_id)
@@ -223,38 +314,20 @@ class AgentManager:
         # Set up SQLite caching
         set_llm_cache(SQLiteCache(database_path=".langchain.db"))
 
-    def setup_rate_limiter(self):
-        # Set up rate limiter based on model tier
-        if 'pro' in self.model_settings['mainLLM']:
-            self.rate_limiter = InMemoryRateLimiter(
-                requests_per_second=1/30,  # 2 requests per minute = 1 request per 30 seconds
-                check_every_n_seconds=0.1,
-                max_bucket_size=2
-            )
-        else:
-            self.rate_limiter = InMemoryRateLimiter(
-                requests_per_second=0.25,  # 15 requests per minute = 1 request per 4 seconds
-                check_every_n_seconds=0.1,
-                max_bucket_size=15
-            )
-
-
     async def generate_chapter_stream(
         self,
         chapter_number: int,
         plot: str,
         writing_style: str,
-        instructions: Dict[str, Any],
-        previous_chapters: List[Dict[str, Any]],
-        codex_items: List[Dict[str, Any]]
+        instructions: Dict[str, Any]
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
-            # Construct context from previous chapters and codex items
-            context = self._construct_context(
+
+            # Construct context using vector store directly
+            context = await self._construct_context(
                 plot, 
-                writing_style, 
-                {item['name']: item['description'] for item in codex_items}, 
-                previous_chapters
+                writing_style,
+                self.vector_store,
             )
             
             # Use our existing _construct_prompt method
@@ -268,18 +341,18 @@ class AgentManager:
             )
 
             chat_history = ChatMessageHistory()
-            total_tokens = 0
-            max_history_tokens = self.MAX_INPUT_TOKENS // 4
             
-            # Add relevant previous chapters to chat history
-            for i, chapter in enumerate(reversed(previous_chapters), 1):
-                chapter_content = f"Chapter {chapter.get('chapter_number', i)}: {chapter['content']}"
-                chapter_tokens = self.estimate_token_count(chapter_content)
-                if total_tokens + chapter_tokens > max_history_tokens:
-                    break
-                chat_history.add_user_message(chapter_content)
+            # Get relevant previous chapters from vector store instead of passing them
+            previous_chapters = await self.vector_store.similarity_search(
+                query_text=plot,
+                filter={"type": "chapter"},
+                k=3  # Adjust number as needed
+            )
+            
+            # Add relevant chapters to chat history
+            for doc in previous_chapters:
+                chat_history.add_user_message(doc.page_content)
                 chat_history.add_ai_message("Understood.")
-                total_tokens += chapter_tokens
 
             chain = RunnableWithMessageHistory(
                 chain,
@@ -330,7 +403,7 @@ class AgentManager:
             )
 
             # Extract and process new codex items
-            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content, codex_items)
+            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content)
 
             # Return the chapter content and metadata without saving
             yield {
@@ -405,38 +478,47 @@ class AgentManager:
 
 
 
-    def _construct_context(self, plot: str, writing_style: str, 
-                           codex_items: Dict[str, str], previous_chapters: List[Dict[str, Any]]) -> str:
-        context = ""
-        context += "Codex Items:\n"
-        for name, description in codex_items.items():
-            context += f"{name}: {description}\n"
-        context += "\n"
-        
-        context += "Previous Chapters:\n"
-        chapters_content = ""
-        total_tokens = self.estimate_token_count(context)
-        max_chapter_tokens = self.MAX_INPUT_TOKENS // 2  # Reserve half of the tokens for previous chapters
-
-        for i, chapter in enumerate(reversed(previous_chapters), 1):
-            chapter_num = chapter.get('chapter_number', i)  # Use index as fallback
-            chapter_content = f"Chapter {chapter_num}: {chapter['content']}\n"
-            chapter_tokens = self.estimate_token_count(chapter_content)
-
-            if total_tokens + chapter_tokens > max_chapter_tokens:
-                # Summarize the chapter if it exceeds the token limit
-                chapter_content = self.summarize_chapter(chapter_content)
-                chapter_tokens = self.estimate_token_count(chapter_content)
-
-            if total_tokens + chapter_tokens > max_chapter_tokens:
-                break
-
-            chapters_content = chapter_content + chapters_content
-            total_tokens += chapter_tokens
-
-        context += chapters_content
-
-        return context
+    async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
+        try:
+            # Get relevant chapters
+            chapters = await vector_store.similarity_search(
+                query_text=plot,
+                filter={"type": "chapter"},
+                k=3
+            )
+            
+            context_parts = []
+            
+            # Add plot and writing style
+            context_parts.append(f"Plot: {plot}\n")
+            context_parts.append(f"Writing Style: {writing_style}\n")
+            
+            # Process chapters
+            for chapter in chapters:
+                chapter_number = chapter.metadata.get('chapter_number', 'Unknown')
+                chapter_content = chapter.page_content
+                context_parts.append(f"Chapter {chapter_number}: {chapter_content}\n")
+            
+            # Get relevant codex items
+            codex_items = await vector_store.similarity_search(
+                query_text=plot,
+                filter={"type": {"$in": [t.value for t in CodexItemType]}},
+                k=5
+            )
+            
+            # Add codex items to context
+            if codex_items:
+                context_parts.append("\nRelevant Codex Items:")
+                for item in codex_items:
+                    name = item.metadata.get('name', 'Unknown')
+                    item_type = item.metadata.get('type', 'Unknown')
+                    context_parts.append(f"\n{name} ({item_type}): {item.page_content}")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            self.logger.error(f"Error constructing context: {str(e)}")
+            raise
 
     def summarize_chapter(self, chapter_content: str) -> str:
         document = Document(page_content=chapter_content)
@@ -444,15 +526,14 @@ class AgentManager:
         return summary
 
     def estimate_token_count(self, text: str) -> int:
-        # Gemini models use about 4 characters per token
         return self.llm.get_num_tokens(text)
 
     def get_embedding(self, text: str) -> List[float]:
         return self.embeddings.embed_query(text)
 
     async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
-                        previous_chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
-        async with self.lock:
+                        previous_chapters: List[Document]) -> Dict[str, Any]:
+        async with self._lock:
             try:
                 truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
                 
@@ -590,59 +671,54 @@ class AgentManager:
             raise
     
 
-    async def update_or_remove_from_knowledge_base(self, identifier, action, new_content=None, new_metadata=None):
-        if self.vector_store is None:
-            await self.initialize()
+    async def update_or_remove_from_knowledge_base(self, identifier: Union[str, Dict[str, str]], action: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
         try:
-            if isinstance(identifier, str):
-                embedding_id = identifier
-            elif isinstance(identifier, dict) and 'item_id' in identifier and 'item_type' in identifier:
-                embedding_id = await self.vector_store.get_embedding_id(identifier['item_id'], identifier['item_type'])
-            else:
-                raise ValueError("Invalid identifier. Must be embedding_id or dict with item_id and item_type")
-
-            if action == 'delete':
+            # Handle both string embedding_id and dictionary identifier
+            embedding_id = identifier if isinstance(identifier, str) else await self.vector_store.get_embedding_id(
+                item_id=identifier['item_id'],
+                item_type=identifier['item_type']
+            )
+            
+            if embedding_id is None:
+                self.logger.warning(f"No embedding found for identifier: {identifier}")
+                return
+                
+            if action == "delete":
                 await self.vector_store.delete_from_knowledge_base(embedding_id)
-            elif action == 'update':
+            elif action == "update":
                 if new_content is None and new_metadata is None:
                     raise ValueError("Either new_content or new_metadata must be provided for update action")
                 await self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
             else:
-                raise ValueError("Invalid action. Must be 'delete' or 'update'")
-            
+                raise ValueError(f"Invalid action: {action}. Must be either 'delete' or 'update'")
+                
         except Exception as e:
-            self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}", exc_info=True)
+            self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}")
             raise
 
-    async def query_knowledge_base(self, query: str, k: int = 5) -> List[Document]:
-        """
-        Query the knowledge base using the vector store.
-        
-        Args:
-            query: The search query string
-            k: Number of results to return (default=5)
-            
-        Returns:
-            List of Document objects containing the search results
-        """
-        try:
-            # Create a filter dict for the vector store query
-            filter_dict = {
-                "user_id": self.user_id,
-                "project_id": self.project_id
-            }
-            
-            # Use the vector store's query method with the filter
-            results = await self.vector_store.similarity_search(
-                query_text=query,
-                filter=filter_dict,
-                k=k
-            )
-            
-            return results
-        except Exception as e:
-            self.logger.error(f"Error in query_knowledge_base: {str(e)}")
-            raise
+    async def query_knowledge_base(self, query: str, type_filter: List[CodexItemType], limit: int = 5):
+        # Convert enum values to strings for the type filter
+        type_filter_values = [t.value for t in type_filter]
+
+        # Log the query parameters
+        #self.logger.info(f"Processing query with params: {{'query': query, 'type_filter': type_filter_values, 'limit': limit}}")
+
+        # Perform the query
+        results = await self.vector_store.similarity_search(
+            query_text=query,
+            filter={"type": {"$in": type_filter_values}},
+            k=limit
+        )
+
+        # Log the results
+        #self.logger.info(f"Results for query '{query}' with type_filter {type_filter_values}:")
+        #for doc in results:
+            #self.logger.info(f"- Type: {doc.metadata.get('type')}")
+            #self.logger.info(f"  Content: {doc.page_content}")
+            #self.logger.info(f"  Metadata: {doc.metadata}")
+            #self.logger.info("---")
+
+        return results
 
     async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
@@ -711,9 +787,9 @@ class AgentManager:
         })
 
         # Format the response with source information
-        response = f"{answer}\n\n\n"
+        response = f"{answer}\n"
         for i, doc in enumerate(documents, 1):
-            response += f"{i}. {doc.metadata.get('source', 'Unknown source')}\n"
+            response += f"{i}. {doc.metadata.get('')}\n"
 
         return response
 
@@ -723,8 +799,9 @@ class AgentManager:
 
     def _truncate_context(self, context: str) -> str:
         max_tokens = self.MAX_INPUT_TOKENS // 2  # Reserve half of the tokens for context
-        if self.estimate_token_count(context) > max_tokens:
-            return ' '.join(context.split()[:max_tokens]) + "..."
+        summary = self.summarize_context(context)
+        if self.estimate_token_count(summary) > max_tokens:
+            return ' '.join(summary.split()[:max_tokens]) + "..."
         return context
 
     def get_existing_chapter_content(self, chapter_number: int, previous_chapters: List[Dict[str, Any]]) -> Optional[str]:
@@ -744,26 +821,39 @@ class AgentManager:
         return existing_content if existing_content else None
 
 
-    def _truncate_previous_chapters(self, previous_chapters: List[Dict[str, Any]]) -> str:
-        truncated = ""
-        total_tokens = 0
-        max_tokens = self.MAX_INPUT_TOKENS // 4  # Reserve a quarter of the tokens for previous chapters
-        for i, chapter in enumerate(reversed(previous_chapters), 1):
-            chapter_num = chapter.get('chapter_number', i)  # Use index as fallback
-            chapter_content = f"Chapter {chapter_num}: {chapter['content']}\n"
-            chapter_tokens = self.estimate_token_count(chapter_content)
-
-            if total_tokens + chapter_tokens > max_tokens:
-                # Summarize the chapter if it exceeds the token limit
-                chapter_content = self.summarize_chapter(chapter_content)
+    def _truncate_previous_chapters(self, previous_chapters: List[Document]) -> str:
+        """Truncate previous chapters to fit within token limit"""
+        try:
+            truncated_content = []
+            total_tokens = 0
+            max_tokens = self.MAX_INPUT_TOKENS // 2  # Use half of max tokens for previous chapters
+            
+            for i, chapter in enumerate(previous_chapters):
+                chapter_num = chapter.metadata.get('chapter_number', i + 1)  # Use metadata, fallback to index+1
+                chapter_content = chapter.page_content
+                
+                # Estimate tokens for this chapter
                 chapter_tokens = self.estimate_token_count(chapter_content)
-
-            if total_tokens + chapter_tokens > max_tokens:
-                break
-
-            truncated = chapter_content + truncated
-            total_tokens += chapter_tokens
-        return truncated
+                
+                if total_tokens + chapter_tokens > max_tokens:
+                    # If adding this chapter would exceed limit, summarize it
+                    summary = self.summarize_content(chapter_content)
+                    truncated_content.append(f"Chapter {chapter_num} (Summary): {summary}")
+                    total_tokens += self.estimate_token_count(summary)
+                else:
+                    # Add full chapter if within limit
+                    truncated_content.append(f"Chapter {chapter_num}: {chapter_content}")
+                    total_tokens += chapter_tokens
+                
+                # Stop if we've reached token limit
+                if total_tokens >= max_tokens:
+                    break
+            
+            return "\n\n".join(truncated_content)
+            
+        except Exception as e:
+            self.logger.error(f"Error truncating previous chapters: {str(e)}")
+            raise
 
     async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
         try:
@@ -777,7 +867,7 @@ class AgentManager:
             Return only the title, without "Chapter X:" prefix.
             """)
             
-            llm = await self._get_llm(self.model_settings['titleGenerationLLM'])  # Add await here
+            llm = await self._get_llm(self.model_settings['titleGenerationLLM']) 
             chain = prompt | llm | StrOutputParser()
             
             title = await chain.ainvoke({
@@ -937,48 +1027,62 @@ class AgentManager:
                 return await agent.process(task)
         raise ValueError(f"No agent can handle task: {task}")
 
-    async def check_and_extract_new_codex_items(self, chapter: str, codex_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    async def check_and_extract_new_codex_items(self, chapter: str) -> List[Dict[str, str]]:
+        """Extract new codex items from a chapter"""
         try:
+            # Get existing codex items from vector store for comparison
+            existing_items = await self.vector_store.similarity_search(
+                query_text=chapter,
+                filter={"type": {"$in": [t.value for t in CodexItemType]}},  # Use enum values
+                k=50  # Adjust as needed
+            )
+            
+            existing_names = {doc.metadata.get('name') for doc in existing_items if doc.metadata.get('name')}
+            
             chunks = self.chunk_content(chapter, self.MAX_INPUT_TOKENS // 2)
             all_new_items = []
-
+            
             for chunk in chunks:
                 parser = PydanticOutputParser(pydantic_object=CodexExtraction)
                 fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
                 
                 prompt = ChatPromptTemplate.from_template("""
-                You are an expert at identifying new codex items in a story. Your task is to analyze the following chapter and identify ANY new codex items that are not in the provided list of existing codex items.
+                    You are an expert at identifying new codex items in a story. Your task is to analyze 
+                    the following chapter and identify ANY new codex items that are not in the provided 
+                    list of existing codex items.
 
-                For each new codex item you find:
-                1. Provide its name
-                2. Write a brief description of the codex item based on information in the chapter
-                3. Determine the type of codex item (lore, worldbuilding, item, character)
-                4. If the type is "worldbuilding", determine the subtype (history, culture, geography)
+                    Valid types are: {valid_types}
+                    For worldbuilding items, valid subtypes are: {valid_subtypes}
 
-                IMPORTANT: Even if a codex item is only mentioned briefly or seems minor, include it in your list if it's not in the existing codex items. Pay special attention to names, pronouns, and any descriptive phrases that might indicate a new codex item.
+                    For each new codex item you find:
+                    1. Provide its name
+                    2. Write a brief description based on information in the chapter
+                    3. Determine the type from the valid types listed above
+                    4. If the type is "worldbuilding", determine the subtype from the valid subtypes listed above
 
-                If you truly find no new codex items after a thorough analysis, return an empty list.
+                    Chapter:
+                    {chapter}
 
-                Chapter:
-                {chapter}
+                    Existing Item Names:
+                    {existing_names}
 
-                Existing Codex Items:
-                {codex_items}
+                    Remember to include ANY new codex item not in the existing names list.
+                    Be thorough and precise in your analysis.
 
-                Remember, include ANY codex item that is not in the list of existing codex items, no matter how minor they might seem. Be thorough and precise in your analysis.
+                    {format_instructions}
+                    """)
 
-                {format_instructions}
-                """)
-                Codexllm = await self._get_llm(self.model_settings['extractionLLM'])
+                codex_llm = await self._get_llm(self.model_settings['extractionLLM'])
+                extraction_chain = prompt | codex_llm | fixing_parser
                 
-                extraction_chain = prompt | Codexllm | fixing_parser
-
                 result = await extraction_chain.ainvoke({
                     "chapter": chunk,
-                    "codex_items": ", ".join([item['name'] for item in codex_items]),
+                    "existing_names": ", ".join(existing_names),
+                    "valid_types": ", ".join([t.value for t in CodexItemType]),
+                    "valid_subtypes": ", ".join([t.value for t in WorldbuildingSubtype]),
                     "format_instructions": parser.get_format_instructions()
                 })
-
+                
                 all_new_items.extend(result.new_items)
 
             # Remove duplicates based on name
@@ -990,159 +1094,99 @@ class AgentManager:
                     unique_items.append(item)
 
             return [item.dict() for item in unique_items]
-
+            
         except Exception as e:
             self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
-            return []
+            raise
 
-    async def analyze_character_relationships(self, character_ids: List[str]) -> List[Dict[str, Any]]:
+    async def analyze_character_relationships(self, characters: List[Dict[str, Any]]) -> List[RelationshipAnalysis]:
+        """Analyze relationships between the provided characters"""
         try:
-            character_data = {}
-            for char_id in character_ids:
-                char = await db_instance.get_codex_item_by_id(char_id, self.user_id, self.project_id)
-                if char and char['type'] == 'character':
-                    # Store full character info
-                    character_data[char_id] = {
-                        'id': char_id,
-                        'name': char['name'].split(',')[0].strip(),  # Split and strip to handle commas
-                        'description': char.get('description', ''),
-                        'full_name': char['name']
-                    }
-                else:
-                    self.logger.warning(f"Character not found for ID: {char_id}")
+            # Get story context from chapters
+            context = await db_instance.get_all_chapters(self.project_id, self.user_id)
 
-            if not character_data:
-                self.logger.warning("No valid characters found")
-                return []
+            # Summarize context if it's too large
+            if self.estimate_token_count(json.dumps(context)) > self.MAX_INPUT_TOKENS // 4:
+                context = self.summarize_context(json.dumps(context))
 
-            # Create pairs of characters for analysis
-            character_pairs = [(a, b) for i, a in enumerate(character_ids) for b in character_ids[i+1:]]
-
-            # Get the latest chapter content
-            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
-                self.project_id,
-                self.user_id,
-                PROCESS_TYPES['RELATIONSHIPS']
-            )
+            saved_relationships = []
+            batch_size = 10  # Process 10 character pairs at a time
             
-            if not chapter_data:
-                return []
-            chapter_id = chapter_data['id']
-            chapter_content = chapter_data['content']
-            
-            if not chapter_content:
-                self.logger.warning("No chapter content found for analysis")
-                return []
+            for i in range(0, len(characters), batch_size):
+                batch_characters = characters[i:i+batch_size]
 
-            # Format character pairs using cleaned names
-            formatted_pairs = [
-                f"{character_data[pair[0]]['name']} and {character_data[pair[1]]['name']}"
-                for pair in character_pairs
-            ]
-            
-            valid_characters = [char['name'] for char in character_data.values()]
-
-            prompt = ChatPromptTemplate.from_template("""
-                Analyze the relationships between the following character pairs based on the given chapter content.
                 
-                IMPORTANT: Only analyze relationships between these specific characters:
-                {valid_characters}
-                Do not include any other characters in your analysis.
+                prompt = ChatPromptTemplate.from_template("""
+                Analyze the relationships between these specific characters:
 
-                Character Pairs to Analyze:
-                {character_pairs}
+                Characters:
+                {characters}
 
-                Chapter Content:
-                {chapter_content}
-
-                Character descriptions:
-                {character_descriptions}
-
-                IMPORTANT: Only analyze relationships between the characters listed above. Do not include any other characters in your analysis.
-
-                                                      
+                Story Context:
+                {context}
 
                 For each pair of characters, provide:
-                1. The nature of their relationship (e.g., friends, rivals, family, none)
-                2. A brief description of their relationship
-                3. Any significant interactions or events from the chapter that define their relationship
+                1. The names of both characters
+                2. The type of relationship (family, friend, enemy, mentor, etc.)
+                3. A detailed description of their relationship and interactions
 
-                RULES:
-                - Only analyze relationships between the characters listed above
-                - Do not introduce or mention any characters not in the provided list
-                - If you can't determine a relationship between characters, use "unknown" as the relationship type
-                
-                Format each relationship analysis as a list of dictionaries with these exact keys:
                 {format_instructions}
                 """)
 
-            parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-            llmRelationship = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmRelationship | parser
+                parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
+                llmRelationship = await self._get_llm(self.model_settings['extractionLLM'])
+                chain = prompt | llmRelationship | parser
 
-            character_descriptions = "\n".join(
-                f"{char['name']}: {char['description']}" for char in character_data.values()
-            )
+                result = await chain.ainvoke({
+                    "characters": json.dumps(batch_characters, indent=2),
+                    "context": context,
+                    "format_instructions": parser.get_format_instructions()
+                })
 
-            result = await chain.ainvoke({
-                "valid_characters": ", ".join(valid_characters),
-                "character_pairs": ", ".join(formatted_pairs),
-                "chapter_content": chapter_content,
-                "character_descriptions": character_descriptions,
-                "format_instructions": parser.get_format_instructions()
-            })
 
-            name_to_id = {v['name']: k for k, v in character_data.items()}
-            relationships = []
-            
-            for rel in result.relationships:
-                if rel.character1 not in valid_characters or rel.character2 not in valid_characters:
-                    self.logger.warning(f"Skipping invalid relationship with characters: {rel.character1}, {rel.character2}")
-                    continue
-                
-                char1_id = name_to_id[rel.character1]
-                char2_id = name_to_id[rel.character2]
-                
-                # Save to relationship analysis table
-                analysis_id = await db_instance.save_relationship_analysis(
-                    character1_id=char1_id,
-                    character2_id=char2_id,
-                    relationship_type=rel.relationship_type,
-                    description=rel.description,
-                    user_id=self.user_id,
-                    project_id=self.project_id
-                )
-                
-                # Also save to character relationships table
-                relationship_id = await db_instance.create_character_relationship(
-                    char1_id,
-                    char2_id,
-                    rel.relationship_type,
-                    self.project_id,
-                    description=rel.description
-                )
-                
-                relationship_dict = {
-                    'character1_id': char1_id,
-                    'character2_id': char2_id,
-                    'character1_name': character_data[char1_id]['full_name'],
-                    'character2_name': character_data[char2_id]['full_name'],
-                    'character1_description': character_data[char1_id]['description'],
-                    'character2_description': character_data[char2_id]['description'],
-                    'relationship_type': rel.relationship_type,
-                    'description': rel.description
-                }
-                relationship_dict['id'] = relationship_id
-                relationship_dict['analysis_id'] = analysis_id
-                
-                relationships.append(relationship_dict)
-                
-            if relationships:
-                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['RELATIONSHIPS'])
-            return relationships
+                if hasattr(result, 'relationships'):
+                    for relationship in result.relationships:
+                        # Verify both characters exist and are of type CHARACTER
+                        char1 = next((c for c in characters 
+                                    if c.get('name') == relationship.character1 
+                                    and c['type'] == CodexItemType.CHARACTER.value), None)
+                        char2 = next((c for c in characters 
+                                    if c.get('name') == relationship.character2 
+                                    and c['type'] == CodexItemType.CHARACTER.value), None)
+                        
+                        if char1 and char2:
+                            # Create the relationship in the database
+                            relationship_id = await db_instance.create_character_relationship(
+                                character_id=char1['id'],
+                                related_character_id=char2['id'],
+                                relationship_type=relationship.relationship_type,
+                                project_id=self.project_id,
+                                description=relationship.description
+                            )
+
+                            # Add relationship info to knowledge base
+                            relationship_content = (
+                                f"Relationship between {relationship.character1} and {relationship.character2}: "
+                                f"{relationship.relationship_type}. {relationship.description}"
+                            )
+
+                            await self.add_to_knowledge_base(
+                                "relationship",
+                                relationship_content,
+                                {
+                                    "name": f"{relationship.character1}-{relationship.character2} relationship",
+                                    "type": "relationship",
+                                    "relationship_id": relationship_id
+                                }
+                            )
+
+                            saved_relationships.append(relationship)
+
+            return saved_relationships
+
         except Exception as e:
-            self.logger.error(f"Error analyzing relationships: {str(e)}", exc_info=True)
-            return []
+            self.logger.error(f"Error analyzing character relationships: {str(e)}")
+            raise
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
         #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
@@ -1218,58 +1262,64 @@ class AgentManager:
 
     async def extract_character_backstory(self, character_id: str, chapter_id: str):
         try:
-            character = await db_instance.get_codex_item_by_id(character_id, self.user_id, self.project_id)
-            if not character or character['type'] != 'character':
-                raise ValueError(f"Character with ID {character_id} not found")
+            character = await db_instance.get_characters(self.user_id, self.project_id, character_id=character_id)
             
-            # Get the chapter content
-            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+            # Get all unprocessed chapters
+            chapters_data = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
                 PROCESS_TYPES['BACKSTORY']
             )
             
-            # If no unprocessed chapters, return early with empty result
-            if not chapter_data:
+            # If no unprocessed chapters, return early
+            if not chapters_data:
                 return CharacterBackstoryExtraction(
                     character_id=character_id,
                     new_backstory=""
                 )
 
-            chapter_id = chapter_data['id']
-            chapter_content = chapter_data['content']
+            all_backstory = []
+            # Process each chapter
+            for chapter in chapters_data:
+                chapter_id = chapter['id']
+                chapter_content = chapter['content']
 
-            prompt = ChatPromptTemplate.from_template("""
-            Given the following information about a character and a new chapter, extract any new backstory information for the character.
-            Only include information that is explicitly mentioned or strongly implied in the chapter.
+                prompt = ChatPromptTemplate.from_template("""
+                Given the following information about a character and a new chapter, extract any new backstory information for the character.
+                Only include information that is explicitly mentioned or strongly implied in the chapter.
 
-            Character Information:
-            {character_info}
+                Character Information:
+                {character_info}
 
-            Chapter Content:
-            {chapter_content}
+                Chapter Content:
+                {chapter_content}
 
-            Extract new backstory information for the character, their history, and their background. Provide their journey over the course of the story. If no new information is found, return an empty string.
+                Extract new backstory information for the character, their history, and their background. Provide their journey over the course of the story. If no new information is found, return an empty string.
 
-            Use the following format for your response:
-            {format_instructions}
-            """)
-            
-            parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
-            llmBackstory = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmBackstory | parser
-            
-            result = await chain.ainvoke({
-                "character_info": json.dumps(character),
-                "chapter_content": chapter_content,
-                "format_instructions": parser.get_format_instructions()
-            })
+                Use the following format for your response:
+                {format_instructions}
+                """)
+                
+                parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
+                llmBackstory = await self._get_llm(self.model_settings['extractionLLM'])
+                chain = prompt | llmBackstory | parser
+                
+                result = await chain.ainvoke({
+                    "character_info": json.dumps(character),
+                    "chapter_content": chapter_content,
+                    "format_instructions": parser.get_format_instructions()
+                })
 
-            if result.new_backstory:
-                # Mark the chapter as processed with the correct process type
-                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
+                if result.new_backstory:
+                    all_backstory.append(result.new_backstory)
+                    # Mark each chapter as processed
+                    await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
 
-            return result
+            # Combine all backstory information
+            return CharacterBackstoryExtraction(
+                character_id=character_id,
+                new_backstory="\n\n".join(all_backstory)
+            )
         except Exception as e:
             self.logger.error(f"Error extracting character backstory: {str(e)}")
             raise
@@ -1364,300 +1414,351 @@ class AgentManager:
 
         return chapter_content
 
-    def _parse_location_result(self, result: str) -> List[Dict[str, Any]]:
-        """Parse the location analysis result string into structured data.
-        
-        Args:
-            result: String containing location information in a semi-structured format
-            
-        Returns:
-            List of dictionaries containing parsed location data
-        """
-        locations = []
-        current_location = {}
-        
-        # Split the result into lines and process each line
-        lines = result.strip().split('\n')
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Check if this line starts a new location
-            if line.startswith('- ') or line.startswith('* '):
-                # Save the previous location if it exists
-                if current_location:
-                    locations.append(current_location)
-                current_location = {'name': line[2:].strip(), 'description': '', 'coordinates': None}
-                continue
-                
-            # Look for specific location details
-            lower_line = line.lower()
-            if 'description:' in lower_line:
-                current_location['description'] = line.split(':', 1)[1].strip()
-            elif 'coordinates:' in lower_line or 'location:' in lower_line:
-                current_location['coordinates'] = line.split(':', 1)[1].strip()
-            elif current_location:  # Append to description if no specific marker
-                if current_location['description']:
-                    current_location['description'] += ' ' + line
-                else:
-                    current_location['description'] = line
-        
-        # Add the last location if it exists
-        if current_location:
-            locations.append(current_location)
-            
-        return locations
 
-    async def analyze_unprocessed_chapter_locations(self, chapter_id: str):
-        self.logger.info("Starting location analysis for chapter")
+    async def analyze_unprocessed_chapter_locations(self) -> List[Dict[str, Any]]:
         try:
-            # Get the chapter content
-            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+            # Get unprocessed chapters
+            unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
                 PROCESS_TYPES['LOCATIONS']
             )
-            if not chapter_data:
-                raise ValueError("No unprocessed chapter found for location analysis")
             
-            chapter_id = chapter_data['id']
-            chapter_content = chapter_data['content']
-            self.logger.info("Retrieved chapter content")
-            
-            if not chapter_content:
-                self.logger.info("No chapter content found")
+            if not unprocessed_chapters:
                 return []
 
+            # Create the prompt
             prompt = ChatPromptTemplate.from_template("""
-            Analyze the following chapter content and identify any locations mentioned or described.
-            For each location, provide details in the following format:
+                Analyze the following chapter and identify all locations mentioned.
+                For each location provide:
+                1. A unique identifier (location_id)
+                2. The name of the location (location_name)
+                3. An analysis of its significance to the story
+                4. Any connected locations
+                5. Notable events that occurred there
+                6. Characters associated with this location
 
-            * [Location Name]
-            Description: [Detailed description of the location]
-            Coordinates/Location: [Any geographical details or relative position]
+                Chapter:
+                {chapter_content}
 
-            Chapter Content:
-            {chapter_content}
-
-            Only include locations that are explicitly mentioned or described in the chapter.
-            Be specific and detailed in the descriptions.
+                {format_instructions}
             """)
-            llmLocation = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmLocation | StrOutputParser()
-            
-            result = await chain.ainvoke({"chapter_content": chapter_content})
-            
-            # Parse the locations from the result
-            location_list = self._parse_location_result(result)
-            
-            # Process and save the locations
-            locations = []
-            for location_data in location_list:
-                try:
-                    # Check if the location already exists
-                    existing_location = await db_instance.get_location_by_name(location_data['name'], self.user_id, self.project_id)
-                    if existing_location:
-                        self.logger.info(f"Location {location_data['name']} already exists, skipping save.")
-                        locations.append({"id": existing_location['id'], **location_data})
-                        continue
 
+            parser = PydanticOutputParser(pydantic_object=LocationAnalysisList)
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+
+            chain = prompt | self.llm | fixing_parser
+
+            locations = []
+            for chapter in unprocessed_chapters:
+                result = await chain.ainvoke({
+                    "chapter_content": chapter['content'],
+                    "format_instructions": parser.get_format_instructions()
+                })
+
+                # Process each location
+                for location in result.locations:
                     location_id = await db_instance.create_location(
-                        name=location_data['name'],
-                        description=location_data['description'],
-                        coordinates=location_data.get('coordinates'),
+                        name=location.location_name,
+                        description=location.significance_analysis,
+                        coordinates=None,
                         user_id=self.user_id,
                         project_id=self.project_id
                     )
-                    locations.append({"id": location_id, **location_data})
-                except Exception as e:
-                    self.logger.error(f"Error saving location {location_data['name']}: {str(e)}")
-                    continue
 
-            # Mark the chapter as processed for location analysis
-            if locations:
-                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['LOCATIONS'])
-            
-            self.logger.info(f"Location analysis completed. Found {len(locations)} locations")
+                    locations.append({
+                        'id': location_id,
+                        'name': location.location_name,
+                        'description': location.significance_analysis,
+                        'coordinates': None,
+                        'connected_locations': location.connected_locations,
+                        'notable_events': location.notable_events,
+                        'character_associations': location.character_associations
+                    })
+
+                # Mark chapter as processed for locations
+                await db_instance.mark_chapter_processed(
+                    chapter['id'],
+                    self.user_id,
+                    PROCESS_TYPES['LOCATIONS']
+                )
+
             return locations
+
         except Exception as e:
             self.logger.error(f"Error analyzing locations: {str(e)}")
             raise
 
 
-    async def analyze_unprocessed_chapter_events(self, chapter_id: str):
+    async def analyze_unprocessed_chapter_events(self):
         try:
-            chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
+            chapters_data = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
                 PROCESS_TYPES['EVENTS']
             )
-            if not chapter_data:
-                raise ValueError(f"No unprocessed chapter found for events analysis")
+            if not chapters_data:
+                raise ValueError("No unprocessed chapters found for events analysis")
 
-            chapter_id = chapter_data['id']
-            chapter_content = chapter_data['content']
+            all_events = []
+            for chapter in chapters_data:
+                chapter_id = chapter['id']
+                chapter_content = chapter['content']
 
-            parser = PydanticOutputParser(pydantic_object=EventAnalysis)
-            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
-            
-            prompt = ChatPromptTemplate.from_template("""
-            Analyze the following chapter and identify all significant events. For each event, provide:
-            1. A title
-            2. A description
-            3. The impact on the story or characters
-            4. List of involved characters
-            5. Location where it takes place (if mentioned)
+                # Use chunking for large chapters
+                chunks = self.chunk_content(chapter_content, self.MAX_INPUT_TOKENS // 2)
+                chapter_events = []
 
-            Chapter Content:
-            {chapter_content}
+                for chunk in chunks:
+                    parser = PydanticOutputParser(pydantic_object=EventAnalysis)
+                    fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+                    
+                    prompt = ChatPromptTemplate.from_template("""
+                    Analyze the following chapter content and identify all significant events. For each event, provide:
+                    1. A title
+                    2. A description
+                    3. The impact on the story or characters
+                    4. List of involved characters
+                    5. Location where it takes place (if mentioned)
 
-            Format your response as a dictionary with a single key 'events' containing a list of events.
-            {format_instructions}
-            """)
+                    Chapter Content:
+                    {chapter_content}
 
-            llmAnalysis = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmAnalysis | fixing_parser
+                    Format your response as a dictionary with a single key 'events' containing a list of events.
+                    {format_instructions}
+                    """)
 
-            result = await chain.ainvoke({
-                "chapter_content": chapter_content,
-                "format_instructions": parser.get_format_instructions()
-            })
+                    llmAnalysis = await self._get_llm(self.model_settings['extractionLLM'])
+                    chain = prompt | llmAnalysis | fixing_parser
 
-            # Process and store the events
-            stored_events = []
-            for event in result.events:
-                # Get character ID for the first involved character (if any)
-                character_id = None
-                if event.involved_characters:
-                    character = await db_instance.get_characters(self.user_id, self.project_id, name=event.involved_characters[0])
-                    if character:
-                        character_id = character['id']
+                    result = await chain.ainvoke({
+                        "chapter_content": chunk,
+                        "format_instructions": parser.get_format_instructions()
+                    })
 
-                # Get location ID if location is specified
-                location_id = None
-                if event.location:
-                    location = await db_instance.get_location_by_name(event.location, self.user_id, self.project_id)
-                    if location:
-                        location_id = location['id']
+                    # Process events from this chunk
+                    for event in result.events:
+                        # Get character ID for the first involved character (if any)
+                        character_id = None
+                        if event.involved_characters:
+                            character = await db_instance.get_characters(
+                                self.user_id, 
+                                self.project_id, 
+                                name=event.involved_characters[0]
+                            )
+                            if character:
+                                character_id = character['id']
 
-                # Check if the event already exists
-                existing_event = await db_instance.get_event_by_title(event.title, self.user_id, self.project_id)
-                if existing_event:
-                    self.logger.info(f"Event {event.title} already exists, skipping save.")
-                    stored_events.append({"id": existing_event['id'], **event.dict()})
-                    continue
+                        # Get location ID if location is specified
+                        location_id = None
+                        if event.location:
+                            location = await db_instance.get_location_by_name(
+                                event.location, 
+                                self.user_id, 
+                                self.project_id
+                            )
+                            if location:
+                                location_id = location['id']
 
-                event_id = await db_instance.create_event(
-                    title=event.title,
-                    description=event.description,
-                    date=datetime.now(),  # You might want to extract or compute this
-                    project_id=self.project_id,
-                    user_id=self.user_id,
-                    character_id=character_id,
-                    location_id=location_id
-                )
-                stored_events.append({
-                    "id": event_id,
-                    **event.dict()
-                })
+                        # Check if the event already exists
+                        existing_event = await db_instance.get_event_by_title(
+                            event.title, 
+                            self.user_id, 
+                            self.project_id
+                        )
+                        if existing_event:
+                            #self.logger.info(f"Event {event.title} already exists, skipping save.")
+                            chapter_events.append({"id": existing_event['id'], **event.dict()})
+                            continue
 
-            # Mark the chapter as processed for events
-            if stored_events:
-                await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
+                        event_id = await db_instance.create_event(
+                            title=event.title,
+                            description=event.description,
+                            date=datetime.now(),
+                            project_id=self.project_id,
+                            user_id=self.user_id,
+                            character_id=character_id,
+                            location_id=location_id
+                        )
+                        chapter_events.append({
+                            "id": event_id,
+                            **event.dict()
+                        })
 
-            return stored_events
+                if chapter_events:
+                    all_events.extend(chapter_events)
+                    await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
+
+            return all_events
         except Exception as e:
             self.logger.error(f"Error analyzing events: {str(e)}")
             raise
 
-    async def analyze_event_connections(self, event_ids: List[str]) -> List[EventConnectionAnalysis]:
+    async def analyze_event_connections(self) -> List[EventConnection]:
         try:
-            events = [await db_instance.get_event_by_id(event_id, self.user_id, self.project_id) for event_id in event_ids]
-            events = [e for e in events if e]  # Filter out None values
+            events = await db_instance.get_events(self.project_id, self.user_id, limit=100)
+            characters = await db_instance.get_characters(self.user_id, self.project_id)
+            locations = await db_instance.get_locations(self.user_id, self.project_id)
 
-            prompt = ChatPromptTemplate.from_template("""
-            Analyze the following events and their connections:
+            saved_connections = []
+            batch_size = 10  # Process 10 event pairs at a time
 
-            Events:
-            {events}
+            for i in range(0, len(events), batch_size):
+                batch_events = events[i:i+batch_size]
+                
+                prompt = ChatPromptTemplate.from_template("""
+                Analyze the connections between the following events:
+                
+                Characters:
+                {characters}
+                                                          
+                Locations:
+                {locations}
 
-            For each event, provide:
-            1. The impact on the story and characters
-            2. Connected events and their relationships
-            3. All characters involved and their roles
-            4. The significance of the location where it occurred
+                Events:
+                {events}
 
-            Use the following format for your response:
-            {format_instructions}
-            """)
+                For each pair of connected events, provide:
+                1. Event_1_ID and Event_2_ID
+                2. Connection_Type (cause_effect, parallel, contrast, etc.)
+                3. Description of how they are connected
+                4. Impact this connection has on the story
+                5. Characters_Involved (as a comma-separated string)
+                6. Location_Relation describing where these events occur
 
-            parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
-            llmEvent = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmEvent | parser
+                {format_instructions}
+                """)
 
-            analyses = []
-            for event in events:
+                parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
+                llmEvent = await self._get_llm(self.model_settings['extractionLLM'])
+                chain = prompt | llmEvent | parser
+
                 result = await chain.ainvoke({
-                    "events": json.dumps(events, indent=2),
+                    "events": json.dumps(batch_events, indent=2),
+                    "characters": json.dumps(characters, indent=2),
+                    "locations": json.dumps(locations, indent=2),
                     "format_instructions": parser.get_format_instructions()
                 })
-                analyses.append(result)
 
-            return analyses
+                if result.connections:
+                    for connection in result.connections:
+                        # Create a new EventConnection with the connection ID
+                        connection_id = await db_instance.create_event_connection(
+                            event1_id=connection.event1_id,
+                            event2_id=connection.event2_id,
+                            connection_type=connection.connection_type,
+                            description=connection.description,
+                            impact=connection.impact,
+                            project_id=self.project_id,
+                            user_id=self.user_id
+                        )
+                        
+                        # Create a new EventConnection object with the ID
+                        saved_connection = EventConnection(
+                            id=connection_id,
+                            event1_id=connection.event1_id,
+                            event2_id=connection.event2_id,
+                            connection_type=connection.connection_type,
+                            description=connection.description,
+                            impact=connection.impact,
+                            characters_involved=connection.characters_involved,
+                            location_relation=connection.location_relation
+                        )
+                        saved_connections.append(saved_connection)
+
+            return saved_connections
         except Exception as e:
             self.logger.error(f"Error analyzing event connections: {str(e)}")
             raise
 
-    async def analyze_location_connections(self, location_ids: List[str]) -> List[LocationConnection]:
+    async def analyze_location_connections(self) -> List[LocationConnection]:
         try:
-            locations = [await db_instance.get_location_by_id(loc_id, self.user_id, self.project_id) for loc_id in location_ids]
-            locations = [l for l in locations if l]  # Filter out None values
+            locations = await db_instance.get_locations(self.user_id, self.project_id)
+            context = await db_instance.get_all_chapters(self.project_id, self.user_id)
 
-            prompt = ChatPromptTemplate.from_template("""
-            Analyze the connections between the following locations:
+            # Summarize context if it's too large
+            if self.estimate_token_count(json.dumps(context)) > self.MAX_INPUT_TOKENS // 4:
+                context = self.summarize_context(json.dumps(context))
 
-            Locations:
-            {locations}
+            saved_connections = []
+            batch_size = 10  # Process 10 location pairs at a time
 
-            For each pair of locations, provide:
-            1. The type of connection (geographical, historical, cultural, etc.)
-            2. A detailed description of how they are connected
-            3. Any travel routes between them
-            4. Cultural influences and exchanges
+            for i in range(0, len(locations), batch_size):
+                batch_locations = locations[i:i+batch_size]
+                
+                prompt = ChatPromptTemplate.from_template("""
+                Analyze the connections between these locations:
 
-            Use the following format for your response:
-            {format_instructions}
-            """)
+                Locations:
+                {locations}
 
-            parser = PydanticOutputParser(pydantic_object=LocationConnection)
-            llmLocationConnection = await self._get_llm(self.model_settings['extractionLLM'])
-            chain = prompt | llmLocationConnection | parser
+                Story Context:
+                {context}
 
-            connections = []
-            for i, loc1 in enumerate(locations):
-                for loc2 in locations[i+1:]:
-                    result = await chain.ainvoke({
-                        "locations": json.dumps([loc1, loc2], indent=2),
-                        "format_instructions": parser.get_format_instructions()
-                    })
-                    connections.append(result)
+                For each pair of connected locations, provide:
+                1. The type of connection (geographical, historical, cultural, political, etc.)
+                2. A detailed description of how they are connected
+                3. Any travel routes or paths between them
+                4. Cultural influences and exchanges between them
 
-            return connections
+                {format_instructions}
+                """)
+
+                parser = PydanticOutputParser(pydantic_object=LocationConnectionAnalysis)
+                llmLocationConnection = await self._get_llm(self.model_settings['extractionLLM'])
+                chain = prompt | llmLocationConnection | parser
+
+                result = await chain.ainvoke({
+                    "locations": json.dumps(batch_locations, indent=2),
+                    "context": context,
+                    "format_instructions": parser.get_format_instructions()
+                })
+
+                if hasattr(result, 'connections') and result.connections:
+                    for connection in result.connections:
+                        # Get location names for the connection
+                        location1 = next((loc for loc in locations if loc['id'] == connection.location1_id), None)
+                        location2 = next((loc for loc in locations if loc['id'] == connection.location2_id), None)
+                        
+                        if location1 and location2:
+                            # Create a dictionary of connection data
+                            connection_data = {
+                                'id': str(uuid.uuid4()),  # Generate a new UUID for the connection
+                                'location1_id': connection.location1_id,
+                                'location2_id': connection.location2_id,
+                                'location1_name': location1['name'],
+                                'location2_name': location2['name'],
+                                'connection_type': connection.connection_type,
+                                'description': connection.description,
+                                'travel_route': connection.travel_route,
+                                'cultural_exchange': connection.cultural_exchange,
+                                'created_at': datetime.now(),
+                                'updated_at': datetime.now()
+                            }
+                            
+                            # Save to database
+                            connection_id = await db_instance.create_location_connection(
+                                location1_id=connection.location1_id,
+                                location2_id=connection.location2_id,
+                                location1_name=location1['name'],
+                                location2_name=location2['name'],
+                                connection_type=connection.connection_type,
+                                description=connection.description,
+                                travel_route=connection.travel_route,
+                                cultural_exchange=connection.cultural_exchange,
+                                project_id=self.project_id,
+                                user_id=self.user_id
+                            )
+                            
+                            # Add the ID to the connection data
+                            connection_data['id'] = connection_id
+                            
+                            # Create LocationConnection object with the complete data
+                            saved_connection = LocationConnection(**connection_data)
+                            saved_connections.append(saved_connection)
+
+            return saved_connections
+
         except Exception as e:
             self.logger.error(f"Error analyzing location connections: {str(e)}")
             raise
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 from agent_manager import AgentManager, PROCESS_TYPES
 from database import db_instance, Chapter, Project, CodexItem, KnowledgeBaseItem
 from vector_store import VectorStore
+from models import CodexItemType, WorldbuildingSubtype
 # Load environment variables
 load_dotenv()
 
@@ -210,9 +211,10 @@ class UniverseUpdate(BaseModel):
     name: str
 
 class CodexItemGenerateRequest(BaseModel):
-    codex_type: str = Field(..., description="Type of codex item (worldbuilding, character, item, lore)")
-    subtype: Optional[str] = Field(None, description="Subtype of codex item (only for worldbuilding)")
-    description: str = Field(..., description="Description of the codex item")
+    codex_type: str  # Keep as string for now
+    subtype: Optional[str] = None  # Keep as string
+    description: str = Field(..., description="Description to base the codex item on")
+
 
 class ChatHistoryItem(BaseModel):
     type: str
@@ -260,7 +262,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.utcnow() + timedelta(minutes=150)
     to_encode.update({"exp": expire})
     try:
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -537,18 +539,15 @@ generation_tasks = {}  # Changed from defaultdict to regular dict
 # Update the cancel endpoint
 @chapter_router.post("/cancel")
 async def cancel_chapter_generation(project_id: str, current_user: User = Depends(get_current_active_user)):
-    task_key = f"{current_user.id}_{project_id}"
-    
-    agent_manager = await agent_manager_store.get_manager(current_user.id, project_id)
-    if agent_manager:
-        try:
-            await agent_manager.close()  # Close the agent manager
-            return {"message": "Generation cancelled successfully"}
-        except Exception as e:
-            logger.error(f"Error cancelling generation: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error cancelling generation")
-    else:
-        return {"message": "No generation in progress for this project"}
+    try:
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            if agent_manager:
+                await agent_manager.close()
+                return {"message": "Generation cancelled successfully"}
+            return {"message": "No generation in progress for this project"}
+    except Exception as e:
+        logger.error(f"Error cancelling generation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error cancelling generation")
 
 # Update the generate_chapters endpoint to store the AgentManager instance
 @chapter_router.post("/generate")
@@ -558,10 +557,6 @@ async def generate_chapters(
     current_user: User = Depends(get_current_active_user),
 ):
     try:
-        # Check if generation is already in progress
-        if await agent_manager_store.get_manager(current_user.id, project_id):
-            raise HTTPException(status_code=400, detail="Chapter generation already in progress for this project.")
-        
         # Parse and validate the request body
         body = await request.json()
         
@@ -576,22 +571,20 @@ async def generate_chapters(
         if not isinstance(instructions, dict):
             raise HTTPException(status_code=400, detail="Instructions must be an object")
 
-        previous_chapters = await db_instance.get_all_chapters(current_user.id, project_id)
-        codex_items = await db_instance.get_all_codex_items(current_user.id, project_id)
+        # Just get the chapter count
+        chapter_count = await db_instance.get_chapter_count(project_id, current_user.id)
 
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             generated_chapter_ids = []
             for i in range(body['numChapters']):
-                chapter_number = len(previous_chapters) + i + 1
+                chapter_number = chapter_count + i + 1
                 
                 chapter_content = ""
                 async for chunk in agent_manager.generate_chapter_stream(
                     chapter_number=chapter_number,
                     plot=body['plot'],
                     writing_style=body['writingStyle'],
-                    instructions=instructions,
-                    previous_chapters=previous_chapters,
-                    codex_items=codex_items
+                    instructions=instructions
                 ):
                     if isinstance(chunk, dict) and 'content' in chunk:
                         chapter_content += chunk['content']
@@ -634,6 +627,7 @@ async def generate_chapters(
                         if 'new_codex_items' in chunk:
                             for item in chunk['new_codex_items']:
                                 try:
+                                    # Create codex item in DB
                                     item_id = await db_instance.create_codex_item(
                                         name=item['name'],
                                         description=item['description'],
@@ -643,17 +637,16 @@ async def generate_chapters(
                                         project_id=project_id
                                     )
 
-                                    metadata = {
-                                        "name": item['name'],
-                                        "id": str(item_id),
-                                        "type": item['type'],
-                                        "subtype": item.get('subtype')
-                                    }
-
+                                    # Add to knowledge base with the specific type
                                     embedding_id = await agent_manager.add_to_knowledge_base(
-                                        "codex_item",
+                                        item['type'],  # Use the specific type instead of "codex_item"
                                         item['description'],
-                                        metadata
+                                        {
+                                            "name": item['name'],
+                                            "id": str(item_id),
+                                            "type": item['type'],
+                                            "subtype": item.get('subtype')
+                                        }
                                     )
 
                                     await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
@@ -746,7 +739,7 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: st
         # Update in knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
-                existing_chapter['embedding_id'],
+                chapter_id,
                 'update',
                 new_content=chapter.content,
                 new_metadata={"title": chapter.title, "id": chapter_id, "type": "chapter"}
@@ -768,12 +761,17 @@ async def delete_chapter(chapter_id: str, project_id: str, current_user: User = 
         # Delete from knowledge base if embedding_id exists
         if chapter.get('embedding_id'):
             async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-                await agent_manager.update_or_remove_from_knowledge_base(chapter['embedding_id'], 'delete')
+                await agent_manager.update_or_remove_from_knowledge_base(
+                    {"item_id": chapter_id, "item_type": "chapter"},
+                    "delete"
+                )
         else:
             logger.warning(f"No embedding_id found for chapter {chapter_id}. Skipping knowledge base deletion.")
 
-        # Delete from database
-            await db_instance.delete_chapter(chapter_id, current_user.id, project_id)
+        # Delete from database and ensure it's committed
+        success = await db_instance.delete_chapter(chapter_id, current_user.id, project_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete chapter")
 
         return {"message": "Chapter deleted successfully"}
     except Exception as e:
@@ -790,30 +788,39 @@ async def generate_codex_item(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Validate the type
+        try:
+            codex_type = CodexItemType(request.codex_type)  # Convert string to enum
+            subtype = WorldbuildingSubtype(request.subtype) if request.subtype else None  # Convert string to enum if exists
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid codex type or subtype. Valid types are: {[t.value for t in CodexItemType]}")
+
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             generated_item = await agent_manager.generate_codex_item(
-                request.codex_type, request.subtype, request.description
+                codex_type.value,  # Convert enum to string
+                subtype.value if subtype else None,  # Convert enum to string if it exists
+                request.description
             )
             
             # Save to database
             item_id = await db_instance.create_codex_item(
                 generated_item["name"],
                 generated_item["description"],
-                request.codex_type,
-                request.subtype,
+                codex_type.value,
+                subtype.value if subtype else None,
                 current_user.id,
                 project_id
             )
                 
-            # Add to knowledge base
+            # Add to knowledge base with the specific type
             embedding_id = await agent_manager.add_to_knowledge_base(
-                "codex_item",
+                codex_type.value,  # Use the enum value
                 generated_item["description"],
                 {
                     "name": generated_item["name"],
                     "id": item_id,
-                    "type": request.codex_type,
-                    "subtype": request.subtype
+                    "type": codex_type.value,
+                    "subtype": subtype.value if subtype else None
                 }
             )
                 
@@ -857,24 +864,35 @@ async def extract_character_backstory(
     request: BackstoryExtractionRequest,
     current_user: User = Depends(get_current_active_user)
 ):
+
     try:
-        # Check if the character exists and belongs to the user/project
-        character = await db_instance.get_codex_item_by_id(character_id, current_user.id, project_id)
-        if not character or character['type'] != 'character':
+        character = await db_instance.get_characters(current_user.id, project_id, character_id=character_id)
+        if not character or character['type'] != CodexItemType.CHARACTER.value:
             raise HTTPException(status_code=404, detail="Character not found")
 
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:         
-            # Extract backstory
             result = await agent_manager.extract_character_backstory(character_id, request.chapter_id)
 
         if result and result.new_backstory:
-            # Save the backstory to the database
+            # Save to database
             await db_instance.save_character_backstory(
                 character_id=character_id,
                 content=result.new_backstory,
                 user_id=current_user.id,
                 project_id=project_id
             )
+
+            # Add to knowledge base
+            await agent_manager.add_to_knowledge_base(
+                "character_backstory",
+                result.new_backstory,
+                {
+                    "character_id": character_id,
+                    "type": "character_backstory",
+                    "name": character['name']  # Include character name for better context
+                }
+            )
+
             return {"message": "Backstory updated", "backstory": result.model_dump()}
         else:
             return {"message": "No new backstory information found", "alreadyProcessed": True}
@@ -893,24 +911,46 @@ async def update_backstory(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Update in database
         await db_instance.update_character_backstory(character_id, backstory, current_user.id, project_id)
+        
+        # Update in knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.add_to_knowledge_base(
+                "character_backstory",
+                backstory,
+                {
+                    "character_id": character_id,
+                    "type": "character_backstory"
+                }
+            )
+            
         return {"message": "Backstory updated successfully"}
-    except ValueError as e:
-        logger.error(f"Error updating backstory: {str(e)}")
-        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating backstory: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @codex_item_router.delete("/characters/{character_id}/backstory")
-async def delete_backstory(character_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_backstory(
+    character_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
     try:
-         await db_instance.delete_character_backstory(character_id, current_user.id, project_id)
-         return {"message": "Backstory deleted successfully"}
+        # Delete from database
+        await db_instance.delete_character_backstory(character_id, current_user.id, project_id)
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": character_id, "item_type": "character_backstory"},
+                "delete"
+            )
+        return {"message": "Backstory deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting backstory: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @codex_item_router.post("/")
@@ -928,7 +968,7 @@ async def create_codex_item(codex_item: CodexItemCreate, project_id: str, curren
         # Add to knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             embedding_id = await agent_manager.add_to_knowledge_base(
-                    "codex_item",
+                codex_item.type,  # Use the actual type from the codex item
                 codex_item.description,
                 {
                     "name": codex_item.name,
@@ -962,7 +1002,7 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
                 "name": codex_item.name,
                 "id": item_id,
                 "type": codex_item.type,
-                "subtype": codex_item.subtype  # This can be None, which will remove the field if it exists
+                "subtype": codex_item.subtype
             }
 
             if existing_item.get('embedding_id'):
@@ -973,8 +1013,12 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
                     new_metadata=metadata
                 )
             else:
-                # If no embedding_id exists, create a new one
-                embedding_id = await agent_manager.add_to_knowledge_base("codex_item", codex_item.description, metadata)
+                # If no embedding_id exists, create a new one with the specific type
+                embedding_id = await agent_manager.add_to_knowledge_base(
+                    codex_item.type,  # Use the actual type from the codex item
+                    codex_item.description,
+                    metadata
+                )
                 await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
         return updated_item
@@ -993,7 +1037,10 @@ async def delete_codex_item(item_id: str, project_id: str, current_user: User = 
         # Delete from knowledge base if embedding_id exists
         if codex_item.get('embedding_id'):
             async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-                await agent_manager.update_or_remove_from_knowledge_base(codex_item['embedding_id'], 'delete')
+                await agent_manager.update_or_remove_from_knowledge_base(
+                    {"item_id": item_id, "item_type": codex_item['type']},
+                    "delete"
+                )
         else:
             logger.warning(f"No embedding_id found for codex item {item_id}. Skipping knowledge base deletion.")
 
@@ -1362,21 +1409,33 @@ async def create_relationship(
     project_id: str,
     related_character_id: str,
     relationship_type: str,
-    description: Optional[str] = None,  # Make sure this parameter is included
+    description: Optional[str] = None,
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        project = await db_instance.get_project(project_id, current_user.id)
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-            
+        # Create in database
         relationship_id = await db_instance.create_character_relationship(
-                character_id, 
-                related_character_id, 
-                relationship_type, 
-                project_id,
-                description  # Pass the description parameter
+            character_id, 
+            related_character_id, 
+            relationship_type, 
+            project_id,
+            description
+        )
+        
+        # Add to knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.add_to_knowledge_base(
+                "relationship",
+                description or relationship_type,
+                {
+                    "id": relationship_id,
+                    "character_id": character_id,
+                    "related_character_id": related_character_id,
+                    "type": "relationship",
+                    "relationship_type": relationship_type
+                }
             )
+            
         return {"message": "Relationship created successfully", "id": relationship_id}
     except Exception as e:
         logger.error(f"Error creating relationship: {str(e)}")
@@ -1397,21 +1456,35 @@ async def get_relationships(
 @relationship_router.put("/{relationship_id}")
 async def update_relationship(
     relationship_id: str,
-    relationship_type: str,
     project_id: str,
+    relationship_data: Dict[str, Any],
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        updated_relationship = await db_instance.update_character_relationship(
-                relationship_id, relationship_type, current_user.id, project_id
+        # Update in database
+        await db_instance.update_character_relationship(
+            relationship_id,
+            relationship_data['relationship_type'],
+            relationship_data.get('description'),
+            project_id,
+            current_user.id
+        )
+        
+        # Update in knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": relationship_id, "item_type": "relationship"},
+                "update",
+                new_content=relationship_data.get('description') or relationship_data['relationship_type'],
+                new_metadata={
+                    "relationship_type": relationship_data['relationship_type'],
+                    "type": "relationship"
+                }
             )
-        if updated_relationship:
-            return {"message": "Relationship updated successfully", "relationship": updated_relationship}
-        else:
-            raise HTTPException(status_code=404, detail="Relationship not found")
+        return {"message": "Relationship updated successfully"}
     except Exception as e:
         logger.error(f"Error updating relationship: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @relationship_router.delete("/{relationship_id}")
 async def delete_relationship(
@@ -1420,42 +1493,355 @@ async def delete_relationship(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        success = await db_instance.delete_character_relationship(relationship_id, current_user.id, project_id)
-        if success:
-            return {"message": "Relationship deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Relationship not found")
+        # Delete from database - reorder parameters to match method signature
+        await db_instance.delete_character_relationship(relationship_id, current_user.id, project_id)
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": relationship_id, "item_type": "relationship"},
+                "delete"
+            )
+        return {"message": "Relationship deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting relationship: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @relationship_router.post("/analyze")
 async def analyze_relationships(
-    request: Request,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
-    chapter_id: str = 'latest'
+    character_ids: List[str] = Body(...),
+    current_user: User = Depends(get_current_active_user)
 ):
     try:
-        # Get latest unprocessed chapter
-        chapter_data = await db_instance.get_latest_unprocessed_chapter_content(
-            project_id,
-            current_user.id,
-            PROCESS_TYPES['RELATIONSHIPS']
-        )
-            
-        if not chapter_data:
-            return {"message": "No unprocessed chapters to analyze", "skip": True}
-
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-            characters = await db_instance.get_characters(current_user.id, project_id)
-            character_ids = [char['id'] for char in characters]
-            relationships = await agent_manager.analyze_character_relationships(character_ids)
-               
-        return {"relationships": relationships}
+            # Get only the selected characters
+            characters = []
+            for char_id in character_ids:
+                character = await db_instance.get_characters(current_user.id, project_id, character_id=char_id)
+                if character and character['type'] == CodexItemType.CHARACTER.value:
+                    characters.append(character)
+            
+            if len(characters) < 2:
+                raise HTTPException(status_code=404, detail="At least two valid characters are required")
+            
+            # Analyze relationships for selected characters only
+            relationships = await agent_manager.analyze_character_relationships(characters)
+            
+            return {"relationships": relationships}
+    except ValueError as ve:
+        return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
     except Exception as e:
         logger.error(f"Error analyzing relationships: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+# Event Connections
+
+
+
+@event_router.post("/connections")
+async def create_event_connection(
+    project_id: str,
+    event1_id: str,
+    event2_id: str,
+    connection_type: str,
+    description: str,
+    impact: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Create in database
+        connection_id = await db_instance.create_event_connection(
+            event1_id=event1_id,
+            event2_id=event2_id,
+            connection_type=connection_type,
+            description=description,
+            impact=impact,
+            project_id=project_id,
+            user_id=current_user.id
+        )
+        
+        # Add to knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.add_to_knowledge_base(
+                "event_connection",
+                f"Connection between events: {description}\nImpact: {impact}",
+                {
+                    "id": connection_id,
+                    "event1_id": event1_id,
+                    "event2_id": event2_id,
+                    "type": "event_connection",
+                    "connection_type": connection_type
+                }
+            )
+            
+        return {"id": connection_id}
+    except Exception as e:
+        logger.error(f"Error creating event connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.put("/connections/{connection_id}")
+async def update_event_connection(
+    connection_id: str,
+    project_id: str,
+    connection_type: str,
+    description: str,
+    impact: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Update in database
+        updated = await db_instance.update_event_connection(
+            connection_id=connection_id,
+            connection_type=connection_type,
+            description=description,
+            impact=impact,
+            user_id=current_user.id,
+            project_id=project_id
+        )
+        
+        # Update in knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": connection_id, "item_type": "event_connection"},
+                "update",
+                new_content=f"Connection between events: {description}\nImpact: {impact}",
+                new_metadata={
+                    "type": "event_connection",
+                    "connection_type": connection_type
+                }
+            )
+        
+        if updated:
+            return updated
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except Exception as e:
+        logger.error(f"Error updating event connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@event_router.delete("/connections/{connection_id}")
+async def delete_event_connection(
+    connection_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Delete from database
+        success = await db_instance.delete_event_connection(connection_id, current_user.id, project_id)
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": connection_id, "item_type": "event_connection"},
+                "delete"
+            )
+            
+        if success:
+            return {"message": "Connection deleted successfully"}
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except Exception as e:
+        logger.error(f"Error deleting event connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Get Event Connections
+@event_router.get("/connections")
+async def get_event_connections(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        connections = await db_instance.get_event_connections(project_id, current_user.id)
+        return {"event_connections": connections}
+    except Exception as e:
+        logger.error(f"Error fetching event connections: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+
+# Update analyze event connections to save to knowledge base
+@event_router.post("/analyze-connections")
+async def analyze_event_connections(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            connections = await agent_manager.analyze_event_connections()
+            
+            # Convert each connection to a dictionary before returning
+            connection_dicts = [
+                {
+                    'id': conn.id,
+                    'event1_id': conn.event1_id,
+                    'event2_id': conn.event2_id,
+                    'connection_type': conn.connection_type,
+                    'description': conn.description,
+                    'impact': conn.impact
+                }
+                for conn in connections
+            ]
+            
+            return {"event_connections": connection_dicts}
+    except Exception as e:
+        logger.error(f"Error analyzing event connections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Location Connections
+@location_router.post("/connections")
+async def create_location_connection(
+    project_id: str,
+    location1_id: str,
+    location2_id: str,
+    connection_type: str,
+    description: str,
+    travel_route: Optional[str] = None,
+    cultural_exchange: Optional[str] = None,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Create in database
+        connection_id = await db_instance.create_location_connection(
+            location1_id=location1_id,
+            location2_id=location2_id,
+            connection_type=connection_type,
+            description=description,
+            travel_route=travel_route,
+            cultural_exchange=cultural_exchange,
+            project_id=project_id,
+            user_id=current_user.id
+        )
+        
+        # Add to knowledge base
+        content = f"Connection between locations: {description}"
+        if travel_route:
+            content += f"\nTravel Route: {travel_route}"
+        if cultural_exchange:
+            content += f"\nCultural Exchange: {cultural_exchange}"
+            
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.add_to_knowledge_base(
+                "location_connection",
+                content,
+                {
+                    "id": connection_id,
+                    "location1_id": location1_id,
+                    "location2_id": location2_id,
+                    "type": "location_connection",
+                    "connection_type": connection_type
+                }
+            )
+            
+        return {"id": connection_id}
+    except Exception as e:
+        logger.error(f"Error creating location connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.put("/connections/{connection_id}")
+async def update_location_connection(
+    connection_id: str,
+    project_id: str,
+    connection_type: str,
+    description: str,
+    travel_route: Optional[str] = None,
+    cultural_exchange: Optional[str] = None,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Update in database
+        updated = await db_instance.update_location_connection(
+            connection_id=connection_id,
+            connection_type=connection_type,
+            description=description,
+            travel_route=travel_route,
+            cultural_exchange=cultural_exchange,
+            user_id=current_user.id,
+            project_id=project_id
+        )
+        
+        # Update in knowledge base
+        content = f"Connection between locations: {description}"
+        if travel_route:
+            content += f"\nTravel Route: {travel_route}"
+        if cultural_exchange:
+            content += f"\nCultural Exchange: {cultural_exchange}"
+            
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": connection_id, "item_type": "location_connection"},
+                "update",
+                new_content=content,
+                new_metadata={
+                    "type": "location_connection",
+                    "connection_type": connection_type
+                }
+            )
+        
+        if updated:
+            return updated
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except Exception as e:
+        logger.error(f"Error updating location connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.delete("/connections/{connection_id}")
+async def delete_location_connection(
+    connection_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Delete from database
+        success = await db_instance.delete_location_connection(connection_id, current_user.id, project_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Connection not found")
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": connection_id, "item_type": "location_connection"},
+                "delete"
+            )
+        return {"message": "Connection deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting location connection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@location_router.post("/analyze-connections")
+async def analyze_location_connections(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        locations = await db_instance.get_locations(current_user.id, project_id)
+        if not locations or len(locations) < 2:
+            return JSONResponse({
+                "message": "Not enough locations to analyze connections", 
+                "skip": True
+            })
+
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            connections = await agent_manager.analyze_location_connections()
+            
+            # Convert each connection to a dictionary before returning
+            connection_dicts = [
+                {
+                    'id': connection.id,
+                    'location1_id': connection.location1_id,
+                    'location2_id': connection.location2_id,
+                    'connection_type': connection.connection_type,
+                    'description': connection.description,
+                    'travel_route': connection.travel_route,
+                    'cultural_exchange': connection.cultural_exchange
+                }
+                for connection in connections
+            ]
+            
+            return {
+                "location_connections": connection_dicts,
+            }
+    except Exception as e:
+        logger.error(f"Error analyzing location connections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @event_router.post("")
 async def create_event(
@@ -1464,6 +1850,7 @@ async def create_event(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Create in database
         event_id = await db_instance.create_event(
                 title=event_data['title'],
                 description=event_data['description'],
@@ -1473,35 +1860,25 @@ async def create_event(
                 project_id=project_id,
                 user_id=current_user.id
             )
+        
+        # Add to knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.add_to_knowledge_base(
+                "event",
+                event_data['description'],
+                {
+                    "id": event_id,
+                    "title": event_data['title'],
+                    "type": "event",
+                    "date": event_data['date'],
+                    "character_id": event_data.get('character_id'),
+                    "location_id": event_data.get('location_id')
+                }
+            )
+            
         return {"id": event_id}
     except Exception as e:
         logger.error(f"Error creating event: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@event_router.post("/analyze-chapter")
-async def analyze_chapter_events(
-    project_id: str,
-    chapter_id: str = 'latest',
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        if chapter_id == 'latest':
-            latest_chapter = await db_instance.get_latest_chapter(project_id, current_user.id)
-            if not latest_chapter:
-                raise HTTPException(status_code=404, detail="No chapters found")
-            chapter_id = latest_chapter['id']
-
-            if await db_instance.is_chapter_processed_for_type(chapter_id, PROCESS_TYPES['EVENTS']):
-                return JSONResponse({"message": "Chapter already analyzed for events", "alreadyAnalyzed": True})
-
-            async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-                events = await agent_manager.analyze_unprocessed_chapter_events(chapter_id)  # Pass chapter_id
-            
-            await db_instance.mark_chapter_processed(chapter_id, current_user.id, PROCESS_TYPES['EVENTS'])
-            
-        return {"events": events}
-    except Exception as e:
-        logger.error(f"Error analyzing chapter events: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @event_router.get("")
@@ -1516,20 +1893,6 @@ async def get_events(
         logger.error(f"Error getting events: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
         
-@event_router.post("/analyze-connections")
-async def analyze_event_connections(
-    project_id: str,
-    event_ids: List[str],
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-            analyses = await agent_manager.analyze_event_connections(event_ids)
-            return {"analyses": [analysis.model_dump() for analysis in analyses]}
-    except Exception as e:
-        logger.error(f"Error analyzing event connections: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @event_router.get("/{event_id}")
 async def get_event(
     event_id: str,
@@ -1553,10 +1916,33 @@ async def update_event(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        updated_event = await db_instance.update_event(event_id, current_user.id, project_id, event_data)
-        if not updated_event:
-            raise HTTPException(status_code=404, detail="Event not found")
-        return updated_event
+        # Update in database
+        await db_instance.update_event(
+            event_id=event_id,
+            title=event_data['title'],
+            description=event_data['description'],
+            date=datetime.fromisoformat(event_data['date']),
+            character_id=event_data.get('character_id'),
+            location_id=event_data.get('location_id'),
+            project_id=project_id,
+            user_id=current_user.id
+        )
+        
+        # Update in knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": event_id, "item_type": "event"},
+                "update",
+                new_content=event_data['description'],
+                new_metadata={
+                    "title": event_data['title'],
+                    "type": "event",
+                    "date": event_data['date'],
+                    "character_id": event_data.get('character_id'),
+                    "location_id": event_data.get('location_id')
+                }
+            )
+        return {"message": "Event updated successfully"}
     except Exception as e:
         logger.error(f"Error updating event: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1568,12 +1954,67 @@ async def delete_event(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        success = await db_instance.delete_event(event_id, current_user.id, project_id)
+        # Delete from database
+        success = await db_instance.delete_event(event_id, project_id, current_user.id)
         if not success:
             raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": event_id, "item_type": "event"},
+                "delete"
+            )
         return {"message": "Event deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@event_router.post("/analyze-chapter")
+async def analyze_chapter_events(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            # Analyze and get unprocessed chapter events
+            events = await agent_manager.analyze_unprocessed_chapter_events()
+            
+            # Add events to the knowledge base
+            for event in events:
+                try:
+                    # Create metadata with only the required fields
+                    metadata = {
+                        "id": event['id'],
+                        "title": event['title'],
+                        "type": "event"
+                    }
+                    
+                    # Add optional fields if they exist
+                    if 'date' in event:
+                        metadata['date'] = event['date']
+                    if 'character_id' in event:
+                        metadata['character_id'] = event['character_id']
+                    if 'location_id' in event:
+                        metadata['location_id'] = event['location_id']
+
+                    # Add to knowledge base
+                    await agent_manager.add_to_knowledge_base(
+                        "event",
+                        event['description'],
+                        metadata
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding event to knowledge base for event {event.get('id', 'unknown')}: {str(e)}")
+                    logger.error(f"Event data: {event}")  # Log the event data for debugging
+                    continue  # Continue with the next event if one fails
+            
+            return {"events": events}
+    except ValueError as ve:
+        return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
+    except Exception as e:
+        logger.error(f"Error analyzing chapter events: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Location endpoints
@@ -1613,25 +2054,35 @@ async def create_location(
 @location_router.post("/analyze-chapter")
 async def analyze_chapter_locations(
     project_id: str,
-    chapter_id: str = 'latest',
     current_user: User = Depends(get_current_active_user)
 ):
-    agent_manager = None
     try:
-        # If chapter_id is 'latest', get the latest chapter
-        if chapter_id == 'latest':
-            latest_chapter = await db_instance.get_latest_chapter(project_id, current_user.id)
-            if not latest_chapter:
-                raise HTTPException(status_code=404, detail="No chapters found")
-            chapter_id = latest_chapter['id']
+        # Check if there are any unprocessed chapters
+        unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
+            project_id,
+            current_user.id,
+            PROCESS_TYPES['LOCATIONS']
+        )
+        
+        if not unprocessed_chapters:
+            return JSONResponse({"message": "All chapters analyzed for locations", "alreadyAnalyzed": True})
 
-            if await db_instance.is_chapter_processed_for_type(chapter_id, PROCESS_TYPES['LOCATIONS']):
-                return JSONResponse({"message": "Chapter already analyzed for locations", "alreadyAnalyzed": True})
-
-            async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-                locations = await agent_manager.analyze_unprocessed_chapter_locations(chapter_id)  # Pass chapter_id
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            locations = await agent_manager.analyze_unprocessed_chapter_locations()
             
-            await db_instance.mark_chapter_processed(chapter_id, current_user.id, PROCESS_TYPES['LOCATIONS'])
+            # Add each location to knowledge base
+            for location in locations:
+                # Add to knowledge base
+                await agent_manager.add_to_knowledge_base(
+                    "location",
+                    f"{location['name']}: {location['description']}",
+                    {
+                        "id": location['id'],  # Now using id from the location returned by agent_manager
+                        "name": location['name'],
+                        "type": "location",
+                        "coordinates": location.get('coordinates')
+                    }
+                )
             
             return {"locations": locations}
     except Exception as e:
@@ -1639,19 +2090,6 @@ async def analyze_chapter_locations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@location_router.post("/analyze-connections")
-async def analyze_location_connections(
-    project_id: str,
-    location_ids: List[str],
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-            connections = await agent_manager.analyze_location_connections(location_ids)
-            return {"connections": [connection.model_dump() for connection in connections]}
-    except Exception as e:
-        logger.error(f"Error analyzing location connections: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @location_router.get("/{location_id}")
 async def get_location(
@@ -1662,7 +2100,8 @@ async def get_location(
     try:
         location = await db_instance.get_location_by_id(location_id, current_user.id, project_id)
         if not location:
-            raise HTTPException(status_code=404, detail="Location not found")
+            #logger.warning(f"Location not found: {location_id}")
+            return None
         return location
     except Exception as e:
         logger.error(f"Error getting location: {str(e)}")
@@ -1678,10 +2117,29 @@ async def update_location(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        updated_location = await db_instance.update_location(location_id, current_user.id, project_id, location_data)
-        if not updated_location:
-            raise HTTPException(status_code=404, detail="Location not found")
-        return updated_location
+        # Update in database
+        await db_instance.update_location(
+            location_id=location_id,
+            name=location_data['name'],
+            description=location_data['description'],
+            coordinates=location_data.get('coordinates'),
+            project_id=project_id,
+            user_id=current_user.id
+        )
+        
+        # Update in knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": location_id, "item_type": "location"},
+                "update",
+                new_content=f"{location_data['name']}: {location_data['description']}",
+                new_metadata={
+                    "name": location_data['name'],
+                    "type": "location",
+                    "coordinates": location_data.get('coordinates')
+                }
+            )
+        return {"message": "Location updated successfully"}
     except Exception as e:
         logger.error(f"Error updating location: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1693,26 +2151,43 @@ async def delete_location(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        success = await db_instance.delete_location(location_id, current_user.id, project_id)
+        # Delete from database
+        success = await db_instance.delete_location(location_id, project_id, current_user.id)
         if not success:
             raise HTTPException(status_code=404, detail="Location not found")
-        return {"message": "Location deleted successfully"}
+        
+        # Delete from knowledge base
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            # Update: Fix the parameter names in the metadata dictionary
+            await agent_manager.update_or_remove_from_knowledge_base(
+                {"item_id": location_id, "item_type": "location"},  # Changed from "id" to "item_id"
+                "delete"
+            )
+            # Delete any associated connections
+            connections = await db_instance.get_location_connections(project_id, current_user.id)
+            for conn in connections:
+                if conn['location1_id'] == location_id or conn['location2_id'] == location_id:
+                    await agent_manager.update_or_remove_from_knowledge_base(
+                        {"item_id": conn['id'], "item_type": "location_connection"},  # Changed from "id" to "item_id"
+                        "delete"
+                    )
+        
+        return {"message": "Location and associated connections deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting location: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@location_router.get("/{location_id}/events")
-async def get_location_events(
-    location_id: str,
+@app.get("/locations/connections") 
+async def get_location_connections(
     project_id: str,
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        events = await db_instance.get_events_by_location(location_id, current_user.id, project_id)
-        return {"events": events}
+        connections = await db_instance.get_location_connections(project_id, current_user.id)
+        return {"location_connections": connections} 
     except Exception as e:
-        logger.error(f"Error getting location events: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching location connections: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 

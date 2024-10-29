@@ -2,7 +2,7 @@ import asyncio  # Add this import at the top
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.docstore.document import Document
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import logging
 from chromadb.config import Settings
@@ -116,11 +116,7 @@ class VectorStore:
         try:
             loop = asyncio.get_running_loop()
 
-            # Prepare the filter
-            if filter is None:
-                filter = {}
-            
-            # Combine all filter conditions into a single 'and' operator
+            # Prepare the base filter with user and project
             combined_filter = {
                 "$and": [
                     {"user_id": {"$eq": self.user_id}},
@@ -128,18 +124,42 @@ class VectorStore:
                 ]
             }
             
+            # Handle type filtering
+            if filter and "type" in filter:
+                if isinstance(filter["type"], dict):
+                    # Handle $nin operator by converting to $neq if there's only one value
+                    if "$nin" in filter["type"] and len(filter["type"]["$nin"]) == 1:
+                        combined_filter["$and"].append(
+                            {"type": {"$ne": filter["type"]["$nin"][0]}}
+                        )
+                    # For multiple values, we'll need to use $or with $ne
+                    elif "$nin" in filter["type"]:
+                        combined_filter["$and"].append({
+                            "$or": [
+                                {"type": {"$ne": val}} 
+                                for val in filter["type"]["$nin"]
+                            ]
+                        })
+                    else:
+                        combined_filter["$and"].append({"type": filter["type"]})
+                else:
+                    combined_filter["$and"].append({"type": {"$eq": filter["type"]}})
+            
             # Add any additional filter conditions
-            for key, value in filter.items():
-                combined_filter["$and"].append({key: {"$eq": value}})
+            if filter:
+                for key, value in filter.items():
+                    if key != "type":  # Skip 'type' as it's already handled
+                        if isinstance(value, dict):
+                            # Handle operators
+                            combined_filter["$and"].append({key: value})
+                        else:
+                            combined_filter["$and"].append({key: {"$eq": value}})
 
-            # Perform the similarity search
-            results = await loop.run_in_executor(
-                None,
-                lambda: self.vector_store.similarity_search(
-                    query_text,
-                    k=k,
-                    filter=combined_filter
-                )
+            # Perform the similarity search with relevance scores
+            results = await self._search_with_relevance(
+                query_text,
+                k=k,
+                filter=combined_filter
             )
 
             return results
@@ -147,6 +167,23 @@ class VectorStore:
         except Exception as e:
             self.logger.error(f"Error in similarity_search: {str(e)}")
             raise
+
+    async def _search_with_relevance(self, query: str, k: int, filter: Dict[str, Any]) -> List[Document]:
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            None,
+            lambda: self.vector_store.similarity_search_with_relevance_scores(
+                query,
+                k=k,
+                filter=filter
+            )
+        )
+        
+        # Add relevance scores to metadata
+        for doc, score in results:
+            doc.metadata['relevance_score'] = score
+            
+        return [doc for doc, _ in results]
 
     async def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         loop = asyncio.get_running_loop()
@@ -248,6 +285,47 @@ class VectorStore:
         if hasattr(self, '_client') and hasattr(self._client, 'close'):
             self._client.close()
         # Add any other cleanup steps here
+
+    async def get_embedding_id(self, item_id: str, item_type: str) -> Optional[str]:
+        """
+        Get the embedding ID for a given item from the vector store.
+        
+        Args:
+            item_id: The ID of the item
+            item_type: The type of the item (e.g., 'event', 'location')
+            
+        Returns:
+            The embedding ID if found, None otherwise
+        """
+        try:
+            # Create filter for the search
+            search_filter = {
+                "$and": [
+                    {"user_id": {"$eq": self.user_id}},
+                    {"project_id": {"$eq": self.project_id}},
+                    {"id": {"$eq": item_id}},
+                    {"type": {"$eq": item_type}}
+                ]
+            }
+
+            # Get all matching documents
+            loop = asyncio.get_running_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.vector_store._collection.get(
+                    where=search_filter
+                )
+            )
+
+            # Return the ID of the first matching document if found
+            if results and results['ids'] and len(results['ids']) > 0:
+                return results['ids'][0]
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error getting embedding ID: {str(e)}")
+            return None
 
 
 

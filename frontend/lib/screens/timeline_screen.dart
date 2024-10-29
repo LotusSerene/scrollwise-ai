@@ -5,13 +5,15 @@ import '../models/location.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
-import 'package:expandable/expandable.dart';
-import 'package:intl/intl.dart';
 import '../widgets/event_dialog.dart';
 import '../widgets/location_dialog.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart'; // Add this import
+import '../models/event_connection.dart';
+import '../models/location_connection.dart';
+import '../widgets/event_list.dart';
+import '../widgets/location_list.dart';
 
 class TimelineScreen extends StatefulWidget {
   final String projectId;
@@ -28,15 +30,18 @@ class _TimelineScreenState extends State<TimelineScreen>
   List<Location> locations = [];
   bool isLoading = false;
   late TabController _tabController;
+  List<EventConnection> eventConnections = [];
+  List<LocationConnection> locationConnections = [];
+  bool isSelectionMode = false;
 
   @override
   void initState() {
     super.initState();
     final appState = Provider.of<AppState>(context, listen: false);
 
-    // Initialize tab controller with saved state
+    // Update tab controller to handle 4 tabs instead of 2
     _tabController = TabController(
-      length: 2,
+      length: 4,
       vsync: this,
       initialIndex: appState.timelineState['activeTab'] ?? 0,
     );
@@ -53,6 +58,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     await Future.wait([
       _loadEvents(),
       _loadLocations(),
+      _loadEventConnections(),
+      _loadLocationConnections(),
     ]);
   }
 
@@ -107,6 +114,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final headers = await getAuthHeaders();
 
+      // Removed chapter_id parameter since it's handled server-side
       final eventResponse = await http.post(
         Uri.parse(
             '$apiUrl/events/analyze-chapter?project_id=${widget.projectId}'),
@@ -207,40 +215,22 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _deleteEvent(String eventId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Confirm Delete'),
-        content: const Text('Are you sure you want to delete this event?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse('$apiUrl/events/$eventId?project_id=${widget.projectId}'),
+        headers: headers,
+      );
 
-    if (confirmed == true) {
-      try {
-        final headers = await getAuthHeaders();
-        final response = await http.delete(
-          Uri.parse('$apiUrl/events/$eventId?project_id=${widget.projectId}'),
-          headers: headers,
-        );
-
-        if (response.statusCode == 200) {
-          await _loadEvents();
-          _showSuccess('Event deleted successfully');
-        }
-      } catch (e) {
-        _showError('Error deleting event: $e');
+      if (response.statusCode == 200) {
+        setState(() {
+          events.removeWhere((event) => event.id == eventId);
+        });
+      } else {
+        throw Exception('Failed to delete event');
       }
+    } catch (e) {
+      _showError('Error deleting event: $e');
     }
   }
 
@@ -343,462 +333,788 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  Future<void> _analyzeEventConnections() async {
+    try {
+      setState(() => isLoading = true);
+      final headers = await getAuthHeaders();
+
+      final response = await http.post(
+        Uri.parse(
+            '$apiUrl/events/analyze-connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          // Only update event connections
+          eventConnections = (data['event_connections'] as List)
+              .map((conn) => EventConnection.fromJson(conn))
+              .toList();
+        });
+        _showSuccess('Event connections analyzed successfully');
+        await _loadEventConnections();
+      } else {
+        _showError('Error analyzing event connections');
+      }
+    } catch (e) {
+      _showError('Error analyzing event connections: $e');
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _analyzeLocationConnections() async {
+    try {
+      setState(() => isLoading = true);
+      final headers = await getAuthHeaders();
+
+      final response = await http.post(
+        Uri.parse(
+            '$apiUrl/locations/analyze-connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          // Only update location connections
+          locationConnections = (data['location_connections'] as List)
+              .map((conn) => LocationConnection.fromJson(conn))
+              .toList();
+        });
+        _showSuccess('Location connections analyzed successfully');
+        await _loadLocationConnections();
+      } else {
+        _showError('Error analyzing location connections');
+      }
+    } catch (e) {
+      _showError('Error analyzing location connections: $e');
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _loadEventConnections() async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('$apiUrl/events/connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        // First decode the response body
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        // Check if there's a 'connections' key and it's a list
+        if (responseData.containsKey('event_connections') &&
+            responseData['event_connections'] is List) {
+          final List<dynamic> connectionsData =
+              responseData['event_connections'];
+          setState(() {
+            eventConnections = connectionsData
+                .map((json) => EventConnection.fromJson(json))
+                .toList();
+          });
+        } else {
+          setState(() => eventConnections = []);
+        }
+      } else {
+        setState(() => eventConnections = []);
+      }
+    } catch (e) {
+      setState(() => eventConnections = []);
+      print('Error loading event connections: $e'); // For debugging
+    }
+  }
+
+  Future<void> _loadLocationConnections() async {
+    setState(() => isLoading = true);
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.get(
+        Uri.parse(
+            '$apiUrl/locations/connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data != null && data['location_connections'] != null) {
+          final List<dynamic> connectionsData = data['location_connections'];
+          setState(() {
+            locationConnections = connectionsData
+                .map((json) => LocationConnection.fromJson(json))
+                .toList();
+          });
+        } else {
+          setState(() {
+            locationConnections = []; // Set empty list if no connections
+          });
+        }
+      } else {
+        print('Error loading location connections: ${response.statusCode}');
+        setState(() {
+          locationConnections = []; // Set empty list on error
+        });
+      }
+    } catch (e) {
+      print('Error loading location connections: $e');
+      setState(() {
+        locationConnections = []; // Set empty list on error
+      });
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _analyzeConnections() async {
+    setState(() => isLoading = true);
+    try {
+      final headers = await getAuthHeaders();
+
+      // Analyze event connections
+      final eventResponse = await http.post(
+        Uri.parse(
+            '$apiUrl/events/analyze-connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      // Analyze location connections
+      final locationResponse = await http.post(
+        Uri.parse(
+            '$apiUrl/locations/analyze-connections?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      final eventData = json.decode(eventResponse.body);
+      final locationData = json.decode(locationResponse.body);
+
+      // Handle events separately
+      if (eventData['skip'] == true) {
+        _showInfo('Not enough events to analyze connections');
+      } else if (eventData['connections'] != null) {
+        await _loadEventConnections();
+        _showSuccess('Event connections analyzed');
+      }
+
+      // Handle locations separately
+      if (locationData['skip'] == true) {
+        _showInfo('Not enough locations to analyze connections');
+      } else if (locationData['connections'] != null) {
+        await _loadLocationConnections();
+        _showSuccess('Location connections analyzed');
+      }
+
+      // Combined message if both are skipped
+      if (eventData['skip'] == true && locationData['skip'] == true) {
+        _showInfo(
+            'Need at least 2 events and 2 locations to analyze connections');
+      }
+    } catch (e) {
+      _showError('Error analyzing connections: $e');
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  void _showInfo(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.secondary,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final canAnalyze = events.length >= 2 || locations.length >= 2;
+
     return Scaffold(
       body: Column(
         children: [
-          _buildHeader(),
-          Expanded(
-            child: isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : Column(
+          // AppBar section
+          Container(
+            height: 200,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Theme.of(context).colorScheme.primary,
+                  Theme.of(context).colorScheme.primaryContainer,
+                ],
+              ),
+            ),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Top actions row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      TabBar(
-                        controller: _tabController,
-                        tabs: [
-                          Tab(
-                            icon: const Icon(Icons.event),
-                            text: 'Events (${events.length})',
+                      const SizedBox(width: 48), // Balance for actions
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Timeline & Locations',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineMedium
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimary,
+                                    ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Track events and important locations',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimary
+                                          .withOpacity(0.8),
+                                    ),
+                              ),
+                            ],
                           ),
-                          Tab(
-                            icon: const Icon(Icons.place),
-                            text: 'Locations (${locations.length})',
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.refresh),
+                            onPressed: _loadData,
+                            color: Theme.of(context).colorScheme.onPrimary,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.analytics),
+                            onPressed: canAnalyze ? _analyzeConnections : null,
+                            color: Theme.of(context).colorScheme.onPrimary,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.auto_awesome),
+                            onPressed: _analyzeChapters,
+                            color: Theme.of(context).colorScheme.onPrimary,
                           ),
                         ],
                       ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Updated TabBar with 4 tabs
+          TabBar(
+            controller: _tabController,
+            isScrollable: true, // Allow tabs to scroll
+            tabs: [
+              Tab(
+                icon: const Icon(Icons.event),
+                text: 'Events (${events.length})',
+              ),
+              Tab(
+                icon: const Icon(Icons.place),
+                text: 'Locations (${locations.length})',
+              ),
+              Tab(
+                icon: const Icon(Icons.compare_arrows),
+                text: 'Event Connections (${eventConnections.length})',
+              ),
+              Tab(
+                icon: const Icon(Icons.compare_arrows),
+                text: 'Location Connections (${locationConnections.length})',
+              ),
+            ],
+          ),
+
+          // Updated TabBarView with 4 views
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildEventsView(),
+                _buildLocationsView(),
+                _buildEventConnectionsView(),
+                _buildLocationConnectionsView(),
+              ],
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: _buildSpeedDial(),
+    );
+  }
+
+  Widget _buildEventsView() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader('Timeline', Icons.timeline),
+          EventList(
+            events: events,
+            connections: [],
+            onEdit: _editEvent,
+            onDelete: _deleteEvent,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationsView() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader('Locations', Icons.place),
+          LocationList(
+            locations: locations,
+            connections: [],
+            onEdit: _editLocation,
+            onDelete: _deleteLocation,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventConnectionsView() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader('Event Connections', Icons.compare_arrows),
+          _buildConnectionsGrid(events, eventConnections),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationConnectionsView() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader('Location Connections', Icons.compare_arrows),
+          _buildLocationConnectionsGrid(locations, locationConnections),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          Icon(icon, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedDial() {
+    if (isSelectionMode) return const SizedBox.shrink();
+    return SpeedDial(
+      icon: Icons.add,
+      activeIcon: Icons.close,
+      backgroundColor: Theme.of(context).colorScheme.primary,
+      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+      children: [
+        SpeedDialChild(
+          child: const Icon(Icons.event),
+          label: 'Add Event',
+          onTap: () => _showCreateDialog(),
+        ),
+        SpeedDialChild(
+          child: const Icon(Icons.place),
+          label: 'Add Location',
+          onTap: () {
+            _tabController.animateTo(1); // Switch to locations tab
+            _showCreateDialog();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectionsGrid(
+      List<Event> events, List<EventConnection> connections) {
+    if (connections.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Icon(
+                Icons.compare_arrows,
+                size: 48,
+                color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'No event connections found',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use the analyze button to discover connections',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7),
+                    ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Filter out connections where either event doesn't exist
+    final validConnections = connections.where((connection) {
+      try {
+        events.firstWhere((e) => e.id == connection.event1Id);
+        events.firstWhere((e) => e.id == connection.event2Id);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }).toList();
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.5,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: validConnections.length,
+      itemBuilder: (context, index) {
+        final connection = validConnections[index];
+        final event1 = events.firstWhere((e) => e.id == connection.event1Id);
+        final event2 = events.firstWhere((e) => e.id == connection.event2Id);
+
+        return Card(
+          elevation: 2,
+          child: InkWell(
+            onTap: () => _showConnectionActions(event1, event2),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
                       Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            _buildEventsList(),
-                            _buildLocationsList(),
-                          ],
+                        child: Text(
+                          '${event1.title} → ${event2.title}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-          ),
-        ],
-      ),
-      floatingActionButton: SpeedDial(
-        icon: Icons.add,
-        activeIcon: Icons.close,
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        children: [
-          SpeedDialChild(
-            child: const Icon(Icons.event),
-            label: 'Add Event',
-            onTap: () => _showCreateDialog(),
-          ),
-          SpeedDialChild(
-            child: const Icon(Icons.place),
-            label: 'Add Location',
-            onTap: () {
-              _tabController.animateTo(1); // Switch to locations tab
-              _showCreateDialog();
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).shadowColor.withOpacity(0.1),
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Timeline & Locations',
-                    style: Theme.of(context).textTheme.headlineSmall,
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      connection.connectionType,
+                      style: TextStyle(
+                        color:
+                            Theme.of(context).colorScheme.onSecondaryContainer,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 8),
                   Text(
-                    'Track events and important locations',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withOpacity(0.6),
-                        ),
+                    connection.description,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
-              ElevatedButton.icon(
-                onPressed: _analyzeChapters,
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Analyze'),
-                style: ElevatedButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEventsList() {
-    if (events.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.calendar_today_outlined,
-        message: 'No events found',
-        subtitle: 'Add events or analyze chapters to get started',
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: events.length,
-      itemBuilder: (context, index) {
-        final event = events[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 16),
-          child: ExpandablePanel(
-            theme: const ExpandableThemeData(
-              headerAlignment: ExpandablePanelHeaderAlignment.center,
-              hasIcon: true,
             ),
-            header: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                child: Icon(
-                  Icons.event_available,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
-              ),
-              title: _buildStyledText(
-                event.title,
-                Theme.of(context).textTheme.titleMedium,
-              ),
-              subtitle: Text(
-                DateFormat.yMMMd().format(event.date),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-            collapsed: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: _buildStyledText(
-                event.description,
-                Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-            expanded: _buildExpandedEventContent(event),
           ),
         );
       },
     );
   }
 
-  Widget _buildExpandedEventContent(Event event) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Description',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-          ),
-          const SizedBox(height: 8),
-          _buildStyledText(
-            event.description,
-            Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (event.impact != null && event.impact!.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Impact',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            _buildStyledText(
-              event.impact!,
-              Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+  Widget _buildLocationConnectionsGrid(
+      List<Location> locations, List<LocationConnection> connections) {
+    if (connections.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
             children: [
-              TextButton.icon(
-                icon: const Icon(Icons.edit),
-                label: const Text('Edit'),
-                onPressed: () => _editEvent(event),
+              Icon(
+                Icons.compare_arrows,
+                size: 48,
+                color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
               ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                icon: const Icon(Icons.delete),
-                label: const Text('Delete'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                ),
-                onPressed: () => _deleteEvent(event.id),
+              const SizedBox(height: 16),
+              Text(
+                'No location connections found',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use the analyze button to discover connections',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7),
+                    ),
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLocationsList() {
-    if (locations.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.location_on_outlined,
-        message: 'No locations found',
-        subtitle: 'Add locations or analyze chapters to get started',
+        ),
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: locations.length,
+    // Filter out connections where either location doesn't exist
+    final validConnections = connections.where((connection) {
+      try {
+        locations.firstWhere((l) => l.id == connection.location1Id);
+        locations.firstWhere((l) => l.id == connection.location2Id);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }).toList();
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.5,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: validConnections.length,
       itemBuilder: (context, index) {
-        final location = locations[index];
+        final connection = validConnections[index];
+        final location1 =
+            locations.firstWhere((l) => l.id == connection.location1Id);
+        final location2 =
+            locations.firstWhere((l) => l.id == connection.location2Id);
+
         return Card(
-          margin: const EdgeInsets.only(bottom: 16),
-          child: ExpandablePanel(
-            theme: const ExpandableThemeData(
-              headerAlignment: ExpandablePanelHeaderAlignment.center,
-              hasIcon: true,
-            ),
-            header: ListTile(
-              leading: CircleAvatar(
-                backgroundColor:
-                    Theme.of(context).colorScheme.secondaryContainer,
-                child: Icon(
-                  Icons.location_searching,
-                  color: Theme.of(context).colorScheme.onSecondaryContainer,
-                ),
-              ),
-              title: _buildStyledText(
-                location.name,
-                Theme.of(context).textTheme.titleMedium,
-              ),
-              subtitle: location.coordinates != null
-                  ? Text(
-                      location.coordinates!,
+          elevation: 2,
+          child: InkWell(
+            onTap: () => _showLocationConnectionActions(location1, location2),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${location1.name} ↔ ${location2.name}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  if (connection.travelRoute != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Travel Route',
+                        style: TextStyle(
+                          color:
+                              Theme.of(context).colorScheme.onPrimaryContainer,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      connection.travelRoute!,
                       style: Theme.of(context).textTheme.bodySmall,
-                    )
-                  : null,
-            ),
-            collapsed: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: _buildStyledText(
-                location.description,
-                Theme.of(context).textTheme.bodyMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (connection.culturalExchange != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      connection.culturalExchange!,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
               ),
             ),
-            expanded: _buildExpandedLocationContent(location),
           ),
         );
       },
     );
   }
 
-  Widget _buildExpandedLocationContent(Location location) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Description',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-          ),
-          const SizedBox(height: 8),
-          _buildStyledText(
-            location.description,
-            Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (location.significance != null &&
-              location.significance!.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Significance',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
+  void _showConnectionActions(Event event1, Event event2) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: Text('Edit ${event1.title}'),
+              onTap: () {
+                Navigator.pop(context);
+                _editEvent(event1);
+              },
             ),
-            const SizedBox(height: 8),
-            _buildStyledText(
-              location.significance!,
-              Theme.of(context).textTheme.bodyMedium,
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: Text('Edit ${event2.title}'),
+              onTap: () {
+                Navigator.pop(context);
+                _editEvent(event2);
+              },
             ),
-          ],
-          if (location.coordinates != null) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Coordinates',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
+            ListTile(
+              leading: const Icon(Icons.delete),
+              title: Text('Delete ${event1.title}'),
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () {
+                Navigator.pop(context);
+                _deleteEvent(event1.id);
+              },
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  Icons.map,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-                const SizedBox(width: 8),
-                Text(location.coordinates!),
-              ],
+            ListTile(
+              leading: const Icon(Icons.delete),
+              title: Text('Delete ${event2.title}'),
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () {
+                Navigator.pop(context);
+                _deleteEvent(event2.id);
+              },
             ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton.icon(
-                icon: const Icon(Icons.edit),
-                label: const Text('Edit'),
-                onPressed: () => _editLocation(location),
-              ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                icon: const Icon(Icons.delete),
-                label: const Text('Delete'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                ),
-                onPressed: () => _deleteLocation(location.id),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String message,
-    required String subtitle,
-  }) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 64,
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            message,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                ),
-          ),
-        ],
+  void _showLocationConnectionActions(Location location1, Location location2) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: Text('Edit ${location1.name}'),
+              onTap: () {
+                Navigator.pop(context);
+                _editLocation(location1);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: Text('Edit ${location2.name}'),
+              onTap: () {
+                Navigator.pop(context);
+                _editLocation(location2);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete),
+              title: Text('Delete ${location1.name}'),
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () {
+                Navigator.pop(context);
+                _deleteLocation(location1.id);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete),
+              title: Text('Delete ${location2.name}'),
+              textColor: Colors.red,
+              iconColor: Colors.red,
+              onTap: () {
+                Navigator.pop(context);
+                _deleteLocation(location2.id);
+              },
+            ),
+          ],
+        ),
       ),
-    );
-  }
-
-  // Add this helper method to create styled text
-  Widget _buildStyledText(String text, TextStyle? baseStyle) {
-    final List<TextSpan> spans = [];
-    String remaining = text;
-
-    // Handle bold text first
-    while (remaining.contains('**')) {
-      final startIndex = remaining.indexOf('**');
-      final endIndex = remaining.indexOf('**', startIndex + 2);
-
-      if (endIndex == -1) break;
-
-      // Add text before the bold marker
-      if (startIndex > 0) {
-        spans.add(TextSpan(
-          text: remaining.substring(0, startIndex),
-          style: baseStyle,
-        ));
-      }
-
-      // Add bold text
-      spans.add(TextSpan(
-        text: remaining.substring(startIndex + 2, endIndex),
-        style: baseStyle?.copyWith(fontWeight: FontWeight.bold),
-      ));
-
-      remaining = remaining.substring(endIndex + 2);
-    }
-
-    // Handle italic text in the remaining text
-    while (remaining.contains('*')) {
-      final startIndex = remaining.indexOf('*');
-      final endIndex = remaining.indexOf('*', startIndex + 1);
-
-      if (endIndex == -1) break;
-
-      // Add text before the italic marker
-      if (startIndex > 0) {
-        spans.add(TextSpan(
-          text: remaining.substring(0, startIndex),
-          style: baseStyle,
-        ));
-      }
-
-      // Add italic text
-      spans.add(TextSpan(
-        text: remaining.substring(startIndex + 1, endIndex),
-        style: baseStyle?.copyWith(fontStyle: FontStyle.italic),
-      ));
-
-      remaining = remaining.substring(endIndex + 1);
-    }
-
-    // Add any remaining text
-    if (remaining.isNotEmpty) {
-      spans.add(TextSpan(
-        text: remaining,
-        style: baseStyle,
-      ));
-    }
-
-    return RichText(
-      text: TextSpan(children: spans),
-      overflow: TextOverflow.ellipsis,
-      maxLines: 2,
     );
   }
 }

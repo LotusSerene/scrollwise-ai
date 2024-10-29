@@ -7,6 +7,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
+import '../utils/text_utils.dart';
 
 class Editor extends StatefulWidget {
   final String projectId;
@@ -148,12 +149,15 @@ class _EditorState extends State<Editor> {
         headers: headers,
       );
       if (response.statusCode == 200) {
+        // Remove from state first
         Provider.of<AppState>(context, listen: false).removeChapter(chapterId);
         setState(() {
           _selectedChapter = null;
         });
         Fluttertoast.showToast(msg: 'Chapter deleted successfully');
-        _fetchChapters();
+        // Add this line to refresh chapters from server
+        await Provider.of<AppState>(context, listen: false)
+            .fetchChapters(widget.projectId);
       } else {
         final jsonResponse = json.decode(response.body);
         final errorMessage = jsonResponse['error'] ?? 'Error deleting chapter';
@@ -342,7 +346,7 @@ class _EditorState extends State<Editor> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              '${_getWordCount(chapter['content'])} words',
+              '${getWordCount(chapter['content'])} words',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             leading: Icon(
@@ -486,10 +490,6 @@ class _EditorState extends State<Editor> {
         ),
       ),
     );
-  }
-
-  int _getWordCount(String text) {
-    return text.split(' ').where((word) => word.isNotEmpty).length;
   }
 
   void _showDeleteDialog(String chapterId) {

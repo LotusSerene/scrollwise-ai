@@ -286,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
           onPressed: () {
             showDialog(
               context: context,
-              builder: (BuildContext context) => PrivacyPolicyDialog(),
+              builder: (BuildContext context) => const PrivacyPolicyDialog(),
             );
           },
           icon: const Icon(Icons.privacy_tip_outlined, size: 18),

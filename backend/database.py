@@ -1,23 +1,19 @@
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, joinedload
 from datetime import datetime, timezone
-from sqlalchemy import delete 
-from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select
+from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select, delete, or_
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
 import os
 from dotenv import load_dotenv
 import uuid
-import asyncio
 from typing import Optional, List, Dict, Any
-from sqlalchemy import exists, alias
-from models import ChapterValidation
 from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 from base64 import b64encode, b64decode
-
+from models import CodexItemType, WorldbuildingSubtype
 
 load_dotenv()
 
@@ -42,12 +38,18 @@ class Project(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
-    # Update the relationships with proper back_populates
+    # Update relationships to include cascade deletes
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
     validity_checks = relationship("ValidityCheck", back_populates="project", cascade="all, delete-orphan")
     codex_items = relationship("CodexItem", back_populates="project", cascade="all, delete-orphan")
     chat_histories = relationship("ChatHistory", back_populates="project", cascade="all, delete-orphan")
     presets = relationship("Preset", back_populates="project", cascade="all, delete-orphan")
+    events = relationship("Event", back_populates="project", cascade="all, delete-orphan")
+    locations = relationship("Location", back_populates="project", cascade="all, delete-orphan")
+    character_relationships = relationship("CharacterRelationship", back_populates="project", cascade="all, delete-orphan")
+    character_relationship_analyses = relationship("CharacterRelationshipAnalysis", back_populates="project", cascade="all, delete-orphan")
+    event_connections = relationship("EventConnection", back_populates="project", cascade="all, delete-orphan")
+    location_connections = relationship("LocationConnection", back_populates="project", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -73,6 +75,7 @@ class Chapter(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     project = relationship("Project", back_populates="chapters")
     processed_types = Column(JSON, default=list, nullable=False)  # Changed from lambda to list
+    validity_checks = relationship("ValidityCheck", back_populates="chapter", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -103,6 +106,7 @@ class ValidityCheck(Base):
 
     # Add the relationship definition
     project = relationship("Project", back_populates="validity_checks")
+    chapter = relationship("Chapter", back_populates="validity_checks")
 
     def to_dict(self):
         return {
@@ -124,8 +128,8 @@ class CodexItem(Base):
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
-    type = Column(String, nullable=False)
-    subtype = Column(String)
+    type = Column(String, nullable=False)  # Will store the enum value as string
+    subtype = Column(String)  # Will store the enum value as string
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
@@ -149,15 +153,13 @@ class CodexItem(Base):
             'id': self.id,
             'name': self.name,
             'description': self.description,
-            'type': self.type,
+            'type': self.type,  # This will be the string value of the enum
             'subtype': self.subtype,
-            'backstory': self.backstory if self.type == 'character' else None,
+            'backstory': self.backstory if self.type == CodexItemType.CHARACTER.value else None,
             'embedding_id': self.embedding_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
-        if self.type == 'character':
-            data['backstory'] = self.backstory
         return data
 
 class ChatHistory(Base):
@@ -213,6 +215,7 @@ class CharacterRelationship(Base):
     related_character = relationship("CodexItem", 
                                      foreign_keys=[related_character_id],
                                      back_populates="related_to")
+    project = relationship("Project", back_populates="character_relationships")
 
     def to_dict(self):
         return {
@@ -238,6 +241,7 @@ class Event(Base):
 
     character = relationship("CodexItem", back_populates="events")
     location = relationship("Location", back_populates="events")
+    project = relationship("Project", back_populates="events")
 
     def to_dict(self):
         return {
@@ -263,6 +267,7 @@ class Location(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     events = relationship("Event", back_populates="location")
+    project = relationship("Project", back_populates="locations")
 
     def to_dict(self):
         return {
@@ -270,6 +275,8 @@ class Location(Base):
             'name': self.name,
             'description': self.description,
             'coordinates': self.coordinates,
+            'project_id': self.project_id,
+            'user_id': self.user_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -304,6 +311,8 @@ class CharacterRelationshipAnalysis(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
+    project = relationship("Project", back_populates="character_relationship_analyses")
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -315,6 +324,125 @@ class CharacterRelationshipAnalysis(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
+class BaseConnection(Base):
+    __abstract__ = True
+    
+    id = Column(String, primary_key=True)
+    description = Column(Text, nullable=False)
+    connection_type = Column(String, nullable=False)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'description': self.description,
+            'connection_type': self.connection_type,
+            'project_id': self.project_id,
+            'user_id': self.user_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+class EventConnection(BaseConnection):
+    __tablename__ = 'event_connections'
+    
+    event1_id = Column(String, ForeignKey('events.id'), nullable=False)
+    event2_id = Column(String, ForeignKey('events.id'), nullable=False)
+    impact = Column(Text)
+    
+    event1 = relationship("Event", foreign_keys=[event1_id])
+    event2 = relationship("Event", foreign_keys=[event2_id])
+    project = relationship("Project", back_populates="event_connections")
+    
+    def to_dict(self):
+        result = super().to_dict()
+        result.update({
+            'event1_id': self.event1_id,
+            'event2_id': self.event2_id,
+            'impact': self.impact
+        })
+        return result
+
+class LocationConnection(BaseConnection):
+    __tablename__ = 'location_connections'
+    
+    location1_id = Column(String, ForeignKey('locations.id'), nullable=False)
+    location2_id = Column(String, ForeignKey('locations.id'), nullable=False)
+    travel_route = Column(Text)
+    cultural_exchange = Column(Text)
+    
+    # Add these new columns
+    location1_name = Column(String, nullable=False)
+    location2_name = Column(String, nullable=False)
+    
+    location1 = relationship("Location", foreign_keys=[location1_id])
+    location2 = relationship("Location", foreign_keys=[location2_id])
+    project = relationship("Project", back_populates="location_connections")
+    
+    def to_dict(self):
+        result = super().to_dict()
+        result.update({
+            'location1_id': self.location1_id,
+            'location2_id': self.location2_id,
+            'location1_name': self.location1_name,
+            'location2_name': self.location2_name,
+            'travel_route': self.travel_route,
+            'cultural_exchange': self.cultural_exchange
+        })
+        return result
+
+class ConnectionService:
+    def __init__(self, logger):
+        self.logger = logger
+
+    async def get_connections(self, model_class, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        try:
+            query = (
+                select(model_class)
+                .filter_by(project_id=project_id, user_id=user_id)
+                .options(
+                    joinedload(model_class.location1 if hasattr(model_class, 'location1') else model_class.event1),
+                    joinedload(model_class.location2 if hasattr(model_class, 'location2') else model_class.event2)
+                )
+            )
+            
+            # Fix: Store the query result in the connections variable
+            async with db_instance.Session() as session:
+                connections = await session.execute(query)
+                connections = connections.unique().scalars().all()
+            
+            result = []
+            for conn in connections:
+                connection_dict = conn.to_dict()
+                
+                # Add related entity names based on connection type
+                if isinstance(conn, EventConnection):
+                    if conn.event1 and conn.event2:
+                        connection_dict.update({
+                            'event1_title': conn.event1.title,
+                            'event2_title': conn.event2.title
+                        })
+                elif isinstance(conn, LocationConnection):
+                    if conn.location1 and conn.location2:
+                        connection_dict.update({
+                            'location1_name': conn.location1.name,
+                            'location2_name': conn.location2.name
+                        })
+                        
+                result.append(connection_dict)
+                
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error getting connections: {str(e)}")
+            raise
+
+
+
 class KnowledgeBaseItem(Base):
     __tablename__ = 'knowledge_base_items'
     id = Column(String, primary_key=True)
@@ -325,6 +453,7 @@ class Database:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
+        self.connection_service = ConnectionService(self.logger)
         
         # Initialize encryption key
         encryption_key = os.getenv('ENCRYPTION_KEY')
@@ -358,13 +487,8 @@ class Database:
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    @asynccontextmanager
     async def get_session(self):
-        session = self.Session()
-        try:
-            yield session
-        finally:
-            await session.close()
+        return self.Session()
 
     async def create_user(self, email, password):
         async with await self.get_session() as session:
@@ -677,11 +801,22 @@ class Database:
                 self.logger.error(f"Error creating location: {str(e)}")
                 raise
 
-    async def delete_location(self, location_id: str, user_id: str, project_id: str) -> bool:
+    async def delete_location(self, location_id: str, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
             try:
+                # First verify the location exists and belongs to the user/project
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
+                    # Delete associated connections first
+                    await session.execute(
+                        delete(LocationConnection).where(
+                            or_(
+                                LocationConnection.location1_id == location_id,
+                                LocationConnection.location2_id == location_id
+                            )
+                        )
+                    )
+                    # Then delete the location
                     await session.delete(location)
                     await session.commit()
                     return True
@@ -691,9 +826,10 @@ class Database:
                 self.logger.error(f"Error deleting location: {str(e)}")
                 raise
 
-    async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
+    async def delete_event(self, event_id: str, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
             try:
+                # First verify the event exists and belongs to the user/project
                 event = await session.get(Event, event_id)
                 if event and event.user_id == user_id and event.project_id == project_id:
                     await session.delete(event)
@@ -731,21 +867,6 @@ class Database:
                 self.logger.error(f"Error marking chapter as processed: {str(e)}")
                 raise
 
-    async def get_latest_chapter(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.execute(select(Chapter).filter_by(
-                    project_id=project_id,
-                    user_id=user_id
-                ).order_by(Chapter.chapter_number.desc()))
-                chapter = chapter.scalars().first()
-                
-                if chapter:
-                    return chapter.to_dict()
-                raise
-            except Exception as e:
-                self.logger.error(f"Error getting latest chapter: {str(e)}")
-                raise
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -764,8 +885,9 @@ class Database:
                 location = await session.get(Location, location_id)
                 if location and location.user_id == user_id and location.project_id == project_id:
                     return location.to_dict()
+                return None
             except Exception as e:
-                self.logger.error(f"Error getting latest chapter: {str(e)}")
+                self.logger.error(f"Error getting location by ID: {str(e)}")
                 raise
 
     async def update_codex_item_embedding_id(self, item_id, embedding_id):
@@ -1010,10 +1132,12 @@ class Database:
     async def get_characters(self, user_id: str, project_id: str, character_id: Optional[str] = None, name: Optional[str] = None):
         async with await self.get_session() as session:
             try:
-                query = select(CodexItem).filter_by(
-                    user_id=user_id,
-                    project_id=project_id,
-                    type='character'
+                query = select(CodexItem).where(
+                    and_(
+                        CodexItem.user_id == user_id,
+                        CodexItem.project_id == project_id,
+                        CodexItem.type == CodexItemType.CHARACTER.value
+                    )
                 )
                 
                 if character_id:
@@ -1032,40 +1156,37 @@ class Database:
                 raise
 
 
-    async def get_events(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+    async def get_events(self, project_id: str, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
-                events = await session.execute(select(Event).filter_by(project_id=project_id))
-                events = events.scalars().all()
-                return [event.to_dict() for event in events]
-            except Exception as e:
-                self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
-                raise
-
-    async def get_locations(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                locations = await session.execute(select(Location).filter_by(user_id=user_id, project_id=project_id))
-                locations = locations.scalars().all()
-                return [location.to_dict() for location in locations]
-            except Exception as e:
-                self.logger.error(f"Error getting character backstories: {str(e)}")
-                raise
-
-    async def is_chapter_processed(self, chapter_id: str, project_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                processed_chapter = await session.execute(select(ProcessedChapter).filter_by(
-                    chapter_id=chapter_id, 
+                query = select(Event).filter_by(
+                    user_id=user_id,
                     project_id=project_id
-                ))
-                processed_chapter = processed_chapter.scalars().first()
-                return processed_chapter is not None
+                )
+                if limit is not None:
+                    query = query.limit(limit)
+                events = await session.execute(query)
+                return [event.to_dict() for event in events.scalars().all()]
             except Exception as e:
-                self.logger.error(f"Error getting characters from codex: {str(e)}")
+                self.logger.error(f"Error getting events: {str(e)}")
                 raise
 
-    async def mark_latest_chapter_processed(self, project_id: str, function_name: str):
+    async def get_locations(self, user_id: str, project_id: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                query = select(Location).filter_by(
+                    user_id=user_id,
+                    project_id=project_id
+                )
+                if k is not None:
+                    query = query.limit(k)
+                locations = await session.execute(query)
+                return [location.to_dict() for location in locations.scalars().all()]
+            except Exception as e:
+                self.logger.error(f"Error getting locations: {str(e)}")
+                raise
+
+    async def mark_latest_chapter_processed(self, project_id: str, process_type: str):
         async with await self.get_session() as session:
             try:
                 latest_chapter = await session.execute(select(Chapter).filter(
@@ -1074,17 +1195,27 @@ class Database:
                 latest_chapter = latest_chapter.scalars().first()
 
                 if latest_chapter:
-                    processed_chapter = ProcessedChapter(
-                        id=str(uuid.uuid4()),
-                        chapter_id=latest_chapter.id,
-                        project_id=project_id,
-                        processed_at=lambda: datetime.now(timezone.utc)
-                    )
-                    session.add(processed_chapter)
+                    if not latest_chapter.processed_types:
+                        latest_chapter.processed_types = []
+                    if process_type not in latest_chapter.processed_types:
+                        latest_chapter.processed_types.append(process_type)
                     await session.commit()
             except Exception as e:
-                self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
+                await session.rollback()
+                self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
                 raise
+
+    async def is_chapter_processed(self, chapter_id: str, process_type: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                chapter = await session.get(Chapter, chapter_id)
+                if chapter and isinstance(chapter.processed_types, list):
+                    return process_type in chapter.processed_types
+                return False
+            except Exception as e:
+                self.logger.error(f"Error checking chapter processed status: {str(e)}")
+                raise
+
 
     async def get_model_settings(self, user_id):
         async with await self.get_session() as session:
@@ -1319,21 +1450,6 @@ class Database:
                 raise
 
 
-    async def get_latest_chapter_content(self, project_id: str) -> Optional[str]:
-        async with await self.get_session() as session:
-            try:
-                latest_chapter = await session.execute(select(Chapter).filter(
-                    Chapter.project_id == project_id
-                ).order_by(Chapter.chapter_number.desc()))
-                latest_chapter = latest_chapter.scalars().first()
-                
-                if latest_chapter:
-                    return latest_chapter.content
-                raise
-            except Exception as e:
-                self.logger.error(f"Error getting character by ID: {str(e)}")
-                raise
-
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
@@ -1405,6 +1521,11 @@ class Database:
                 self.logger.error(f"Error deleting character backstory: {str(e)}")
                 raise
 
+    async def get_chapter_count(self, project_id: str, user_id: str) -> int:
+        async with await self.get_session() as session:
+            chapters = await session.execute(select(Chapter).filter_by(project_id=project_id, user_id=user_id))
+            chapters = chapters.scalars().all()
+            return len(chapters)
 
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
         async with await self.get_session() as session:
@@ -1464,24 +1585,24 @@ class Database:
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         async with await self.get_session() as session:
             try:
-                # Use JSON containment operator @> instead of LIKE
-                chapter = await session.execute(
+                # Get all unprocessed chapters instead of just the first one
+                chapters = await session.execute(
                     select(Chapter).filter(
                         Chapter.project_id == project_id,
                         Chapter.user_id == user_id,
                         ~Chapter.processed_types.cast(JSONB).contains([process_type])
-                    ).order_by(Chapter.chapter_number.desc())
+                    ).order_by(Chapter.chapter_number)  # Order by chapter number ascending
                 )
-                chapter = chapter.scalars().first()
+                chapters = chapters.scalars().all()  # Get all results instead of .first()
                 
-                if chapter:
-                    return {
+                if chapters:
+                    return [{
                         'id': chapter.id,
                         'content': chapter.content
-                    }
+                    } for chapter in chapters]
                 raise
             except Exception as e:
-                self.logger.error(f"Error getting latest unprocessed chapter content: {str(e)}")
+                self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
                 raise
 
     async def create_character_relationship(self, character_id: str, related_character_id: str, 
@@ -1528,19 +1649,23 @@ class Database:
                 raise
 
 
-    async def update_event(self, event_id: str, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def update_event(self, event_id: str, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
                 event = await session.get(Event, event_id)
-                if event:
-                    for key, value in event_data.items():
-                        setattr(event, key, value)
+                if event and event.user_id == user_id and event.project_id == project_id:
+                    event.title = title
+                    event.description = description
+                    event.date = date
+                    event.character_id = character_id
+                    event.location_id = location_id
+                    event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
                     return event.to_dict()
-                raise
+                raise Exception("Event not found")  # Add a specific exception message
             except Exception as e:
                 await session.rollback()
-                self.logger.error(f"Error updating location: {str(e)}")
+                self.logger.error(f"Error updating event: {str(e)}")
                 raise
 
     async def get_event_by_title(self, title: str, user_id: str, project_id: str):
@@ -1618,6 +1743,165 @@ class Database:
         """Dispose of the engine and close all connections."""
         if self.engine:
             await self.engine.dispose()
+
+    async def create_location_connection(
+        self, 
+        location1_id: str,
+        location2_id: str,
+        location1_name: str,
+        location2_name: str,
+        connection_type: str,
+        description: str,
+        travel_route: Optional[str],
+        cultural_exchange: Optional[str],
+        project_id: str,
+        user_id: str
+    ) -> str:
+        async with await self.get_session() as session:
+            try:
+                connection = LocationConnection(
+                    id=str(uuid.uuid4()),
+                    location1_id=location1_id,
+                    location2_id=location2_id,
+                    location1_name=location1_name,
+                    location2_name=location2_name,
+                    connection_type=connection_type,
+                    description=description,
+                    travel_route=travel_route,
+                    cultural_exchange=cultural_exchange,
+                    project_id=project_id,
+                    user_id=user_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(connection)
+                await session.commit()
+                return connection.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating location connection: {str(e)}")
+                raise
+
+
+    async def create_event_connection(
+        self,
+        event1_id: str,
+        event2_id: str,
+        connection_type: str,
+        description: str,
+        impact: str,
+        project_id: str,
+        user_id: str
+    ) -> str:
+        async with await self.get_session() as session:
+            try:
+                connection = EventConnection(
+                    id=str(uuid.uuid4()),
+                    event1_id=event1_id,
+                    event2_id=event2_id,
+                    connection_type=connection_type,
+                    description=description,
+                    impact=impact,
+                    project_id=project_id,
+                    user_id=user_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(connection)
+                await session.commit()
+                return connection.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating event connection: {str(e)}")
+                raise
+
+    async def get_location_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        return await self.connection_service.get_connections(LocationConnection, project_id, user_id)
+
+
+    async def get_event_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        return await self.connection_service.get_connections(EventConnection, project_id, user_id)
+    
+    async def update_location_connection(
+        self,
+        connection_id: str,
+        connection_type: str,
+        description: str,
+        travel_route: Optional[str],
+        cultural_exchange: Optional[str],
+        user_id: str,
+        project_id: str
+    ) -> Optional[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                connection = await session.get(LocationConnection, connection_id)
+                if connection and connection.user_id == user_id and connection.project_id == project_id:
+                    connection.connection_type = connection_type
+                    connection.description = description
+                    connection.travel_route = travel_route
+                    connection.cultural_exchange = cultural_exchange
+                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return connection.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating location connection: {str(e)}")
+                raise
+
+    async def update_event_connection(
+        self,
+        connection_id: str,
+        connection_type: str,
+        description: str,
+        impact: str,
+        user_id: str,
+        project_id: str
+    ) -> Optional[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                connection = await session.get(EventConnection, connection_id)
+                if connection and connection.user_id == user_id and connection.project_id == project_id:
+                    connection.connection_type = connection_type
+                    connection.description = description
+                    connection.impact = impact
+                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return connection.to_dict()
+                return None
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error updating event connection: {str(e)}")
+                raise
+
+    async def delete_location_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                # First verify the connection exists and belongs to the user/project
+                connection = await session.get(LocationConnection, connection_id)
+                if connection and connection.user_id == user_id and connection.project_id == project_id:
+                    await session.delete(connection)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting location connection: {str(e)}")
+                raise
+
+    async def delete_event_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                connection = await session.get(EventConnection, connection_id)
+                if connection and connection.user_id == user_id and connection.project_id == project_id:
+                    await session.delete(connection)
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error deleting event connection: {str(e)}")
+                raise
 
 db_instance = Database()
 

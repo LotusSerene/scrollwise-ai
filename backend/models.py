@@ -1,11 +1,29 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
+from enum import Enum
+
+class CodexItemType(str, Enum):
+    CHARACTER = "character"
+    WORLDBUILDING = "worldbuilding"
+    ITEM = "item"
+    LORE = "lore"
+    FACTION = "faction"
+    LOCATION = "location"
+    EVENT = "event"
+    RELATIONSHIP = "relationship"
+    BACKSTORY = "character_backstory"
+
+
+class WorldbuildingSubtype(str, Enum):
+    HISTORY = "history"
+    CULTURE = "culture"
+    GEOGRAPHY = "geography"
 
 class CodexItem(BaseModel):
     name: str = Field(description="Name of the codex item")
     description: str = Field(description="Description of the codex item")
-    type: str = Field(description="Type of codex item")
-    subtype: Optional[str] = Field(None, description="Subtype of codex item")
+    type: CodexItemType = Field(description="Type of codex item")
+    subtype: Optional[WorldbuildingSubtype] = Field(None, description="Subtype for worldbuilding items")
 
 class CriterionScore(BaseModel):
     score: int = Field(..., ge=1, le=10, description="Score for the criterion (1-10)")
@@ -20,4 +38,4 @@ class ChapterValidation(BaseModel):
     areas_for_improvement: List[str] = Field(..., description="List of areas that need improvement")
     general_feedback: str = Field(..., description="Overall feedback on the chapter")
 
-# Add other model classes as needed...
+

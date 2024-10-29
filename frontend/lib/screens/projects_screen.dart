@@ -358,8 +358,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
-        // Simplified body handling - always send null when universeId is null
-        body: utf8.encode(json.encode({'universe_id': universeId})),
+        body: utf8.encode(json.encode({'universe_id': universeId ?? ''})),
       );
 
       if (response.statusCode == 200) {
@@ -370,7 +369,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
             // Update the local project data
             _projects[projectIndex] = {
               ..._projects[projectIndex],
-              'universe_id': universeId, // Directly use universeId
+              'universe_id': universeId,
             };
           }
         });
