@@ -305,7 +305,7 @@ async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a project including chapter count and word count."""
     async with get_db_session() as session:
         try:
-            # Get chapter count
+            # Count chapters
             chapter_count = await session.scalar(
                 select(func.count(Chapter.id))
                 .where(Chapter.project_id == project_id)
@@ -314,12 +314,14 @@ async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
 
             # Get total word count from all chapters
             word_count = await session.scalar(
-                select(func.array_length(
-                    func.regexp_split_to_array(
-                        func.regexp_replace(Chapter.content, '\s+', ' ', 'g'),
-                        '\s'
-                    ),
-                    1
+                select(func.sum(
+                    func.array_length(
+                        func.regexp_split_to_array(
+                            func.regexp_replace(Chapter.content, '\s+', ' ', 'g'),
+                            '\s'
+                        ),
+                        1
+                    )
                 ))
                 .where(Chapter.project_id == project_id)
                 .where(Chapter.user_id == user_id)

@@ -5,6 +5,9 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:share_plus/share_plus.dart';
 
 class KnowledgeBase extends StatefulWidget {
   final String projectId;
@@ -154,6 +157,35 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
     }
   }
 
+  Future<void> _exportKnowledgeBase() async {
+    try {
+      // Create markdown content
+      final StringBuffer markdown = StringBuffer();
+      markdown.writeln('# Knowledge Base Export\n');
+      
+      for (var item in _knowledgeBaseContent) {
+        markdown.writeln('## ${item['title'] ?? item['name'] ?? 'Untitled'}\n');
+        markdown.writeln('Type: ${item['type']}\n');
+        markdown.writeln('${item['content']}\n');
+        markdown.writeln('---\n');
+      }
+
+      // Get temporary directory
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/knowledge_base_export.md');
+      await file.writeAsString(markdown.toString());
+
+      // Share the file
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: 'Knowledge Base Export',
+      );
+    } catch (error) {
+      print('Error exporting knowledge base: $error');
+      Fluttertoast.showToast(msg: 'Error exporting knowledge base');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -207,10 +239,19 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
             ),
           ],
         ),
-        IconButton(
-          icon: const Icon(Icons.refresh),
-          onPressed: _fetchKnowledgeBaseContent,
-          tooltip: 'Refresh content',
+        Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _fetchKnowledgeBaseContent,
+              tooltip: 'Refresh content',
+            ),
+            IconButton(
+              icon: const Icon(Icons.upload_file),
+              onPressed: _exportKnowledgeBase,
+              tooltip: 'Export knowledge base',
+            ),
+          ],
         ),
       ],
     );

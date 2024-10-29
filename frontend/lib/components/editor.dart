@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../utils/text_utils.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 
 class Editor extends StatefulWidget {
   final String projectId;
@@ -244,6 +246,49 @@ class _EditorState extends State<Editor> {
     }
   }
 
+  Future<void> _importDocuments() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'md', 'doc', 'docx'],
+        allowMultiple: true,
+      );
+
+      if (result != null) {
+        for (var file in result.files) {
+          if (file.path != null) {
+            final content = await File(file.path!).readAsString();
+            final title = file.name
+                .replaceAll(RegExp(r'\.[^/.]+$'), ''); // Remove extension
+
+            // Create new chapter
+            final response = await http.post(
+              Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
+              headers: await getAuthHeaders(),
+              body: json.encode({
+                'title': title,
+                'content': content,
+                'project_id': widget.projectId,
+              }),
+            );
+
+            if (response.statusCode == 201) {
+              Fluttertoast.showToast(msg: 'Imported: $title');
+            } else {
+              Fluttertoast.showToast(msg: 'Error importing: $title');
+            }
+          }
+        }
+        // Refresh chapter list
+        Provider.of<AppState>(context, listen: false)
+            .fetchChapters(widget.projectId);
+      }
+    } catch (error) {
+      print('Error importing documents: $error');
+      Fluttertoast.showToast(msg: 'Error importing documents');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -410,6 +455,12 @@ class _EditorState extends State<Editor> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            onPressed: _importDocuments,
+            tooltip: 'Import documents',
+          ),
+          const SizedBox(width: 8),
           ElevatedButton.icon(
             onPressed: _handleSaveChapter,
             icon: const Icon(Icons.save),

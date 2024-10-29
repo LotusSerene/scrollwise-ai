@@ -671,7 +671,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _buildSectionHeader('Timeline', Icons.timeline),
           EventList(
             events: events,
-            connections: [],
+            connections: const [],
             onEdit: _editEvent,
             onDelete: _deleteEvent,
           ),
@@ -693,7 +693,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _buildSectionHeader('Locations', Icons.place),
           LocationList(
             locations: locations,
-            connections: [],
+            connections: const [],
             onEdit: _editLocation,
             onDelete: _deleteLocation,
           ),

@@ -163,12 +163,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           'Content-Type': 'application/json',
         };
 
-        // Only include universe_id in the request body if it's not 'no_universe'
         final requestBody = {
           'name': _projectNameController.text,
           'description': _projectDescriptionController.text,
-          if (_selectedUniverseId != 'no_universe')
-            'universe_id': _selectedUniverseId,
+          'universe_id':
+              _selectedUniverseId == 'no_universe' ? null : _selectedUniverseId,
         };
 
         final response = await http.post(
@@ -179,30 +178,40 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
         if (response.statusCode == 201 || response.statusCode == 200) {
           final newProject = json.decode(utf8.decode(response.bodyBytes));
-          setState(() {
-            _projects.add(newProject);
-            _projectNameController.clear();
-            _projectDescriptionController.clear();
-            _selectedUniverseId = null;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Project created successfully'),
-              behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-            ),
-          );
+
+          if (newProject['id'] != null) {
+            setState(() {
+              _projects.add(newProject);
+              _projectNameController.clear();
+              _projectDescriptionController.clear();
+              _selectedUniverseId = 'no_universe';
+            });
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Project created successfully'),
+                  behavior: SnackBarBehavior.fixed,
+                ),
+              );
+            }
+          } else {
+            throw Exception('Created project has no ID');
+          }
         } else {
           final errorData = json.decode(response.body);
           throw Exception(errorData['detail'] ?? 'Unknown error occurred');
         }
       } catch (error) {
         print('Error creating project: $error');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating project: ${error.toString()}'),
-            behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error creating project: ${error.toString()}'),
+              behavior: SnackBarBehavior.fixed,
+            ),
+          );
+        }
       }
     }
   }
@@ -358,38 +367,33 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
-        body: utf8.encode(json.encode({'universe_id': universeId ?? ''})),
+        body: json.encode(
+            {'universe_id': universeId == 'no_universe' ? null : universeId}),
       );
 
       if (response.statusCode == 200) {
-        setState(() {
-          final projectIndex =
-              _projects.indexWhere((p) => p['id'] == projectId);
-          if (projectIndex != -1) {
-            // Update the local project data
-            _projects[projectIndex] = {
-              ..._projects[projectIndex],
-              'universe_id': universeId,
-            };
-          }
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Project updated successfully'),
-            behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-          ),
-        );
+        await _fetchProjects(); // Refresh the projects list
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Project updated successfully'),
+              behavior: SnackBarBehavior.fixed,
+            ),
+          );
+        }
       } else {
         throw Exception('Failed to update project');
       }
     } catch (error) {
       print('Error updating project universe: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating project: ${error.toString()}'),
-          behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating project: ${error.toString()}'),
+            behavior: SnackBarBehavior.fixed,
+          ),
+        );
+      }
     }
   }
 
@@ -576,100 +580,120 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   }
 
   Widget _buildProjectsTab() {
-    return _projects.isEmpty
-        ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.folder_open,
-                  size: 64,
-                  color:
-                      Theme.of(context).colorScheme.secondary.withOpacity(0.5),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No projects found',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.secondary,
-                      ),
-                ),
-              ],
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_projects.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.folder_open,
+              size: 64,
+              color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
             ),
-          )
-        : GridView.builder(
-            padding: const EdgeInsets.all(16),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 1.3,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
+            const SizedBox(height: 16),
+            Text(
+              'No projects found',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.secondary,
+                  ),
             ),
-            itemCount: _projects.length,
-            itemBuilder: (context, index) {
-              // Cast the dynamic map to Map<String, dynamic>
-              final project = Map<String, dynamic>.from(_projects[index]);
-              return Card(
-                elevation: 4,
-                child: InkWell(
-                  onTap: () {
-                    Provider.of<AppState>(context, listen: false)
-                        .setCurrentProject(project['id']);
-                    Navigator.pushReplacementNamed(context, '/home',
-                        arguments: project['id']);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                project['name'],
-                                style: Theme.of(context).textTheme.titleMedium,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            _buildUniverseDropdown(
-                                project), // Now passing properly typed Map
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: Text(
-                            project['description'] ?? 'No description',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 3,
-                          ),
-                        ),
-                        const Spacer(),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Chapters: ${project['chapter_count'] ?? 0}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                            Text(
-                              'Words: ${project['word_count'] ?? 0}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ],
+          ],
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.3,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _projects.length,
+      itemBuilder: (context, index) {
+        final project = _projects[index];
+        return _buildProjectCard(project);
+      },
+    );
+  }
+
+  Widget _buildProjectCard(Map<String, dynamic> project) {
+    final projectId = project['id']?.toString();
+    if (projectId == null) {
+      return const SizedBox(); // Skip rendering invalid projects
+    }
+
+    return Card(
+      elevation: 4,
+      child: InkWell(
+        onTap: () {
+          Provider.of<AppState>(context, listen: false)
+              .setCurrentProject(projectId);
+          Navigator.pushReplacementNamed(
+            context,
+            '/home',
+            arguments: projectId,
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      project['name']?.toString() ?? 'Untitled Project',
+                      style: Theme.of(context).textTheme.titleMedium,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  _buildUniverseDropdown(project),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Text(
+                  project['description']?.toString() ?? 'No description',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 3,
                 ),
-              );
-            },
-          );
+              ),
+              const Spacer(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Chapters: ${project['chapter_count']?.toString() ?? '0'}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Text(
+                    'Words: ${project['word_count']?.toString() ?? '0'}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildUniverseDropdown(Map<String, dynamic> project) {
+    final projectId = project['id']?.toString();
+    if (projectId == null) {
+      return const SizedBox(); // Skip rendering for invalid projects
+    }
+
     return FutureBuilder<List<dynamic>>(
       future: _fetchUniverses(),
       builder: (context, snapshot) {
@@ -682,30 +706,29 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         }
 
         final universes = snapshot.data ?? [];
-        // Fix the syntax error in handling universe_id
-        String? currentUniverseId = project['universe_id']?.toString();
+        String currentUniverseId =
+            project['universe_id']?.toString() ?? 'no_universe';
 
-        return PopupMenuButton<String?>(
+        return PopupMenuButton<String>(
           icon: Icon(
             Icons.public,
-            color: currentUniverseId != null
+            color: currentUniverseId != 'no_universe'
                 ? Theme.of(context).colorScheme.primary
                 : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
           ),
-          onSelected: (String? newValue) {
-            if (newValue == 'no_universe') {
-              _updateProjectUniverse(project['id'].toString(), null);
-            } else {
-              _updateProjectUniverse(project['id'].toString(), newValue);
-            }
+          onSelected: (String newValue) {
+            _updateProjectUniverse(
+              projectId,
+              newValue == 'no_universe' ? null : newValue,
+            );
           },
           itemBuilder: (context) => [
-            const PopupMenuItem<String?>(
+            const PopupMenuItem<String>(
               value: 'no_universe',
               child: Text('No Universe'),
             ),
             ...universes.map((universe) {
-              return PopupMenuItem<String?>(
+              return PopupMenuItem<String>(
                 value: universe['id'].toString(),
                 child: Text(universe['name']),
               );
