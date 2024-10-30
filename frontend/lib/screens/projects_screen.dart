@@ -13,6 +13,8 @@ import 'collaboration_screen.dart';
 
 final GlobalKey<TextFieldState> _tokenFieldKey = GlobalKey<TextFieldState>();
 
+final GlobalKey<TextFieldState> _tokenFieldKey = GlobalKey<TextFieldState>();
+
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
 
