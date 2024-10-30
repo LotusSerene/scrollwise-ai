@@ -11,6 +11,8 @@ import 'universe_screen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'collaboration_screen.dart';
 
+final GlobalKey<TextFieldState> _tokenFieldKey = GlobalKey<TextFieldState>();
+
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
 
@@ -1145,11 +1147,8 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ElevatedButton(
             child: const Text('Join'),
             onPressed: () {
-              // Get the token from the text field
-              final token = (context.findRenderObject() as RenderBox)
-                  .descendant(of: const Key('token_field'))
-                  ?.widget as TextField;
-              Navigator.of(context).pop(token.controller?.text);
+              String? token = _tokenFieldKey.currentState?.text;
+              Navigator.of(context).pop(token);
             },
           ),
         ],
