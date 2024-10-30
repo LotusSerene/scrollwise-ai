@@ -34,7 +34,7 @@ class _LocationListState extends State<LocationList> {
   bool _isLoading = false;
   final ScrollController _scrollController = ScrollController();
   int _currentPage = 0;
-  List<Location> _displayedLocations = [];
+  final List<Location> _displayedLocations = [];
 
   @override
   void initState() {
@@ -75,7 +75,6 @@ class _LocationListState extends State<LocationList> {
       if (!_mounted) return;
 
       final startIndex = _currentPage * widget.itemsPerPage;
-      final endIndex = startIndex + widget.itemsPerPage;
       final newItems =
           widget.locations.skip(startIndex).take(widget.itemsPerPage).toList();
 
@@ -315,7 +314,7 @@ class _LocationListState extends State<LocationList> {
       LocationConnection conn, Location connectedLocation) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      color: Theme.of(context).colorScheme.surfaceVariant,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -352,7 +351,7 @@ class _LocationListState extends State<LocationList> {
                 ),
               ],
             ),
-            if (conn.travelRoute != null) ...[
+            ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -370,7 +369,7 @@ class _LocationListState extends State<LocationList> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        conn.travelRoute!,
+                        conn.travelRoute,
                         style: TextStyle(
                           color:
                               Theme.of(context).colorScheme.onPrimaryContainer,
@@ -381,7 +380,7 @@ class _LocationListState extends State<LocationList> {
                 ),
               ),
             ],
-            if (conn.culturalExchange != null) ...[
+            ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -399,7 +398,7 @@ class _LocationListState extends State<LocationList> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        conn.culturalExchange!,
+                        conn.culturalExchange,
                         style: TextStyle(
                           color: Theme.of(context)
                               .colorScheme
@@ -545,7 +544,7 @@ class _LocationListState extends State<LocationList> {
 
             return Card(
               margin: const EdgeInsets.symmetric(vertical: 4),
-              color: Theme.of(context).colorScheme.surfaceVariant,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: ListTile(
                 leading: const Icon(Icons.compare_arrows),
                 title: Text(connectedLocation.name),

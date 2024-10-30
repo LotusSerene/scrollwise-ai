@@ -26,16 +26,21 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  late TabController _tabController;
+  TabController? _tabController;
   Map<String, bool> _permissions = {};
-  bool _isLoading = true;
   bool _isOwner = false;
+  late Future<void> _permissionsFuture;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 12, vsync: this);
-    _loadPermissions();
+    _permissionsFuture = _loadPermissions();
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPermissions() async {
@@ -55,16 +60,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         setState(() {
           _permissions = Map<String, bool>.from(data['permissions']);
           _isOwner = data['is_owner'];
-          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _permissions = {};
+          _isOwner = false;
         });
       }
     } catch (e) {
-      print('Error loading permissions: $e');
+      setState(() {
+        _permissions = {};
+        _isOwner = false;
+      });
     }
   }
 
+  void _initializeTabController(List<TabItem> authorizedTabs) {
+    // Dispose of the old controller if it exists
+    _tabController?.dispose();
+
+    // Create a new controller with the current number of tabs
+    _tabController = TabController(
+      length: authorizedTabs.length,
+      vsync: this,
+      initialIndex: 0,
+    );
+  }
+
   bool _hasPermission(String permission) {
-    return _isOwner || _permissions[permission] == true;
+    if (_isOwner) return true;
+    return _permissions[permission] == true;
   }
 
   List<TabItem> _getAuthorizedTabs() {
@@ -157,126 +182,153 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final appState = Provider.of<AppState>(context);
     final projectId = appState.currentProjectId;
 
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+    if (projectId == null) {
+      return Scaffold(body: _buildNoProjectSelected());
     }
 
-    final authorizedTabs = _getAuthorizedTabs();
-    _tabController = TabController(length: authorizedTabs.length, vsync: this);
+    return FutureBuilder<void>(
+      future: _permissionsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        title: Row(
-          children: [
-            Icon(Icons.book, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 8),
-            const Text('Story Builder'),
-          ],
-        ),
-        actions: [
-          if (_hasPermission('refresh_data'))
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Refresh',
-              onPressed: () {
-                if (projectId != null) {
-                  appState.refreshProjectData();
-                }
-              },
+        // Get authorized tabs after permissions are loaded
+        final authorizedTabs = _getAuthorizedTabs();
+
+        // Initialize tab controller if needed
+        if (_tabController?.length != authorizedTabs.length) {
+          _initializeTabController(authorizedTabs);
+        }
+
+        // If we don't have a tab controller yet, show loading
+        if (_tabController == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return Scaffold(
+          appBar: AppBar(
+            elevation: 0,
+            title: Row(
+              children: [
+                Icon(Icons.book, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                const Text('Story Builder'),
+              ],
             ),
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            tooltip: 'Back to Projects',
-            onPressed: () =>
-                Navigator.pushReplacementNamed(context, '/projects'),
+            actions: [
+              if (_hasPermission('refresh_data'))
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Refresh',
+                  onPressed: () {
+                    appState.refreshProjectData();
+                  },
+                ),
+              IconButton(
+                icon: const Icon(Icons.exit_to_app),
+                tooltip: 'Back to Projects',
+                onPressed: () =>
+                    Navigator.pushReplacementNamed(context, '/projects'),
+              ),
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(48),
+              child: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                indicatorWeight: 3,
+                indicatorColor: Theme.of(context).colorScheme.primary,
+                tabs: authorizedTabs
+                    .map((tab) => Tab(
+                          icon: Icon(tab.icon, size: 20),
+                          text: tab.label,
+                        ))
+                    .toList(),
+              ),
+            ),
           ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: TabBar(
+          body: TabBarView(
             controller: _tabController,
-            isScrollable: true,
-            indicatorWeight: 3,
-            indicatorColor: Theme.of(context).colorScheme.primary,
-            tabs: authorizedTabs
-                .map((tab) => Tab(
-                      icon: Icon(tab.icon, size: 20),
-                      text: tab.label,
-                    ))
-                .toList(),
+            physics: const NeverScrollableScrollPhysics(),
+            children: authorizedTabs.map((tab) {
+              return _buildTabContent(tab.label, projectId);
+            }).toList(),
           ),
-        ),
-      ),
-      body: projectId == null
-          ? _buildNoProjectSelected()
-          : TabBarView(
-              controller: _tabController,
-              children: authorizedTabs.map((tab) {
-                return _buildTabContent(tab.label, projectId);
-              }).toList(),
-            ),
+        );
+      },
     );
   }
 
   Widget _buildTabContent(String tabLabel, String projectId) {
-    switch (tabLabel) {
-      case 'Dashboard':
-        return Dashboard(
-          projectId: projectId,
-          onProgressChanged: (chapters, codexEntries, wordCount) {
-            Provider.of<AppState>(context, listen: false)
-                .updateProgress(chapters, codexEntries, wordCount);
-          },
-        );
-      case 'Editor':
-        return _hasPermission('write_chapters')
-            ? Editor(projectId: projectId)
-            : _buildNoPermissionView('write_chapters');
-      case 'Codex':
-        return _hasPermission('manage_codex')
-            ? Codex(projectId: projectId)
-            : _buildNoPermissionView('manage_codex');
-      case 'Codex Generation':
-        return _hasPermission('manage_codex')
-            ? CodexGeneration(projectId: projectId)
-            : _buildNoPermissionView('manage_codex');
-      case 'Character Relationships':
-        return _hasPermission('manage_characters')
-            ? CharacterRelationshipsScreen(projectId: projectId)
-            : _buildNoPermissionView('manage_characters');
-      case 'Character Journey':
-        return _hasPermission('manage_characters')
-            ? CharacterJourneyScreen(projectId: projectId)
-            : _buildNoPermissionView('manage_characters');
-      case 'Timeline':
-        return _hasPermission('manage_timeline')
-            ? TimelineScreen(projectId: projectId)
-            : _buildNoPermissionView('manage_timeline');
-      case 'Validity':
-        return _hasPermission('check_validity')
-            ? Validity(projectId: projectId)
-            : _buildNoPermissionView('check_validity');
-      case 'Knowledge Base':
-        return _hasPermission('manage_knowledge_base')
-            ? KnowledgeBase(projectId: projectId)
-            : _buildNoPermissionView('manage_knowledge_base');
-      case 'Query':
-        return _hasPermission('manage_knowledge_base')
-            ? Query(projectId: projectId)
-            : _buildNoPermissionView('manage_knowledge_base');
-      case 'Generate':
-        return _hasPermission('generate_chapters')
-            ? CreateChapter(projectId: projectId)
-            : _buildNoPermissionView('generate_chapters');
-      case 'Project Settings':
-        return _isOwner
-            ? ProjectSettings(projectId: projectId)
-            : _buildNoPermissionView('owner');
-      default:
-        return const Center(child: Text('Unknown tab'));
+    try {
+      switch (tabLabel) {
+        case 'Dashboard':
+          return Dashboard(
+            projectId: projectId,
+            onProgressChanged: (chapters, codexEntries, wordCount) {
+              Provider.of<AppState>(context, listen: false)
+                  .updateProgress(chapters, codexEntries, wordCount);
+            },
+          );
+        case 'Editor':
+          if (!_hasPermission('write_chapters')) {
+            print('No write_chapters permission');
+            return _buildNoPermissionView('write_chapters');
+          }
+          return Editor(projectId: projectId);
+        case 'Codex':
+          return _hasPermission('manage_codex')
+              ? Codex(projectId: projectId)
+              : _buildNoPermissionView('manage_codex');
+        case 'Codex Generation':
+          return _hasPermission('manage_codex')
+              ? CodexGeneration(projectId: projectId)
+              : _buildNoPermissionView('manage_codex');
+        case 'Character Relationships':
+          return _hasPermission('manage_characters')
+              ? CharacterRelationshipsScreen(projectId: projectId)
+              : _buildNoPermissionView('manage_characters');
+        case 'Character Journey':
+          return _hasPermission('manage_characters')
+              ? CharacterJourneyScreen(projectId: projectId)
+              : _buildNoPermissionView('manage_characters');
+        case 'Timeline':
+          return _hasPermission('manage_timeline')
+              ? TimelineScreen(projectId: projectId)
+              : _buildNoPermissionView('manage_timeline');
+        case 'Validity':
+          return _hasPermission('check_validity')
+              ? Validity(projectId: projectId)
+              : _buildNoPermissionView('check_validity');
+        case 'Knowledge Base':
+          return _hasPermission('manage_knowledge_base')
+              ? KnowledgeBase(projectId: projectId)
+              : _buildNoPermissionView('manage_knowledge_base');
+        case 'Query':
+          if (!_hasPermission('manage_knowledge_base')) {
+            print('No manage_knowledge_base permission');
+            return _buildNoPermissionView('manage_knowledge_base');
+          }
+          return Query(projectId: projectId);
+        case 'Generate':
+          return _hasPermission('generate_chapters')
+              ? CreateChapter(projectId: projectId)
+              : _buildNoPermissionView('generate_chapters');
+        case 'Project Settings':
+          return _isOwner
+              ? ProjectSettings(projectId: projectId)
+              : _buildNoPermissionView('owner');
+        default:
+          return const Center(child: Text('Unknown tab'));
+      }
+    } catch (e) {
+      print('Error building tab content: $e');
+      return Center(child: Text('Error loading content: $e'));
     }
   }
 

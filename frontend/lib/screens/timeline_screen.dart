@@ -1116,7 +1116,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ],
                   ),
                   const Spacer(),
-                  if (connection.travelRoute != null) ...[
+                  ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
@@ -1135,16 +1135,16 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      connection.travelRoute!,
+                      connection.travelRoute,
                       style: Theme.of(context).textTheme.bodySmall,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                  if (connection.culturalExchange != null) ...[
+                  ...[
                     const SizedBox(height: 8),
                     Text(
-                      connection.culturalExchange!,
+                      connection.culturalExchange,
                       style: Theme.of(context).textTheme.bodySmall,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,

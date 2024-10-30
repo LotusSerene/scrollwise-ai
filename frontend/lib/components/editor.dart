@@ -417,52 +417,41 @@ class _EditorState extends State<Editor> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppState>(
-      builder: (context, appState, child) {
-        return Container(
-          padding: const EdgeInsets.all(24),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Chapters sidebar
-              SizedBox(
-                width: 300,
-                child: Card(
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildChapterHeader(),
-                      _buildChapterList(appState),
-                      _buildCreateChapterButton(),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 24),
-              // Editor main content
-              Expanded(
-                child: Card(
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildEditorHeader(),
-                      _buildEditorContent(),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+    return Row(
+      children: [
+        // Left panel - Chapter list
+        SizedBox(
+          width: 300,
+          child: Card(
+            margin: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _buildCreateChapterButton(),
+                if (_isLoading)
+                  _buildLoadingIndicator()
+                else if (_error != null)
+                  _buildErrorState()
+                else if (_displayedChapters.isEmpty)
+                  Expanded(child: _buildEmptyState())
+                else
+                  _buildChapterList(),
+              ],
+            ),
           ),
-        );
-      },
+        ),
+        // Right panel - Editor
+        Expanded(
+          child: Card(
+            margin: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _buildEditorHeader(),
+                _buildEditorContent(),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -492,7 +481,7 @@ class _EditorState extends State<Editor> {
     );
   }
 
-  Widget _buildChapterList(AppState appState) {
+  Widget _buildChapterList() {
     if (_isLoading) {
       return _buildLoadingIndicator();
     }

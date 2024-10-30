@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, joinedload
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select, delete, or_
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 import json
@@ -50,6 +50,7 @@ class Project(Base):
     character_relationship_analyses = relationship("CharacterRelationshipAnalysis", back_populates="project", cascade="all, delete-orphan")
     event_connections = relationship("EventConnection", back_populates="project", cascade="all, delete-orphan")
     location_connections = relationship("LocationConnection", back_populates="project", cascade="all, delete-orphan")
+    collaborations = relationship("ProjectCollaboration", back_populates="project", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -60,6 +61,37 @@ class Project(Base):
             'targetWordCount': self.target_word_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+
+class ProjectCollaboration(Base):
+    __tablename__ = 'project_collaborations'
+    id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    owner_id = Column(String, ForeignKey('users.id'), nullable=False)  # Original project owner
+    collaborator_id = Column(String, ForeignKey('users.id'), nullable=True)  # User who received access
+    access_token = Column(String, nullable=False, unique=True)
+    permissions = Column(JSON, nullable=False)  # Store permissions as JSON
+    status = Column(String, nullable=False)  # 'pending', 'active', 'revoked'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    expires_at = Column(DateTime, nullable=True)
+    
+    project = relationship("Project", back_populates="collaborations")
+    owner = relationship("User", foreign_keys=[owner_id])
+    collaborator = relationship("User", foreign_keys=[collaborator_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'project_id': self.project_id,
+            'owner_id': self.owner_id,
+            'collaborator_id': self.collaborator_id,
+            'access_token': self.access_token,
+            'permissions': self.permissions,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None
         }
 
 class Chapter(Base):
@@ -1911,6 +1943,235 @@ class Database:
             except Exception as e:
                 await session.rollback()
                 self.logger.error(f"Error deleting event connection: {str(e)}")
+                raise
+
+    async def create_project_collaboration(self, project_id: str, owner_id: str, collaborator_id: Optional[str], access_token: str, permissions: Dict[str, Any], status: str, expires_at: Optional[datetime]) -> str:
+        async with await self.get_session() as session:
+            try:
+                collaboration = ProjectCollaboration(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    owner_id=owner_id,
+                    collaborator_id=collaborator_id,
+                    access_token=access_token,
+                    permissions=permissions,
+                    status=status,
+                    expires_at=expires_at
+                )
+                session.add(collaboration)
+                await session.commit()
+                return collaboration.id
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating project collaboration: {str(e)}")
+                raise
+
+    async def get_project_collaborations(self, project_id: str) -> List[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                collaborations = await session.execute(select(ProjectCollaboration).filter_by(project_id=project_id))
+                collaborations = collaborations.scalars().all()
+                return [collaboration.to_dict() for collaboration in collaborations]
+            except Exception as e:
+                self.logger.error(f"Error getting project collaborations: {str(e)}")
+                raise
+
+    async def create_collaboration_token(
+        self,
+        project_id: str,
+        owner_id: str,
+        permissions: Dict[str, bool],
+        expires_in_days: Optional[int] = 30
+    ) -> str:
+        async with await self.get_session() as session:
+            try:
+                access_token = str(uuid.uuid4())
+                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+                expires_at = None
+                if expires_in_days:
+                    expires_at = current_time + timedelta(days=expires_in_days)
+                
+                # Log token creation details
+                self.logger.info(f"Creating collaboration token: "
+                           f"project_id={project_id}, "
+                           f"current_time={current_time}, "
+                           f"expires_at={expires_at}")
+                
+                collaboration = ProjectCollaboration(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    owner_id=owner_id,
+                    access_token=access_token,
+                    permissions=permissions,
+                    status='pending',
+                    created_at=current_time,
+                    expires_at=expires_at
+                )
+                
+                session.add(collaboration)
+                await session.commit()
+                
+                # Log successful creation
+                self.logger.info(f"Created collaboration token: {access_token}")
+                
+                return access_token
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error creating collaboration token: {str(e)}")
+                raise
+
+    async def accept_collaboration(self, access_token: str, collaborator_id: str) -> Dict[str, Any]:
+        async with await self.get_session() as session:
+            try:
+                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+                
+                # First, find the collaboration without expiration filter
+                collaboration = await session.execute(
+                    select(ProjectCollaboration)
+                    .filter_by(access_token=access_token)
+                )
+                collaboration = collaboration.scalars().first()
+                
+                # Add detailed logging
+                if not collaboration:
+                    self.logger.error(f"No collaboration found for token: {access_token}")
+                    raise ValueError("Invalid collaboration token")
+                
+                # Log collaboration details for debugging
+                self.logger.info(f"Found collaboration: status={collaboration.status}, "
+                               f"expires_at={collaboration.expires_at}, "
+                               f"current_time={current_time}")
+                
+                # Check status
+                if collaboration.status != 'pending':
+                    self.logger.error(f"Invalid collaboration status: {collaboration.status}")
+                    raise ValueError("Collaboration is not in pending status")
+                
+                # Check expiration
+                if collaboration.expires_at and collaboration.expires_at <= current_time:
+                    self.logger.error(f"Collaboration expired at {collaboration.expires_at}")
+                    raise ValueError("Collaboration token has expired")
+                
+                # Check if already has collaborator
+                if collaboration.collaborator_id:
+                    self.logger.error("Collaboration already has a collaborator")
+                    raise ValueError("Collaboration already accepted")
+                
+                # Update collaboration
+                collaboration.collaborator_id = collaborator_id
+                collaboration.status = 'active'
+                await session.commit()
+                
+                return collaboration.to_dict()
+                
+            except ValueError as ve:
+                await session.rollback()
+                self.logger.error(f"Validation error in accept_collaboration: {str(ve)}")
+                raise
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error accepting collaboration: {str(e)}")
+                raise
+
+    async def revoke_collaboration(self, collaboration_id: str, owner_id: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                collaboration = await session.get(ProjectCollaboration, collaboration_id)
+                if collaboration and collaboration.owner_id == owner_id:
+                    collaboration.status = 'revoked'
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error revoking collaboration: {str(e)}")
+                raise
+
+    async def get_project_collaborations(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                collaborations = await session.execute(
+                    select(ProjectCollaboration)
+                    .filter(
+                        or_(
+                            ProjectCollaboration.owner_id == user_id,
+                            ProjectCollaboration.collaborator_id == user_id
+                        ),
+                        ProjectCollaboration.project_id == project_id,
+                        ProjectCollaboration.status == 'active'
+                    )
+                )
+                return [collab.to_dict() for collab in collaborations.scalars().all()]
+            except Exception as e:
+                self.logger.error(f"Error getting project collaborations: {str(e)}")
+                raise
+
+    async def get_user_collaborations(self, user_id: str) -> List[Dict[str, Any]]:
+        async with await self.get_session() as session:
+            try:
+                collaborations = await session.execute(
+                    select(ProjectCollaboration)
+                    .filter(
+                        or_(
+                            ProjectCollaboration.owner_id == user_id,
+                            ProjectCollaboration.collaborator_id == user_id
+                        ),
+                        ProjectCollaboration.status == 'active'
+                    )
+                    .join(Project)
+                    .join(User, ProjectCollaboration.owner_id == User.id)
+                )
+                
+                result = []
+                for collab in collaborations.scalars().all():
+                    project = await session.get(Project, collab.project_id)
+                    owner = await session.get(User, collab.owner_id)
+                    
+                    result.append({
+                        'id': collab.id,
+                        'project_id': collab.project_id,
+                        'project_name': project.name if project else 'Unknown Project',
+                        'owner_id': collab.owner_id,
+                        'owner_name': owner.email if owner else 'Unknown User',
+                        'status': collab.status,
+                        'permissions': collab.permissions,
+                        'created_at': collab.created_at.isoformat(),
+                        'expires_at': collab.expires_at.isoformat() if collab.expires_at else None
+                    })
+                
+                return result
+            except Exception as e:
+                self.logger.error(f"Error getting user collaborations: {str(e)}")
+                raise
+
+    async def leave_collaboration(self, collaboration_id: str, user_id: str) -> bool:
+        async with await self.get_session() as session:
+            try:
+                collaboration = await session.get(ProjectCollaboration, collaboration_id)
+                if collaboration and collaboration.collaborator_id == user_id:
+                    collaboration.status = 'revoked'
+                    await session.commit()
+                    return True
+                return False
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Error leaving collaboration: {str(e)}")
+                raise
+
+    async def get_project_collaboration(self, project_id: str, user_id: str) -> Optional[ProjectCollaboration]:
+        async with await self.get_session() as session:
+            try:
+                collaboration = await session.execute(
+                    select(ProjectCollaboration)
+                    .filter(
+                        ProjectCollaboration.project_id == project_id,
+                        ProjectCollaboration.collaborator_id == user_id,
+                        ProjectCollaboration.status == 'active'
+                    )
+                )
+                return collaboration.scalars().first()
+            except Exception as e:
+                self.logger.error(f"Error getting project collaboration: {str(e)}")
                 raise
 
 db_instance = Database()

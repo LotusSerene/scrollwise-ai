@@ -23,7 +23,6 @@ class _CodexState extends State<Codex> {
   final Set<String> _selectedItems = {};
   bool _isSelectionMode = false;
   final int _itemsPerPage = 10;
-  int _currentPage = 0;
   List<dynamic> _displayedItems = [];
   bool _isLoadingMore = false;
   final ScrollController _scrollController = ScrollController();
@@ -70,7 +69,6 @@ class _CodexState extends State<Codex> {
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!_mounted) return;
 
-      final endIndex = startIndex + _itemsPerPage;
       final newItems =
           filteredItems.skip(startIndex).take(_itemsPerPage).toList();
 
@@ -85,7 +83,6 @@ class _CodexState extends State<Codex> {
     final filteredItems = _getFilteredItems();
     _safeSetState(() {
       _displayedItems = filteredItems.take(_itemsPerPage).toList();
-      _currentPage = 1;
     });
   }
 
@@ -513,7 +510,6 @@ class _CodexState extends State<Codex> {
     // Initialize displayed items if empty
     if (_displayedItems.isEmpty) {
       _displayedItems = items.take(_itemsPerPage).toList();
-      _currentPage = 1;
     }
 
     return ListView.builder(
@@ -726,7 +722,6 @@ class _CodexState extends State<Codex> {
     _safeSetState(() {
       _searchController.text = value;
       _displayedItems.clear();
-      _currentPage = 0;
     });
     _resetDisplayedItems();
   }
@@ -736,7 +731,6 @@ class _CodexState extends State<Codex> {
       _selectedTypeFilter = newValue!;
       _selectedSubtypeFilter = 'all';
       _displayedItems.clear();
-      _currentPage = 0;
     });
     _resetDisplayedItems();
   }
@@ -745,7 +739,6 @@ class _CodexState extends State<Codex> {
     _safeSetState(() {
       _selectedSubtypeFilter = newValue!;
       _displayedItems.clear();
-      _currentPage = 0;
     });
     _resetDisplayedItems();
   }

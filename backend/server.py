@@ -208,6 +208,14 @@ class ProjectUpdate(BaseModel):
     universe_id: Optional[str] = None
     target_word_count: Optional[int] = None
 
+
+class CollaborationCreate(BaseModel):
+    permissions: Dict[str, bool]
+    expires_in_days: Optional[int] = 30
+
+class CollaborationAccept(BaseModel):
+    access_token: str
+
 # Universe model
 class UniverseCreate(BaseModel):
     name: str
@@ -289,10 +297,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        user_id: str = payload.get("user_id")  # Get user_id from payload
+        user_id: str = payload.get("user_id")
         if username is None or user_id is None:
             raise credentials_exception
-        token_data = TokenData(username=username, user_id=user_id)  # Include user_id in TokenData
+        token_data = TokenData(username=username, user_id=user_id)
     except JWTError:
         raise credentials_exception
     user = await get_user(username=token_data.username)
@@ -388,6 +396,7 @@ codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for code
 relationship_router = APIRouter(prefix="/relationships", tags=["Relationships"])
 event_router = APIRouter(prefix="/events", tags=["Events"])
 location_router = APIRouter(prefix="/locations", tags=["Locations"])
+collaboration_router = APIRouter(prefix="/collaborations", tags=["Collaborations"])
 
 # Project routes
 @project_router.put("/{project_id}/target-word-count")
@@ -672,8 +681,34 @@ async def generate_chapters(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+async def check_project_access(
+    project_id: str,
+    user_id: str,
+    required_permission: str
+) -> bool:
+    # Check if user is project owner
+    project = await db_instance.get_project(project_id, user_id)
+    if project:
+        return True
+        
+    # Check if user has collaboration access
+    collaborations = await db_instance.get_project_collaborations(project_id, user_id)
+    for collab in collaborations:
+        if (collab['status'] == 'active' and 
+            collab['collaborator_id'] == user_id and 
+            collab['permissions'].get(required_permission, False)):
+            return True
+            
+    return False
+
 @chapter_router.get("/{chapter_id}")
-async def get_chapter(chapter_id: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+async def get_chapter(
+    chapter_id: str,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    if not await check_project_access(project_id, current_user.id, 'read_chapters'):
+        raise HTTPException(status_code=403, detail="Not authorized to access this project")
     try:
         chapter = await db_instance.get_chapter(chapter_id, current_user.id, project_id)
         if not chapter:
@@ -2243,7 +2278,149 @@ async def get_location_connections(
 
 
 
-# Include routers
+#Collaboration endpoints
+@collaboration_router.get("")
+async def get_user_collaborations(current_user: User = Depends(get_current_active_user)):
+    try:
+        collaborations = await db_instance.get_user_collaborations(current_user.id)
+        return {"collaborations": collaborations}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@collaboration_router.get("/project/{project_id}/permissions")
+async def get_project_permissions(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Check if user is project owner
+        project = await db_instance.get_project(project_id, current_user.id)
+        is_owner = project is not None
+
+        if is_owner:
+            # Return all permissions for owner
+            return {
+                "is_owner": True,
+                "permissions": {
+                    "read_chapters": True,
+                    "write_chapters": True,
+                    "manage_codex": True,
+                    "manage_characters": True,
+                    "manage_timeline": True,
+                    "check_validity": True,
+                    "manage_knowledge_base": True,
+                    "generate_chapters": True,
+                    "refresh_data": True
+                }
+            }
+
+        # Get collaboration permissions
+        collaboration = await db_instance.get_project_collaboration(project_id, current_user.id)
+        if collaboration:
+            return {
+                "is_owner": False,
+                "permissions": collaboration.permissions
+            }
+
+        # No permissions
+        return {
+            "is_owner": False,
+            "permissions": {}
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting project permissions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error getting permissions")
+
+
+@collaboration_router.delete("/{collaboration_id}")
+async def leave_collaboration(
+    collaboration_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        success = await db_instance.leave_collaboration(
+            collaboration_id=collaboration_id,
+            user_id=current_user.id
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+        return {"message": "Successfully left collaboration"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@collaboration_router.post("/{project_id}/create-token")
+async def create_collaboration_token(
+    project_id: str,
+    collaboration: CollaborationCreate,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        # Verify user owns the project
+        project = await db_instance.get_project(project_id, current_user.id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        access_token = await db_instance.create_collaboration_token(
+            project_id=project_id,
+            owner_id=current_user.id,
+            permissions=collaboration.permissions,
+            expires_in_days=collaboration.expires_in_days
+        )
+        
+        return {"access_token": access_token}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@collaboration_router.post("/accept")
+async def accept_collaboration(
+    collaboration: CollaborationAccept,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        result = await db_instance.accept_collaboration(
+            access_token=collaboration.access_token,
+            collaborator_id=current_user.id
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@collaboration_router.delete("/{collaboration_id}")
+async def revoke_collaboration(
+    collaboration_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        success = await db_instance.revoke_collaboration(
+            collaboration_id=collaboration_id,
+            owner_id=current_user.id
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+        return {"message": "Collaboration revoked successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@collaboration_router.get("/project/{project_id}")
+async def get_project_collaborations(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        collaborations = await db_instance.get_project_collaborations(
+            project_id=project_id,
+            user_id=current_user.id
+        )
+        return {"collaborations": collaborations}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add the router to the app
+app.include_router(collaboration_router)
 app.include_router(auth_router)
 app.include_router(chapter_router)
 app.include_router(codex_item_router)
@@ -2256,7 +2433,6 @@ app.include_router(project_router)
 app.include_router(universe_router)
 app.include_router(codex_router)
 app.include_router(relationship_router)
-
 
 
 if __name__ == "__main__":

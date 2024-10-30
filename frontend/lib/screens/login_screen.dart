@@ -103,73 +103,41 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildHeader(context),
-                const SizedBox(height: 48),
-                Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: BorderSide(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .outline
-                          .withOpacity(0.2),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(32.0),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Welcome Back',
-                            style: Theme.of(context).textTheme.headlineSmall,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Sign in to continue to ScrollWise',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withOpacity(0.6),
-                                ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 32),
-                          _buildEmailField(),
-                          const SizedBox(height: 16),
-                          _buildPasswordField(),
-                          const SizedBox(height: 24),
-                          _buildLoginButton(),
-                          const SizedBox(height: 16),
-                          _buildRegisterButton(),
-                          if (_isLoading) ...[
-                            const SizedBox(height: 24),
-                            const LinearProgressIndicator(),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                _buildFooter(context),
-              ],
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+          tooltip: 'Back to Home',
+        ),
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Theme.of(context).colorScheme.primary.withOpacity(0.05),
+              Theme.of(context).colorScheme.surface,
+            ],
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader(context),
+                  const SizedBox(height: 48),
+                  _buildLoginCard(context),
+                  const SizedBox(height: 24),
+                  _buildFooter(context),
+                ],
+              ),
             ),
           ),
         ),
@@ -180,10 +148,22 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildHeader(BuildContext context) {
     return Column(
       children: [
-        Image.asset(
-          'assets/images/logo.png',
-          width: 64,
-          height: 64,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+            ),
+            child: Image.asset(
+              'assets/images/logo.png',
+              width: 64,
+              height: 64,
+            ),
+          ),
         ),
         const SizedBox(height: 16),
         Text(
@@ -197,6 +177,68 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _buildLoginCard(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(32.0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Theme.of(context).cardColor,
+              Theme.of(context).cardColor.withOpacity(0.8),
+            ],
+          ),
+        ),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Welcome Back',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sign in to continue to ScrollWise',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6),
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              _buildEmailField(),
+              const SizedBox(height: 16),
+              _buildPasswordField(),
+              const SizedBox(height: 24),
+              _buildLoginButton(),
+              const SizedBox(height: 16),
+              _buildRegisterButton(),
+              if (_isLoading) ...[
+                const SizedBox(height: 24),
+                const LinearProgressIndicator(),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmailField() {
     return TextFormField(
       controller: _emailController,
@@ -205,8 +247,26 @@ class _LoginScreenState extends State<LoginScreen> {
         hintText: 'Enter your email',
         prefixIcon: const Icon(Icons.email_outlined),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.outline,
+          ),
         ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.primary,
+            width: 2,
+          ),
+        ),
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
       keyboardType: TextInputType.emailAddress,
       textInputAction: TextInputAction.next,
@@ -249,12 +309,27 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildLoginButton() {
-    return FilledButton.icon(
-      onPressed: _isLoading ? null : _handleSubmit,
-      icon: const Icon(Icons.login),
-      label: const Text('Sign In'),
-      style: FilledButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      child: FilledButton.icon(
+        onPressed: _isLoading ? null : _handleSubmit,
+        icon: _isLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : const Icon(Icons.login),
+        label: Text(_isLoading ? 'Signing In...' : 'Sign In'),
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
       ),
     );
   }
@@ -265,7 +340,10 @@ class _LoginScreenState extends State<LoginScreen> {
       icon: const Icon(Icons.person_add_outlined),
       label: const Text('Create Account'),
       style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
       ),
     );
   }
@@ -274,25 +352,46 @@ class _LoginScreenState extends State<LoginScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        TextButton.icon(
+        _buildFooterButton(
+          icon: Icons.help_outline,
+          label: 'Need Help?',
           onPressed: () {
             // Add help functionality
           },
-          icon: const Icon(Icons.help_outline, size: 18),
-          label: const Text('Need Help?'),
         ),
         const SizedBox(width: 24),
-        TextButton.icon(
+        _buildFooterButton(
+          icon: Icons.privacy_tip_outlined,
+          label: 'Privacy Policy',
           onPressed: () {
             showDialog(
               context: context,
               builder: (BuildContext context) => const PrivacyPolicyDialog(),
             );
           },
-          icon: const Icon(Icons.privacy_tip_outlined, size: 18),
-          label: const Text('Privacy Policy'),
         ),
       ],
+    );
+  }
+
+  Widget _buildFooterButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 12,
+          ),
+        ),
+      ),
     );
   }
 }

@@ -32,7 +32,7 @@ class _EventListState extends State<EventList> {
   bool _isLoading = false;
   final ScrollController _scrollController = ScrollController();
   int _currentPage = 0;
-  List<Event> _displayedEvents = [];
+  final List<Event> _displayedEvents = [];
 
   @override
   void initState() {
@@ -73,7 +73,6 @@ class _EventListState extends State<EventList> {
       if (!_mounted) return;
 
       final startIndex = _currentPage * widget.itemsPerPage;
-      final endIndex = startIndex + widget.itemsPerPage;
       final newItems =
           widget.events.skip(startIndex).take(widget.itemsPerPage).toList();
 
@@ -326,7 +325,7 @@ class _EventListState extends State<EventList> {
 
             return Card(
               margin: const EdgeInsets.symmetric(vertical: 4),
-              color: Theme.of(context).colorScheme.surfaceVariant,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: ListTile(
                 leading: const Icon(Icons.compare_arrows),
                 title: Text(connectedEvent.title),

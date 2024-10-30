@@ -27,9 +27,16 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   void initState() {
     super.initState();
     final appState = Provider.of<AppState>(context, listen: false);
-
-    // Initialize with saved state
     final savedState = appState.characterJourneyState;
+
+    // Restore any previously updated characters
+    if (savedState['lastGeneratedItem'] != null) {
+      final updatedCharacters =
+          savedState['lastGeneratedItem']['updatedCharacters'] as List<dynamic>;
+      characters =
+          updatedCharacters.map((json) => Character.fromJson(json)).toList();
+    }
+
     _loadCharacters();
   }
 

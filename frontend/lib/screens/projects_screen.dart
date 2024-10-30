@@ -5,15 +5,12 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import 'dart:io';
 import 'dart:async';
 import 'universe_screen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'collaboration_screen.dart';
 
-final GlobalKey<TextFieldState> _tokenFieldKey = GlobalKey<TextFieldState>();
-
-final GlobalKey<TextFieldState> _tokenFieldKey = GlobalKey<TextFieldState>();
+final GlobalKey<FormState> _formKey = GlobalKey<FormState>(); // Form Key
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
@@ -43,6 +40,9 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   String? _selectedUniverseId;
   // Add TabController
   late TabController _tabController;
+
+  final TextEditingController _tokenController =
+      TextEditingController(); // Add this line
 
   @override
   void initState() {
@@ -1134,11 +1134,21 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Join Collaboration'),
-        content: const TextField(
-          key: Key('token_field'),
-          decoration: InputDecoration(
-            labelText: 'Collaboration Token',
-            hintText: 'Enter the token you received',
+        content: Form(
+          // Wrap with Form
+          key: _formKey, // Assign Form Key
+          child: TextFormField(
+            controller: _tokenController, // Use TextEditingController
+            decoration: const InputDecoration(
+              labelText: 'Collaboration Token',
+              hintText: 'Enter the token you received',
+            ),
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return 'Please enter a token';
+              }
+              return null;
+            },
           ),
         ),
         actions: [
@@ -1149,8 +1159,12 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ElevatedButton(
             child: const Text('Join'),
             onPressed: () {
-              String? token = _tokenFieldKey.currentState?.text;
-              Navigator.of(context).pop(token);
+              if (_formKey.currentState?.validate() ?? false) {
+                _formKey.currentState?.save();
+                Navigator.of(context).pop(_tokenController.text);
+              } else {
+                // Handle validation errors, perhaps show a Snackbar
+              }
             },
           ),
         ],
