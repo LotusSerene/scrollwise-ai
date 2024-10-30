@@ -16,37 +16,97 @@ class Validity extends StatefulWidget {
 
 class _ValidityState extends State<Validity> {
   List<dynamic> _validityChecks = [];
+  List<dynamic> _displayedChecks = [];
   bool _isLoading = true;
+  bool _isLoadingMore = false;
   String? _error;
-  dynamic _selectedCheck; // Add this line
+  dynamic _selectedCheck;
+  bool _mounted = true;
+  final ScrollController _scrollController = ScrollController();
+  final int _itemsPerPage = 10;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _fetchValidityChecks();
   }
 
+  @override
+  void dispose() {
+    _mounted = false;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreChecks();
+    }
+  }
+
+  void _loadMoreChecks() {
+    if (_isLoadingMore) return;
+
+    final startIndex = _displayedChecks.length;
+    if (startIndex >= _validityChecks.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final newItems =
+          _validityChecks.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedChecks.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
+  }
+
   Future<void> _fetchValidityChecks() async {
+    _safeSetState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/validity-checks?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
+
+      if (!_mounted) return;
+
       if (response.statusCode == 200) {
-        setState(() {
-          _validityChecks =
-              json.decode(utf8.decode(response.bodyBytes))['validityChecks'];
+        final checks =
+            json.decode(utf8.decode(response.bodyBytes))['validityChecks'];
+        _safeSetState(() {
+          _validityChecks = checks;
+          _displayedChecks = checks.take(_itemsPerPage).toList();
           _isLoading = false;
         });
       } else {
-        setState(() {
+        _safeSetState(() {
           _isLoading = false;
           _error = 'Failed to fetch validity checks';
         });
         Fluttertoast.showToast(msg: 'Error fetching validity checks');
       }
     } catch (error) {
-      setState(() {
+      if (!_mounted) return;
+      _safeSetState(() {
         _isLoading = false;
         _error = error.toString();
       });
@@ -135,7 +195,7 @@ class _ValidityState extends State<Validity> {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               Text(
-                '${_validityChecks.length} checks performed',
+                'Showing ${_displayedChecks.length} of ${_validityChecks.length} checks',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context)
                           .colorScheme
@@ -158,10 +218,15 @@ class _ValidityState extends State<Validity> {
 
   Widget _buildValidityList() {
     return ListView.builder(
-      itemCount: _validityChecks.length,
+      controller: _scrollController,
+      itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
       padding: const EdgeInsets.all(16),
       itemBuilder: (context, index) {
-        final check = _validityChecks[index];
+        if (index == _displayedChecks.length) {
+          return _buildLoadingIndicator();
+        }
+
+        final check = _displayedChecks[index];
         final isValid = check['isValid'] as bool;
 
         return Card(
@@ -431,6 +496,14 @@ class _ValidityState extends State<Validity> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
     );
   }
 }

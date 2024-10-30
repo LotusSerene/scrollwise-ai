@@ -4,10 +4,10 @@ class LocationConnection {
   final String id;
   final String location1Id;
   final String location2Id;
-  final String location1Name; // For displaying location names
-  final String location2Name; // For displaying location names
-  final String? travelRoute; // Optional travel route between locations
-  final String? culturalExchange; // Optional cultural exchange details
+  final String location1Name;
+  final String location2Name;
+  final String travelRoute;
+  final String culturalExchange;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -17,8 +17,8 @@ class LocationConnection {
     required this.location2Id,
     required this.location1Name,
     required this.location2Name,
-    this.travelRoute,
-    this.culturalExchange,
+    required this.travelRoute,
+    required this.culturalExchange,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -38,15 +38,15 @@ class LocationConnection {
         location2Id: json['location2_id']?.toString() ?? '',
         location1Name: json['location1_name']?.toString() ?? '',
         location2Name: json['location2_name']?.toString() ?? '',
-        travelRoute: json['travel_route']?.toString(),
-        culturalExchange: json['cultural_exchange']?.toString(),
+        travelRoute: processField(json['travel_route']),
+        culturalExchange: processField(json['cultural_exchange']),
         createdAt: DateTime.parse(
             json['created_at'] ?? DateTime.now().toIso8601String()),
         updatedAt: DateTime.parse(
             json['updated_at'] ?? DateTime.now().toIso8601String()),
       );
     } catch (e) {
-      print('Error parsing LocationConnection: $e'); // For debugging
+      print('Error parsing LocationConnection: $e');
       rethrow;
     }
   }
@@ -56,8 +56,6 @@ class LocationConnection {
       'id': id,
       'location1_id': location1Id,
       'location2_id': location2Id,
-      'location1_name': location1Name,
-      'location2_name': location2Name,
       'travel_route': travelRoute,
       'cultural_exchange': culturalExchange,
     };

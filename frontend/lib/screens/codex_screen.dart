@@ -187,6 +187,13 @@ class _CodexScreenState extends State<CodexScreen> {
               child: const Icon(Icons.person),
             ),
             const SizedBox(height: 10),
+            FloatingActionButton(
+              heroTag: 'addFaction',
+              onPressed: () => _showAddCodexItemDialog(context, 'faction'),
+              mini: true,
+              child: const Icon(Icons.groups),
+            ),
+            const SizedBox(height: 10),
           ],
           FloatingActionButton(
             heroTag: 'expandButton',

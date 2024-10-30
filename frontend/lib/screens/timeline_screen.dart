@@ -33,6 +33,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   List<EventConnection> eventConnections = [];
   List<LocationConnection> locationConnections = [];
   bool isSelectionMode = false;
+  List<String> selectedEvents = [];
+  List<String> selectedLocations = [];
 
   @override
   void initState() {
@@ -234,42 +236,46 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
-  Future<void> _deleteLocation(String locationId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Confirm Delete'),
-        content: const Text('Are you sure you want to delete this location?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _deleteLocation(String locationId,
+      {bool skipConfirmation = false}) async {
+    // Skip confirmation dialog if skipConfirmation is true (for batch deletions)
+    if (!skipConfirmation) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: const Text('Are you sure you want to delete this location?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
 
-    if (confirmed == true) {
-      try {
-        final headers = await getAuthHeaders();
-        final response = await http.delete(
-          Uri.parse(
-              '$apiUrl/locations/$locationId?project_id=${widget.projectId}'),
-          headers: headers,
-        );
+      if (confirmed != true) return;
+    }
 
-        if (response.statusCode == 200) {
-          await _loadLocations();
-          _showSuccess('Location deleted successfully');
-        }
-      } catch (e) {
-        _showError('Error deleting location: $e');
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse(
+            '$apiUrl/locations/$locationId?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        await _loadLocations();
+        _showSuccess('Location deleted successfully');
       }
+    } catch (e) {
+      _showError('Error deleting location: $e');
     }
   }
 
@@ -402,34 +408,65 @@ class _TimelineScreenState extends State<TimelineScreen>
         Uri.parse('$apiUrl/events/connections?project_id=${widget.projectId}'),
         headers: headers,
       );
-
       if (response.statusCode == 200) {
-        // First decode the response body
-        final Map<String, dynamic> responseData = json.decode(response.body);
-        // Check if there's a 'connections' key and it's a list
-        if (responseData.containsKey('event_connections') &&
-            responseData['event_connections'] is List) {
-          final List<dynamic> connectionsData =
-              responseData['event_connections'];
-          setState(() {
-            eventConnections = connectionsData
-                .map((json) => EventConnection.fromJson(json))
-                .toList();
-          });
-        } else {
-          setState(() => eventConnections = []);
-        }
-      } else {
-        setState(() => eventConnections = []);
+        final List<dynamic> data =
+            json.decode(response.body)['event_connections'];
+        setState(() {
+          eventConnections =
+              data.map((json) => EventConnection.fromJson(json)).toList();
+        });
       }
     } catch (e) {
-      setState(() => eventConnections = []);
-      print('Error loading event connections: $e'); // For debugging
+      _showError('Error loading event connections: $e');
+    }
+  }
+
+  Future<void> _createEventConnection(String event1Id, String event2Id,
+      String connectionType, String description) async {
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
+      final response = await http.post(
+        Uri.parse('$apiUrl/events/connections?project_id=${widget.projectId}'),
+        headers: headers,
+        body: json.encode({
+          'event1_id': event1Id,
+          'event2_id': event2Id,
+          'connection_type': connectionType,
+          'description': description,
+          'impact': '', // Add impact if needed
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        await _loadEventConnections();
+        _showSuccess('Connection created successfully');
+      }
+    } catch (e) {
+      _showError('Error creating connection: $e');
+    }
+  }
+
+  Future<void> _deleteEventConnection(String connectionId) async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse(
+            '$apiUrl/events/connections/$connectionId?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        await _loadEventConnections();
+        _showSuccess('Connection deleted successfully');
+      }
+    } catch (e) {
+      _showError('Error deleting connection: $e');
     }
   }
 
   Future<void> _loadLocationConnections() async {
-    setState(() => isLoading = true);
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
@@ -437,34 +474,115 @@ class _TimelineScreenState extends State<TimelineScreen>
             '$apiUrl/locations/connections?project_id=${widget.projectId}'),
         headers: headers,
       );
-
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data != null && data['location_connections'] != null) {
-          final List<dynamic> connectionsData = data['location_connections'];
-          setState(() {
-            locationConnections = connectionsData
-                .map((json) => LocationConnection.fromJson(json))
-                .toList();
-          });
-        } else {
-          setState(() {
-            locationConnections = []; // Set empty list if no connections
-          });
-        }
-      } else {
-        print('Error loading location connections: ${response.statusCode}');
+        final List<dynamic> data =
+            json.decode(response.body)['location_connections'];
         setState(() {
-          locationConnections = []; // Set empty list on error
+          locationConnections =
+              data.map((json) => LocationConnection.fromJson(json)).toList();
         });
       }
     } catch (e) {
-      print('Error loading location connections: $e');
-      setState(() {
-        locationConnections = []; // Set empty list on error
-      });
-    } finally {
-      setState(() => isLoading = false);
+      _showError('Error loading location connections: $e');
+    }
+  }
+
+  Future<void> _createLocationConnection(String location1Id, String location2Id,
+      {required String connectionType,
+      required String description,
+      String? travelRoute,
+      String? culturalExchange}) async {
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
+      final response = await http.post(
+        Uri.parse(
+            '$apiUrl/locations/connections?project_id=${widget.projectId}'),
+        headers: headers,
+        body: json.encode({
+          'location1_id': location1Id,
+          'location2_id': location2Id,
+          'connection_type': connectionType,
+          'description': description,
+          'travel_route': travelRoute,
+          'cultural_exchange': culturalExchange,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        await _loadLocationConnections();
+        _showSuccess('Connection created successfully');
+      }
+    } catch (e) {
+      _showError('Error creating connection: $e');
+    }
+  }
+
+  Future<void> _deleteLocationConnection(String connectionId) async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse(
+            '$apiUrl/locations/connections/$connectionId?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        await _loadLocationConnections();
+        _showSuccess('Connection deleted successfully');
+      }
+    } catch (e) {
+      _showError('Error deleting connection: $e');
+    }
+  }
+
+  Future<void> _updateEventConnection(EventConnection connection) async {
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
+      final response = await http.put(
+        Uri.parse(
+            '$apiUrl/events/connections/${connection.id}?project_id=${widget.projectId}'),
+        headers: headers,
+        body: json.encode({
+          'connection_type': connection.connectionType,
+          'description': connection.description,
+          'impact': '', // Add impact if needed
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        await _loadEventConnections();
+        _showSuccess('Connection updated successfully');
+      }
+    } catch (e) {
+      _showError('Error updating connection: $e');
+    }
+  }
+
+  Future<void> _updateLocationConnection(LocationConnection connection) async {
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
+      final response = await http.put(
+        Uri.parse(
+            '$apiUrl/locations/connections/${connection.id}?project_id=${widget.projectId}'),
+        headers: headers,
+        body: json.encode({
+          'travel_route': connection.travelRoute,
+          'cultural_exchange': connection.culturalExchange,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        await _loadLocationConnections();
+        _showSuccess('Connection updated successfully');
+      }
+    } catch (e) {
+      _showError('Error updating connection: $e');
     }
   }
 
@@ -645,8 +763,24 @@ class _TimelineScreenState extends State<TimelineScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildEventsView(),
-                _buildLocationsView(),
+                EventList(
+                  events: events,
+                  connections: eventConnections,
+                  onEdit: _editEvent,
+                  onDelete: _deleteEvent,
+                  onDeleteConnection: _deleteEventConnection,
+                  onUpdateConnection: _updateEventConnection,
+                ),
+                LocationList(
+                  locations: locations,
+                  connections: locationConnections,
+                  onEdit: _editLocation,
+                  onDelete: (id) =>
+                      _deleteLocation(id, skipConfirmation: false),
+                  onBatchDelete: _batchDeleteLocations,
+                  onDeleteConnection: _deleteLocationConnection,
+                  onUpdateConnection: _updateLocationConnection,
+                ),
                 _buildEventConnectionsView(),
                 _buildLocationConnectionsView(),
               ],
@@ -671,9 +805,11 @@ class _TimelineScreenState extends State<TimelineScreen>
           _buildSectionHeader('Timeline', Icons.timeline),
           EventList(
             events: events,
-            connections: const [],
+            connections: eventConnections,
             onEdit: _editEvent,
             onDelete: _deleteEvent,
+            onDeleteConnection: _deleteEventConnection,
+            onUpdateConnection: _updateEventConnection,
           ),
         ],
       ),
@@ -693,9 +829,12 @@ class _TimelineScreenState extends State<TimelineScreen>
           _buildSectionHeader('Locations', Icons.place),
           LocationList(
             locations: locations,
-            connections: const [],
+            connections: locationConnections,
             onEdit: _editLocation,
-            onDelete: _deleteLocation,
+            onDelete: (id) => _deleteLocation(id, skipConfirmation: false),
+            onBatchDelete: _batchDeleteLocations,
+            onDeleteConnection: _deleteLocationConnection,
+            onUpdateConnection: _updateLocationConnection,
           ),
         ],
       ),
@@ -1116,5 +1255,104 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
     );
+  }
+
+  // Add this method to handle batch deletion of events
+  Future<void> _deleteSelectedEvents() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Confirm Delete'),
+        content: Text(
+            'Are you sure you want to delete ${selectedEvents.length} events?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final headers = await getAuthHeaders();
+
+        // Create a list of deletion futures
+        final deletionFutures = selectedEvents.map((eventId) async {
+          final response = await http.delete(
+            Uri.parse('$apiUrl/events/$eventId?project_id=${widget.projectId}'),
+            headers: headers,
+          );
+          return response.statusCode == 200;
+        }).toList();
+
+        // Wait for all deletions to complete
+        final results = await Future.wait(deletionFutures);
+
+        // Check if all deletions were successful
+        if (results.every((success) => success)) {
+          setState(() {
+            events.removeWhere((event) => selectedEvents.contains(event.id));
+            selectedEvents.clear();
+          });
+          _showSuccess('Selected events deleted successfully');
+        } else {
+          _showError('Some events could not be deleted');
+        }
+      } catch (e) {
+        _showError('Error deleting events: $e');
+      }
+    }
+  }
+
+  // Add this method to handle batch deletions
+  Future<void> _deleteSelectedLocations(List<String> locationIds) async {
+    try {
+      for (final locationId in locationIds) {
+        await _deleteLocation(locationId, skipConfirmation: true);
+      }
+    } catch (e) {
+      _showError('Error deleting locations: $e');
+    }
+  }
+
+  // Update the delete selected button handler
+  void _handleDeleteSelected() {
+    if (selectedEvents.isNotEmpty) {
+      _deleteSelectedEvents();
+    } else if (selectedLocations.isNotEmpty) {
+      _deleteSelectedLocations(selectedLocations);
+    }
+  }
+
+  // Add this method for batch deletions
+  Future<void> _batchDeleteLocations(List<String> locationIds) async {
+    try {
+      final headers = await getAuthHeaders();
+
+      // Delete all locations without individual confirmations
+      for (final locationId in locationIds) {
+        final response = await http.delete(
+          Uri.parse(
+              '$apiUrl/locations/$locationId?project_id=${widget.projectId}'),
+          headers: headers,
+        );
+
+        if (response.statusCode != 200) {
+          throw Exception('Failed to delete location $locationId');
+        }
+      }
+
+      await _loadLocations();
+      _showSuccess('Selected locations deleted successfully');
+    } catch (e) {
+      _showError('Error deleting locations: $e');
+    }
   }
 }

@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'providers/preset_provider.dart';
 import 'providers/relationship_provider.dart';
 import 'screens/timeline_screen.dart';
+import 'screens/landing_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,6 +55,7 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const AuthWrapper(),
+        '/landing': (context) => const LandingScreen(),
         '/projects': (context) => const ProjectsScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => LoginScreen(onLogin: (token) {
@@ -94,10 +96,7 @@ class AuthWrapper extends StatelessWidget {
         } else if (snapshot.data == true) {
           return const ProjectsScreen();
         } else {
-          return LoginScreen(onLogin: (token) {
-            Provider.of<AppState>(context, listen: false).setLoggedIn(true);
-            Navigator.pushReplacementNamed(context, '/projects');
-          });
+          return const LandingScreen();
         }
       },
     );

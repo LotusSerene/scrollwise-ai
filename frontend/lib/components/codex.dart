@@ -22,11 +22,71 @@ class _CodexState extends State<Codex> {
   String _error = '';
   final Set<String> _selectedItems = {};
   bool _isSelectionMode = false;
+  final int _itemsPerPage = 10;
+  int _currentPage = 0;
+  List<dynamic> _displayedItems = [];
+  bool _isLoadingMore = false;
+  final ScrollController _scrollController = ScrollController();
+  bool _mounted = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _fetchCodexItems();
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreItems();
+    }
+  }
+
+  void _loadMoreItems() {
+    if (_isLoadingMore) return;
+
+    final filteredItems = _getFilteredItems();
+    final startIndex = _displayedItems.length;
+    if (startIndex >= filteredItems.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final endIndex = startIndex + _itemsPerPage;
+      final newItems =
+          filteredItems.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedItems.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
+  }
+
+  void _resetDisplayedItems() {
+    final filteredItems = _getFilteredItems();
+    _safeSetState(() {
+      _displayedItems = filteredItems.take(_itemsPerPage).toList();
+      _currentPage = 1;
+    });
   }
 
   Future<void> _fetchCodexItems() async {
@@ -176,7 +236,8 @@ class _CodexState extends State<Codex> {
                         'worldbuilding',
                         'character',
                         'item',
-                        'lore' // Added 'lore' to the list
+                        'lore', // Added 'lore' to the list
+                        'faction' // Added 'faction' to the list
                       ].map<DropdownMenuItem<String>>((String value) {
                         return DropdownMenuItem<String>(
                           value: value,
@@ -259,6 +320,19 @@ class _CodexState extends State<Codex> {
     _fetchCodexItems();
   }
 
+  void _toggleSelectAll(List<dynamic> items) {
+    setState(() {
+      if (_selectedItems.length == items.length) {
+        // If all items are selected, deselect all
+        _selectedItems.clear();
+        _isSelectionMode = false;
+      } else {
+        // Select all items
+        _selectedItems.addAll(items.map((item) => item['id'].toString()));
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -281,34 +355,62 @@ class _CodexState extends State<Codex> {
   }
 
   Widget _buildHeader() {
+    final filteredItems = _getFilteredItems();
+
     return Container(
       padding: const EdgeInsets.all(24),
       child: Row(
         children: [
-          Icon(
-            Icons.book,
-            size: 32,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Codex',
-                style: Theme.of(context).textTheme.headlineSmall,
+          if (_isSelectionMode) ...[
+            IconButton(
+              icon: Icon(
+                _selectedItems.length == filteredItems.length
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
               ),
-              Text(
-                'Organize your world\'s knowledge',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withOpacity(0.6),
-                    ),
-              ),
-            ],
-          ),
+              onPressed: () => _toggleSelectAll(filteredItems),
+            ),
+            Text('${_selectedItems.length} selected'),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: _selectedItems.isEmpty ? null : _deleteSelectedItems,
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                setState(() {
+                  _selectedItems.clear();
+                  _isSelectionMode = false;
+                });
+              },
+            ),
+          ] else ...[
+            Icon(
+              Icons.book,
+              size: 32,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Codex',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                Text(
+                  'Organize your world\'s knowledge',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
+                      ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -350,7 +452,7 @@ class _CodexState extends State<Codex> {
               filled: true,
               fillColor: Theme.of(context).colorScheme.surface,
             ),
-            onChanged: (value) => setState(() {}),
+            onChanged: _handleSearch,
           ),
           const SizedBox(height: 16),
           Row(
@@ -383,13 +485,9 @@ class _CodexState extends State<Codex> {
         _buildDropdownItem('worldbuilding', 'World Building', Icons.public),
         _buildDropdownItem('item', 'Items', Icons.inventory_2),
         _buildDropdownItem('character', 'Characters', Icons.person),
+        _buildDropdownItem('faction', 'Factions', Icons.groups),
       ],
-      onChanged: (String? newValue) {
-        setState(() {
-          _selectedTypeFilter = newValue!;
-          _selectedSubtypeFilter = 'all';
-        });
-      },
+      onChanged: _handleTypeFilter,
     );
   }
 
@@ -408,16 +506,27 @@ class _CodexState extends State<Codex> {
   }
 
   Widget _buildCodexList(List<dynamic> items) {
-    return items.isEmpty
-        ? _buildEmptyState()
-        : ListView.builder(
-            itemCount: items.length,
-            padding: const EdgeInsets.all(16),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return _buildCodexCard(item);
-            },
-          );
+    if (items.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    // Initialize displayed items if empty
+    if (_displayedItems.isEmpty) {
+      _displayedItems = items.take(_itemsPerPage).toList();
+      _currentPage = 1;
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      itemCount: _displayedItems.length + (_isLoadingMore ? 1 : 0),
+      padding: const EdgeInsets.all(16),
+      itemBuilder: (context, index) {
+        if (index == _displayedItems.length) {
+          return _buildLoadingIndicator();
+        }
+        return _buildCodexCard(_displayedItems[index]);
+      },
+    );
   }
 
   Widget _buildCodexCard(dynamic item) {
@@ -536,6 +645,8 @@ class _CodexState extends State<Codex> {
         return Icons.inventory_2;
       case 'character':
         return Icons.person;
+      case 'faction':
+        return Icons.groups;
       default:
         return Icons.article;
     }
@@ -607,11 +718,43 @@ class _CodexState extends State<Codex> {
         _buildDropdownItem('culture', 'Culture', Icons.people),
         _buildDropdownItem('geography', 'Geography', Icons.landscape),
       ],
-      onChanged: (String? newValue) {
-        setState(() {
-          _selectedSubtypeFilter = newValue!;
-        });
-      },
+      onChanged: _handleSubtypeFilter,
+    );
+  }
+
+  void _handleSearch(String value) {
+    _safeSetState(() {
+      _searchController.text = value;
+      _displayedItems.clear();
+      _currentPage = 0;
+    });
+    _resetDisplayedItems();
+  }
+
+  void _handleTypeFilter(String? newValue) {
+    _safeSetState(() {
+      _selectedTypeFilter = newValue!;
+      _selectedSubtypeFilter = 'all';
+      _displayedItems.clear();
+      _currentPage = 0;
+    });
+    _resetDisplayedItems();
+  }
+
+  void _handleSubtypeFilter(String? newValue) {
+    _safeSetState(() {
+      _selectedSubtypeFilter = newValue!;
+      _displayedItems.clear();
+      _currentPage = 0;
+    });
+    _resetDisplayedItems();
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
     );
   }
 }

@@ -20,12 +20,19 @@ class _CodexGenerationState extends State<CodexGeneration> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _descriptionController = TextEditingController();
 
-  final List<String> _types = ['worldbuilding', 'character', 'item', 'lore'];
+  final List<String> _types = [
+    'worldbuilding',
+    'character',
+    'item',
+    'lore',
+    'faction'
+  ];
   final Map<String, List<String>> _subtypes = {
     'worldbuilding': ['history', 'culture', 'geography'],
     'character': [],
     'item': [],
     'lore': [],
+    'faction': [],
   };
 
   @override
@@ -211,7 +218,7 @@ class _CodexGenerationState extends State<CodexGeneration> {
           items: _types.map((type) {
             return DropdownMenuItem<String>(
               value: type,
-              key: ValueKey(type), // Add a unique key for each item
+              key: ValueKey(type),
               child: Text(type.capitalize()),
             );
           }).toList(),

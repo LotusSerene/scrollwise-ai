@@ -5,9 +5,8 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
-import 'package:share_plus/share_plus.dart';
+import 'dart:html' as html;
+import 'package:http_parser/http_parser.dart';
 
 class KnowledgeBase extends StatefulWidget {
   final String projectId;
@@ -20,38 +19,102 @@ class KnowledgeBase extends StatefulWidget {
 
 class _KnowledgeBaseState extends State<KnowledgeBase> {
   List<dynamic> _knowledgeBaseContent = [];
+  List<dynamic> _displayedContent = [];
   final TextEditingController _textController = TextEditingController();
-  var _selectedFile;
   bool _isLoading = true;
+  bool _isLoadingMore = false;
   String? _error;
+  bool _mounted = true;
+  final ScrollController _scrollController = ScrollController();
+  final int _itemsPerPage = 10;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _fetchKnowledgeBaseContent();
   }
 
+  @override
+  void dispose() {
+    _mounted = false;
+    _scrollController.dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreContent();
+    }
+  }
+
+  void _loadMoreContent() {
+    if (_isLoadingMore) return;
+
+    final startIndex = _displayedContent.length;
+    if (startIndex >= _knowledgeBaseContent.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final newItems =
+          _knowledgeBaseContent.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedContent.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
+  }
+
   Future<void> _fetchKnowledgeBaseContent() async {
+    _safeSetState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
+
+      if (!_mounted) return;
+
       if (response.statusCode == 200) {
-        setState(() {
-          _knowledgeBaseContent =
-              json.decode(utf8.decode(response.bodyBytes))['content'];
+        final content = json.decode(utf8.decode(response.bodyBytes))['content'];
+        _safeSetState(() {
+          _knowledgeBaseContent = content;
+          _displayedContent = content.take(_itemsPerPage).toList();
+          _isLoading = false;
         });
       } else {
+        _safeSetState(() {
+          _error = 'Error fetching knowledge base content';
+          _isLoading = false;
+        });
         Fluttertoast.showToast(msg: 'Error fetching knowledge base content');
       }
     } catch (error) {
-      print('Error fetching knowledge base content: $error');
-      Fluttertoast.showToast(msg: 'Error fetching knowledge base content');
-    } finally {
-      setState(() {
+      if (!_mounted) return;
+      _safeSetState(() {
+        _error = error.toString();
         _isLoading = false;
       });
+      print('Error fetching knowledge base content: $error');
+      Fluttertoast.showToast(msg: 'Error fetching knowledge base content');
     }
   }
 
@@ -93,41 +156,117 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   }
 
   Future<void> _handleFileUpload(BuildContext context) async {
-    if (_selectedFile == null) return;
-
     try {
-      final headers = <String, String>{
-        ...await getAuthHeaders(),
-        'Content-Type': 'multipart/form-data',
-      };
-      final request = http.MultipartRequest('POST',
-          Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'));
-      request.headers.addAll(headers);
-      final file =
-          await http.MultipartFile.fromPath('file', _selectedFile.path);
-      request.files.add(file);
-      request.fields['metadata'] = json.encode({
-        'type': 'file',
-        'filename': _selectedFile.path,
-        'project_id': widget.projectId
-      });
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'md', 'pdf', 'doc', 'docx'],
+        allowMultiple: false,
+        withData: true,
+      );
 
-      if (response.statusCode == 201 && !jsonResponse.containsKey('error')) {
-        setState(() {
-          _selectedFile = null;
-        });
-        _fetchKnowledgeBaseContent();
-        Fluttertoast.showToast(msg: 'File uploaded successfully');
-      } else {
-        final errorMessage = jsonResponse['error'] ?? 'Error uploading file';
-        Fluttertoast.showToast(msg: errorMessage);
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        if (file.bytes == null) {
+          Fluttertoast.showToast(msg: 'Error: Could not read file');
+          return;
+        }
+
+        if (file.extension?.toLowerCase() == 'txt' ||
+            file.extension?.toLowerCase() == 'md') {
+          await _uploadTextFile(file);
+        } else {
+          await _uploadDocumentFile(file);
+        }
       }
     } catch (error) {
       print('Error uploading file: $error');
       Fluttertoast.showToast(msg: 'Error uploading file');
+    }
+  }
+
+  Future<void> _uploadTextFile(PlatformFile file) async {
+    try {
+      final content = utf8.decode(file.bytes!);
+      await _sendToKnowledgeBase(content, file.name, 'text');
+    } catch (e) {
+      Fluttertoast.showToast(msg: 'Error: File must be a valid text file');
+    }
+  }
+
+  Future<void> _uploadDocumentFile(PlatformFile file) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$apiUrl/documents/extract?project_id=${widget.projectId}'),
+      );
+
+      request.headers.addAll(await getAuthHeaders());
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          file.bytes!,
+          filename: file.name,
+          contentType: MediaType.parse(_getContentType(file.extension ?? '')),
+        ),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final extractedText =
+            json.decode(utf8.decode(response.bodyBytes))['text'];
+        await _sendToKnowledgeBase(extractedText, file.name, 'document');
+      } else {
+        Fluttertoast.showToast(msg: 'Error processing document');
+      }
+    } catch (e) {
+      print('Error processing document: $e');
+      Fluttertoast.showToast(msg: 'Error processing document');
+    }
+  }
+
+  Future<void> _sendToKnowledgeBase(
+      String content, String filename, String type) async {
+    final formData = http.MultipartRequest(
+      'POST',
+      Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'),
+    );
+
+    formData.headers.addAll(await getAuthHeaders());
+    formData.fields['documents'] = content;
+    formData.fields['project_id'] = widget.projectId;
+    formData.fields['metadata_str'] = json.encode({
+      'type': type,
+      'filename': filename,
+      'project_id': widget.projectId,
+    });
+
+    final streamedResponse = await formData.send();
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      Fluttertoast.showToast(msg: 'File uploaded successfully');
+    } else {
+      Fluttertoast.showToast(msg: 'Error adding to knowledge base');
+    }
+  }
+
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+      case 'docx':
+        return 'application/msword';
+      case 'txt':
+        return 'text/plain';
+      case 'md':
+        return 'text/markdown';
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -159,10 +298,9 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
   Future<void> _exportKnowledgeBase() async {
     try {
-      // Create markdown content
       final StringBuffer markdown = StringBuffer();
       markdown.writeln('# Knowledge Base Export\n');
-      
+
       for (var item in _knowledgeBaseContent) {
         markdown.writeln('## ${item['title'] ?? item['name'] ?? 'Untitled'}\n');
         markdown.writeln('Type: ${item['type']}\n');
@@ -170,16 +308,16 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         markdown.writeln('---\n');
       }
 
-      // Get temporary directory
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/knowledge_base_export.md');
-      await file.writeAsString(markdown.toString());
+      final content = markdown.toString();
 
-      // Share the file
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: 'Knowledge Base Export',
-      );
+      final blob = html.Blob([content], 'text/markdown');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.AnchorElement(href: url)
+        ..setAttribute('download', 'knowledge_base_export.md')
+        ..click();
+      html.Url.revokeObjectUrl(url);
+
+      Fluttertoast.showToast(msg: 'Export started');
     } catch (error) {
       print('Error exporting knowledge base: $error');
       Fluttertoast.showToast(msg: 'Error exporting knowledge base');
@@ -227,7 +365,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 Text(
-                  '${_knowledgeBaseContent.length} items stored',
+                  'Showing ${_displayedContent.length} of ${_knowledgeBaseContent.length} items',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context)
                             .colorScheme
@@ -299,15 +437,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final result = await FilePicker.platform.pickFiles();
-                      if (result != null) {
-                        setState(() {
-                          _selectedFile = result.files.single;
-                        });
-                        _handleFileUpload(context);
-                      }
-                    },
+                    onPressed: () => _handleFileUpload(context),
                     icon: const Icon(Icons.upload_file),
                     label: const Text('Upload Document'),
                     style: ElevatedButton.styleFrom(
@@ -337,12 +467,15 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: ListView.separated(
+          controller: _scrollController,
           padding: const EdgeInsets.all(16),
-          itemCount: _knowledgeBaseContent.length,
+          itemCount: _displayedContent.length + (_isLoadingMore ? 1 : 0),
           separatorBuilder: (context, index) => const Divider(height: 1),
           itemBuilder: (context, index) {
-            final item = _knowledgeBaseContent[index];
-            return _buildContentItem(item);
+            if (index == _displayedContent.length) {
+              return _buildLoadingIndicator();
+            }
+            return _buildContentItem(_displayedContent[index]);
           },
         ),
       ),
@@ -527,6 +660,14 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
     );
   }
 }

@@ -123,7 +123,6 @@ class EventAnalysis(BaseModel):
     events: List[EventDescription] = Field(..., description="List of events found in the chapter")
 
 
-
 class LocationConnection(BaseModel):
     id: str
     location1_id: str
@@ -137,8 +136,25 @@ class LocationConnection(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    def get_connection_key(self) -> Tuple[str, str]:
+        """Get a unique key for this connection based on location IDs"""
+        return tuple(sorted([self.location1_id, self.location2_id]))
+
 class LocationConnectionAnalysis(BaseModel):
-    connections: List[LocationConnection] = Field(..., description="List of location connections")
+    connections: List[LocationConnection]
+
+    def deduplicate_connections(self) -> 'LocationConnectionAnalysis':
+        """Remove duplicate connections while preserving the first occurrence"""
+        seen_connections = set()
+        unique_connections = []
+        
+        for conn in self.connections:
+            conn_key = conn.get_connection_key()
+            if conn_key not in seen_connections:
+                seen_connections.add(conn_key)
+                unique_connections.append(conn)
+        
+        return LocationConnectionAnalysis(connections=unique_connections)
 
 
 class LocationAnalysis(BaseModel):
@@ -177,11 +193,32 @@ class EventConnection(BaseModel):
     connection_type: str
     description: str
     impact: str
-    characters_involved: Optional[str] = ""  # Make it optional with empty string default
+    characters_involved: Optional[str] = Field(default="")
     location_relation: str
+
+    def get_connection_key(self) -> Tuple[str, str]:
+        """Get a unique key for this connection based on event IDs"""
+        return tuple(sorted([self.event1_id, self.event2_id]))
 
 class EventConnectionAnalysis(BaseModel):
     connections: List[EventConnection]
+
+    def deduplicate_connections(self) -> 'EventConnectionAnalysis':
+        """Remove duplicate connections while preserving the first occurrence"""
+        seen_connections = set()
+        unique_connections = []
+        
+        for conn in self.connections:
+            # Skip connections with null IDs
+            if not conn.event1_id or not conn.event2_id:
+                continue
+                
+            conn_key = conn.get_connection_key()
+            if conn_key not in seen_connections:
+                seen_connections.add(conn_key)
+                unique_connections.append(conn)
+        
+        return EventConnectionAnalysis(connections=unique_connections)
 
 class KnowledgeBaseQuery(BaseModel):
     """Query the knowledge base for relevant information"""
@@ -432,6 +469,22 @@ class AgentManager:
            IMPORTANT: This is a STRICT requirement. The entire text MUST follow this guide exactly.
         4. Additional Requirements: {additional_instructions}
            IMPORTANT: This is a STRICT requirement. The text MUST incorporate these instructions exactly.
+        
+        FORMATTING REQUIREMENTS (MANDATORY):
+        - Divide the chapter into clear, logical paragraphs
+        - Use proper spacing between paragraphs (double line breaks)
+        - Start new paragraphs for:
+            * New scenes or time shifts
+            * Changes in speaker during dialogue
+            * Changes in location
+            * Shifts in perspective
+            * New ideas or topics
+        - Format dialogue properly:
+            * Each speaker gets a new paragraph
+            * Use proper quotation marks
+            * Include dialogue tags and actions
+        - Vary paragraph length for rhythm and pacing
+        - Use scene breaks (three asterisks: ***) for major scene changes
         
         CRITICAL RULES:
         - NEVER use the word "Codex" in the story - this is a technical term
@@ -1427,10 +1480,21 @@ class AgentManager:
             if not unprocessed_chapters:
                 return []
 
+            existing_locations = await db_instance.get_locations(self.user_id, self.project_id)
+            # Create set of existing location names for faster lookup
+            existing_names = {loc['name'].lower() for loc in existing_locations}
+
             # Create the prompt
             prompt = ChatPromptTemplate.from_template("""
-                Analyze the following chapter and identify all locations mentioned.
-                For each location provide:
+                Analyze the following chapter and identify all NEW locations mentioned that are not in the existing locations list.
+
+                EXISTING Locations (DO NOT recreate these):
+                {existing_locations}
+
+                Chapter:
+                {chapter_content}
+
+                For each NEW location (not in existing list) provide:
                 1. A unique identifier (location_id)
                 2. The name of the location (location_name)
                 3. An analysis of its significance to the story
@@ -1438,8 +1502,8 @@ class AgentManager:
                 5. Notable events that occurred there
                 6. Characters associated with this location
 
-                Chapter:
-                {chapter_content}
+                Only return locations that are NOT in the existing locations list.
+                If all locations mentioned already exist, return an empty locations list.
 
                 {format_instructions}
             """)
@@ -1453,11 +1517,27 @@ class AgentManager:
             for chapter in unprocessed_chapters:
                 result = await chain.ainvoke({
                     "chapter_content": chapter['content'],
+                    "existing_locations": json.dumps(existing_locations, indent=2),
                     "format_instructions": parser.get_format_instructions()
                 })
 
                 # Process each location
                 for location in result.locations:
+                    # Skip if location already exists
+                    if location.location_name.lower() in existing_names:
+                        existing_location = next(
+                            loc for loc in existing_locations 
+                            if loc['name'].lower() == location.location_name.lower()
+                        )
+                        locations.append({
+                            **existing_location,
+                            'connected_locations': location.connected_locations,
+                            'notable_events': location.notable_events,
+                            'character_associations': location.character_associations
+                        })
+                        continue
+
+                    # Create new location if it doesn't exist
                     location_id = await db_instance.create_location(
                         name=location.location_name,
                         description=location.significance_analysis,
@@ -1500,6 +1580,9 @@ class AgentManager:
             if not chapters_data:
                 raise ValueError("No unprocessed chapters found for events analysis")
 
+            existing_events = await db_instance.get_events(self.project_id, self.user_id)
+            existing_titles = {event['title'].lower() for event in existing_events}
+
             all_events = []
             for chapter in chapters_data:
                 chapter_id = chapter['id']
@@ -1520,6 +1603,9 @@ class AgentManager:
                     3. The impact on the story or characters
                     4. List of involved characters
                     5. Location where it takes place (if mentioned)
+                                                              
+                    Existing Events (DO NOT recreate these):
+                    {existing_events}
 
                     Chapter Content:
                     {chapter_content}
@@ -1533,11 +1619,21 @@ class AgentManager:
 
                     result = await chain.ainvoke({
                         "chapter_content": chunk,
+                        "existing_events": json.dumps(existing_events, indent=2),
                         "format_instructions": parser.get_format_instructions()
                     })
 
                     # Process events from this chunk
                     for event in result.events:
+                        # Skip if event already exists
+                        if event.title.lower() in existing_titles:
+                            existing_event = next(
+                                e for e in existing_events 
+                                if e['title'].lower() == event.title.lower()
+                            )
+                            chapter_events.append({"id": existing_event['id'], **event.dict()})
+                            continue
+
                         # Get character ID for the first involved character (if any)
                         character_id = None
                         if event.involved_characters:
@@ -1559,17 +1655,6 @@ class AgentManager:
                             )
                             if location:
                                 location_id = location['id']
-
-                        # Check if the event already exists
-                        existing_event = await db_instance.get_event_by_title(
-                            event.title, 
-                            self.user_id, 
-                            self.project_id
-                        )
-                        if existing_event:
-                            #self.logger.info(f"Event {event.title} already exists, skipping save.")
-                            chapter_events.append({"id": existing_event['id'], **event.dict()})
-                            continue
 
                         event_id = await db_instance.create_event(
                             title=event.title,
@@ -1599,32 +1684,50 @@ class AgentManager:
             events = await db_instance.get_events(self.project_id, self.user_id, limit=100)
             characters = await db_instance.get_characters(self.user_id, self.project_id)
             locations = await db_instance.get_locations(self.user_id, self.project_id)
+            existing_connections = await db_instance.get_event_connections(self.project_id, self.user_id)
+
+            # Early return if all possible connections exist
+            if len(existing_connections) >= (len(events) * (len(events) - 1)) / 2:
+                self.logger.info("All possible event connections already exist")
+                return existing_connections
 
             saved_connections = []
-            batch_size = 10  # Process 10 event pairs at a time
+            batch_size = 10
+
+            # Convert existing connections to a set of keys for faster lookup
+            existing_keys = {
+                tuple(sorted([conn['event1_id'], conn['event2_id']])) 
+                for conn in existing_connections
+            }
 
             for i in range(0, len(events), batch_size):
                 batch_events = events[i:i+batch_size]
                 
                 prompt = ChatPromptTemplate.from_template("""
-                Analyze the connections between the following events:
-                
+                Analyze ONLY NEW connections between events that are not in the existing connections list.
+
                 Characters:
                 {characters}
-                                                          
+                                                   
                 Locations:
                 {locations}
 
-                Events:
+                Events to Analyze:
                 {events}
 
-                For each pair of connected events, provide:
-                1. Event_1_ID and Event_2_ID
+                EXISTING Connections (DO NOT recreate these):
+                {existing_connections}
+
+                For each NEW connection between events, provide:
+                1. Event_1_ID and Event_2_ID (must not match any existing connection pairs)
                 2. Connection_Type (cause_effect, parallel, contrast, etc.)
                 3. Description of how they are connected
                 4. Impact this connection has on the story
                 5. Characters_Involved (as a comma-separated string)
                 6. Location_Relation describing where these events occur
+
+                Only return connections that are NOT in the existing connections list.
+                If all possible connections already exist, return an empty connections list.
 
                 {format_instructions}
                 """)
@@ -1637,36 +1740,56 @@ class AgentManager:
                     "events": json.dumps(batch_events, indent=2),
                     "characters": json.dumps(characters, indent=2),
                     "locations": json.dumps(locations, indent=2),
+                    "existing_connections": json.dumps(existing_connections, indent=2),
                     "format_instructions": parser.get_format_instructions()
                 })
 
                 if result.connections:
-                    for connection in result.connections:
-                        # Create a new EventConnection with the connection ID
-                        connection_id = await db_instance.create_event_connection(
-                            event1_id=connection.event1_id,
-                            event2_id=connection.event2_id,
-                            connection_type=connection.connection_type,
-                            description=connection.description,
-                            impact=connection.impact,
-                            project_id=self.project_id,
-                            user_id=self.user_id
-                        )
-                        
-                        # Create a new EventConnection object with the ID
-                        saved_connection = EventConnection(
-                            id=connection_id,
-                            event1_id=connection.event1_id,
-                            event2_id=connection.event2_id,
-                            connection_type=connection.connection_type,
-                            description=connection.description,
-                            impact=connection.impact,
-                            characters_involved=connection.characters_involved,
-                            location_relation=connection.location_relation
-                        )
-                        saved_connections.append(saved_connection)
+                    # Deduplicate connections
+                    deduped_result = result.deduplicate_connections()
+                    
+                    for connection in deduped_result.connections:
+                        # Skip connections with null IDs
+                        if not connection.event1_id or not connection.event2_id:
+                            continue
+                            
+                        # Check if connection already exists
+                        conn_key = connection.get_connection_key()
+                        exists = False
+                        for existing in saved_connections:
+                            if conn_key == existing.get_connection_key():
+                                exists = True
+                                break
+                                
+                        if not exists:
+                            # Create a new EventConnection with the connection ID
+                            connection_id = await db_instance.create_event_connection(
+                                event1_id=connection.event1_id,
+                                event2_id=connection.event2_id,
+                                connection_type=connection.connection_type,
+                                description=connection.description,
+                                impact=connection.impact,
+                                project_id=self.project_id,
+                                user_id=self.user_id
+                            )
+                            
+                            # Create a new EventConnection object with the ID
+                            saved_connection = EventConnection(
+                                id=connection_id,
+                                event1_id=connection.event1_id,
+                                event2_id=connection.event2_id,
+                                connection_type=connection.connection_type,
+                                description=connection.description,
+                                impact=connection.impact,
+                                characters_involved=connection.characters_involved,
+                                location_relation=connection.location_relation
+                            )
+                            saved_connections.append(saved_connection)
 
             return saved_connections
+        except ValidationError as e:
+            self.logger.error(f"Error analyzing event connections: {str(e)}")
+            return []
         except Exception as e:
             self.logger.error(f"Error analyzing event connections: {str(e)}")
             raise
@@ -1674,91 +1797,88 @@ class AgentManager:
     async def analyze_location_connections(self) -> List[LocationConnection]:
         try:
             locations = await db_instance.get_locations(self.user_id, self.project_id)
-            context = await db_instance.get_all_chapters(self.project_id, self.user_id)
+            existing_connections = await db_instance.get_location_connections(self.project_id, self.user_id)
 
-            # Summarize context if it's too large
-            if self.estimate_token_count(json.dumps(context)) > self.MAX_INPUT_TOKENS // 4:
-                context = self.summarize_context(json.dumps(context))
+            # Early return if all possible connections exist
+            if len(existing_connections) >= (len(locations) * (len(locations) - 1)) / 2:
+                self.logger.info("All possible location connections already exist")
+                return existing_connections
+
+            # Convert existing connections to a set of keys for faster lookup
+            existing_keys = {
+                tuple(sorted([conn['location1_id'], conn['location2_id']])) 
+                for conn in existing_connections
+            }
 
             saved_connections = []
-            batch_size = 10  # Process 10 location pairs at a time
+            batch_size = 10
 
             for i in range(0, len(locations), batch_size):
                 batch_locations = locations[i:i+batch_size]
                 
                 prompt = ChatPromptTemplate.from_template("""
-                Analyze the connections between these locations:
+                    Analyze ONLY NEW connections between locations that are not in the existing connections list.
 
-                Locations:
-                {locations}
+                    Locations to Analyze:
+                    {locations}
 
-                Story Context:
-                {context}
+                    EXISTING Connections (DO NOT recreate these):
+                    {existing_connections}
 
-                For each pair of connected locations, provide:
-                1. The type of connection (geographical, historical, cultural, political, etc.)
-                2. A detailed description of how they are connected
-                3. Any travel routes or paths between them
-                4. Cultural influences and exchanges between them
+                    For each NEW connection between locations, provide:
+                    1. The IDs and names of the two connected locations (must not match any existing connection pairs)
+                    2. The type of connection (physical, cultural, historical)
+                    3. A description of how they are connected
+                    4. Any notable travel routes between them
+                    5. Any cultural exchanges or relationships
 
-                {format_instructions}
+                    Only return connections that are NOT in the existing connections list.
+                    If all possible connections already exist, return an empty connections list.
+
+                    {format_instructions}
                 """)
 
                 parser = PydanticOutputParser(pydantic_object=LocationConnectionAnalysis)
-                llmLocationConnection = await self._get_llm(self.model_settings['extractionLLM'])
-                chain = prompt | llmLocationConnection | parser
+                chain = prompt | self.llm | parser
 
                 result = await chain.ainvoke({
                     "locations": json.dumps(batch_locations, indent=2),
-                    "context": context,
+                    "existing_connections": json.dumps(existing_connections, indent=2),
                     "format_instructions": parser.get_format_instructions()
                 })
 
-                if hasattr(result, 'connections') and result.connections:
-                    for connection in result.connections:
-                        # Get location names for the connection
-                        location1 = next((loc for loc in locations if loc['id'] == connection.location1_id), None)
-                        location2 = next((loc for loc in locations if loc['id'] == connection.location2_id), None)
-                        
-                        if location1 and location2:
-                            # Create a dictionary of connection data
-                            connection_data = {
-                                'id': str(uuid.uuid4()),  # Generate a new UUID for the connection
-                                'location1_id': connection.location1_id,
-                                'location2_id': connection.location2_id,
-                                'location1_name': location1['name'],
-                                'location2_name': location2['name'],
-                                'connection_type': connection.connection_type,
-                                'description': connection.description,
-                                'travel_route': connection.travel_route,
-                                'cultural_exchange': connection.cultural_exchange,
-                                'created_at': datetime.now(),
-                                'updated_at': datetime.now()
-                            }
-                            
-                            # Save to database
-                            connection_id = await db_instance.create_location_connection(
-                                location1_id=connection.location1_id,
-                                location2_id=connection.location2_id,
-                                location1_name=location1['name'],
-                                location2_name=location2['name'],
-                                connection_type=connection.connection_type,
-                                description=connection.description,
-                                travel_route=connection.travel_route,
-                                cultural_exchange=connection.cultural_exchange,
-                                project_id=self.project_id,
-                                user_id=self.user_id
-                            )
-                            
-                            # Add the ID to the connection data
-                            connection_data['id'] = connection_id
-                            
-                            # Create LocationConnection object with the complete data
-                            saved_connection = LocationConnection(**connection_data)
-                            saved_connections.append(saved_connection)
+                if result.connections:
+                    # Deduplicate connections
+                    deduped_result = result.deduplicate_connections()
+                    
+                    for connection in deduped_result.connections:
+                        # Skip if connection already exists
+                        conn_key = tuple(sorted([connection.location1_id, connection.location2_id]))
+                        if conn_key in existing_keys:
+                            continue
+
+                        # Create new connection
+                        connection_id = await db_instance.create_location_connection(
+                            location1_id=connection.location1_id,
+                            location2_id=connection.location2_id,
+                            location1_name=connection.location1_name,
+                            location2_name=connection.location2_name,
+                            connection_type=connection.connection_type,
+                            description=connection.description,
+                            travel_route=connection.travel_route,
+                            cultural_exchange=connection.cultural_exchange,
+                            project_id=self.project_id,
+                            user_id=self.user_id
+                        )
+
+                        saved_connection = LocationConnection(
+                            id=connection_id,
+                            **connection.dict()
+                        )
+                        saved_connections.append(saved_connection)
 
             return saved_connections
 
         except Exception as e:
             self.logger.error(f"Error analyzing location connections: {str(e)}")
-            raise
+            return []

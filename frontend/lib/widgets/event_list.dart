@@ -7,6 +7,9 @@ class EventList extends StatefulWidget {
   final List<EventConnection> connections;
   final Function(Event) onEdit;
   final Function(String) onDelete;
+  final Function(String) onDeleteConnection;
+  final Function(EventConnection) onUpdateConnection;
+  final int itemsPerPage = 10;
 
   const EventList({
     Key? key,
@@ -14,6 +17,8 @@ class EventList extends StatefulWidget {
     required this.connections,
     required this.onEdit,
     required this.onDelete,
+    required this.onDeleteConnection,
+    required this.onUpdateConnection,
   }) : super(key: key);
 
   @override
@@ -23,31 +28,117 @@ class EventList extends StatefulWidget {
 class _EventListState extends State<EventList> {
   Set<String> selectedEvents = {};
   bool isSelectionMode = false;
+  bool _mounted = true;
+  bool _isLoading = false;
+  final ScrollController _scrollController = ScrollController();
+  int _currentPage = 0;
+  List<Event> _displayedEvents = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _loadMoreItems();
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreItems();
+    }
+  }
+
+  void _loadMoreItems() {
+    if (_isLoading) return;
+
+    _safeSetState(() {
+      _isLoading = true;
+    });
+
+    // Simulate loading delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final startIndex = _currentPage * widget.itemsPerPage;
+      final endIndex = startIndex + widget.itemsPerPage;
+      final newItems =
+          widget.events.skip(startIndex).take(widget.itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedEvents.addAll(newItems);
+        _currentPage++;
+        _isLoading = false;
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     if (widget.events.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text('No events created yet'),
-        ),
-      );
+      return _buildEmptyState();
     }
 
     return Column(
       children: [
         if (isSelectionMode) _buildSelectionControls(),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: widget.events.length,
-          itemBuilder: (context, index) {
-            final event = widget.events[index];
-            return _buildEventCard(event);
-          },
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            itemCount: _displayedEvents.length + (_isLoading ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == _displayedEvents.length) {
+                return _buildLoadingIndicator();
+              }
+              return _buildEventCard(_displayedEvents[index]);
+            },
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.event_busy,
+              size: 48,
+              color: Theme.of(context).colorScheme.secondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No events created yet',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
     );
   }
 
@@ -193,6 +284,7 @@ class _EventListState extends State<EventList> {
                       ],
                     ),
                   ),
+                  _buildEventConnectionsList(event),
                 ],
               ),
             ),
@@ -202,14 +294,156 @@ class _EventListState extends State<EventList> {
     );
   }
 
+  Widget _buildEventConnectionsList(Event event) {
+    final eventConnections = widget.connections
+        .where((conn) => conn.event1Id == event.id || conn.event2Id == event.id)
+        .toList();
+
+    if (eventConnections.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            'Connected Events',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: eventConnections.length,
+          itemBuilder: (context, index) {
+            final conn = eventConnections[index];
+            final connectedEvent = widget.events.firstWhere(
+              (e) =>
+                  e.id ==
+                  (conn.event1Id == event.id ? conn.event2Id : conn.event1Id),
+            );
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              child: ListTile(
+                leading: const Icon(Icons.compare_arrows),
+                title: Text(connectedEvent.title),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(conn.connectionType),
+                    Text(conn.description),
+                  ],
+                ),
+                trailing: PopupMenuButton(
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      child: const Text('Edit'),
+                      onTap: () => _editConnection(conn),
+                    ),
+                    PopupMenuItem(
+                      child: const Text('Delete'),
+                      onTap: () => _showDeleteConnectionDialog(conn.id),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editConnection(EventConnection connection) async {
+    // Implement connection editing dialog
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Connection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              value: connection.connectionType,
+              decoration: const InputDecoration(labelText: 'Connection Type'),
+              items: ['Cause', 'Effect', 'Related']
+                  .map((type) => DropdownMenuItem(
+                        value: type,
+                        child: Text(type),
+                      ))
+                  .toList(),
+              onChanged: (value) {
+                // Handle type change
+              },
+            ),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Description'),
+              controller: TextEditingController(text: connection.description),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              // Handle save
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      widget.onUpdateConnection(connection);
+    }
+  }
+
+  Future<void> _showDeleteConnectionDialog(String connectionId) async {
+    final bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Connection'),
+        content: const Text('Are you sure you want to delete this connection?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      widget.onDeleteConnection(connectionId);
+    }
+  }
+
+  // Replace all setState calls with _safeSetState
   void _selectAll() {
-    setState(() {
+    _safeSetState(() {
       selectedEvents = widget.events.map((e) => e.id).toSet();
     });
   }
 
   void _deselectAll() {
-    setState(() {
+    _safeSetState(() {
       selectedEvents.clear();
       isSelectionMode = false;
     });
@@ -243,7 +477,7 @@ class _EventListState extends State<EventList> {
       for (final eventId in selectedEvents.toList()) {
         await widget.onDelete(eventId);
       }
-      setState(() {
+      _safeSetState(() {
         selectedEvents.clear();
         isSelectionMode = false;
       });

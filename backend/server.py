@@ -28,6 +28,11 @@ from agent_manager import AgentManager, PROCESS_TYPES
 from database import db_instance, Chapter, Project, CodexItem, KnowledgeBaseItem
 from vector_store import VectorStore
 from models import CodexItemType, WorldbuildingSubtype
+
+from PyPDF2 import PdfReader
+from docx import Document
+import pdfplumber
+import io
 # Load environment variables
 load_dotenv()
 
@@ -1086,6 +1091,51 @@ async def add_to_knowledge_base(
         else:
             logger.warning("No documents or file provided")
             raise HTTPException(status_code=400, detail="No documents or file provided")
+        
+@app.post("/documents/extract")
+async def extract_document_text(
+    file: UploadFile,
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        content = await file.read()
+        text = ""
+        
+        if file.filename.lower().endswith('.pdf'):
+            # Try pdfplumber first as it usually gives better results
+            try:
+                with pdfplumber.open(io.BytesIO(content)) as pdf:
+                    text = "\n".join(page.extract_text() for page in pdf.pages)
+            except Exception as e:
+                # Fallback to PyPDF2 if pdfplumber fails
+                logger.warning(f"pdfplumber failed, trying PyPDF2: {str(e)}")
+                pdf = PdfReader(io.BytesIO(content))
+                text = "\n".join(page.extract_text() for page in pdf.pages)
+                
+        elif file.filename.lower().endswith(('.doc', '.docx')):
+            doc = Document(io.BytesIO(content))
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file format. Only PDF and DOC/DOCX files are supported."
+            )
+            
+        if not text.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Could not extract text from document. The file might be empty or corrupted."
+            )
+            
+        return {"text": text}
+        
+    except Exception as e:
+        logger.error(f"Error extracting text from document: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing document: {str(e)}"
+        )
 
 @knowledge_base_router.get("/")
 async def get_knowledge_base_content(project_id: str, current_user: User = Depends(get_current_active_user)):

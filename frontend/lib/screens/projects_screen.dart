@@ -21,8 +21,14 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     with SingleTickerProviderStateMixin {
   bool _mounted = true;
   bool _isLoading = true;
+  bool _isLoadingMore = false;
   List<dynamic> _projects = [];
-  final List<dynamic> _universes = [];
+  List<dynamic> _displayedProjects = [];
+  List<dynamic> _universes = [];
+  List<dynamic> _displayedUniverses = [];
+  final ScrollController _projectsScrollController = ScrollController();
+  final ScrollController _universesScrollController = ScrollController();
+  final int _itemsPerPage = 10;
   final _projectFormKey = GlobalKey<FormState>();
   final _universeFormKey = GlobalKey<FormState>();
   final _projectNameController = TextEditingController();
@@ -37,6 +43,8 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     super.initState();
     // Initialize TabController
     _tabController = TabController(length: 2, vsync: this);
+    _projectsScrollController.addListener(_onProjectsScroll);
+    _universesScrollController.addListener(_onUniversesScroll);
     _fetchData();
   }
 
@@ -48,7 +56,73 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     _projectNameController.dispose();
     _projectDescriptionController.dispose();
     _universeNameController.dispose();
+    _projectsScrollController.dispose();
+    _universesScrollController.dispose();
     super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onProjectsScroll() {
+    if (_projectsScrollController.position.pixels >=
+        _projectsScrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreProjects();
+    }
+  }
+
+  void _onUniversesScroll() {
+    if (_universesScrollController.position.pixels >=
+        _universesScrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreUniverses();
+    }
+  }
+
+  void _loadMoreProjects() {
+    if (_isLoadingMore) return;
+
+    final startIndex = _displayedProjects.length;
+    if (startIndex >= _projects.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final newItems = _projects.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedProjects.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
+  }
+
+  void _loadMoreUniverses() {
+    if (_isLoadingMore) return;
+
+    final startIndex = _displayedUniverses.length;
+    if (startIndex >= _universes.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final newItems = _universes.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedUniverses.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
   }
 
   Future<void> _fetchData() async {
@@ -81,9 +155,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
   Future<void> _fetchProjects() async {
     if (!_mounted) return;
-    setState(() {
-      _isLoading = true;
-    });
+
     try {
       final headers = await getAuthHeaders();
       final response = await http
@@ -92,47 +164,22 @@ class _ProjectsScreenState extends State<ProjectsScreen>
             headers: headers,
           )
           .timeout(const Duration(seconds: 10));
+
       if (!_mounted) return;
+
       if (response.statusCode == 200) {
-        setState(() {
-          _projects = json.decode(utf8.decode(response.bodyBytes))['projects'];
+        final projects =
+            json.decode(utf8.decode(response.bodyBytes))['projects'];
+        _safeSetState(() {
+          _projects = projects;
+          _displayedProjects = projects.take(_itemsPerPage).toList();
         });
       } else {
-        throw Exception('Failed to load projects: ${response.statusCode}');
+        throw Exception('Failed to load projects');
       }
-    } on TimeoutException catch (e) {
-      print('Timeout Exception: $e');
-      if (!_mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Request timed out. Please try again.'),
-          behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-        ),
-      );
-    } on SocketException catch (e) {
-      print('Socket Exception: $e');
-      if (!_mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Network error. Please check your connection.'),
-          behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-        ),
-      );
     } catch (error) {
-      print('Error fetching projects: $error');
       if (!_mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error fetching projects: ${error.toString()}'),
-          behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-        ),
-      );
-    } finally {
-      if (_mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      rethrow;
     }
   }
 
@@ -177,29 +224,24 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         );
 
         if (response.statusCode == 201 || response.statusCode == 200) {
-          final newProject = json.decode(utf8.decode(response.bodyBytes));
+          // Clear the form
+          _projectNameController.clear();
+          _projectDescriptionController.clear();
+          _selectedUniverseId = 'no_universe';
 
-          if (newProject['id'] != null) {
-            setState(() {
-              _projects.add(newProject);
-              _projectNameController.clear();
-              _projectDescriptionController.clear();
-              _selectedUniverseId = 'no_universe';
-            });
+          // Refresh the projects list
+          await _fetchProjects();
 
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Project created successfully'),
-                  behavior: SnackBarBehavior.fixed,
-                ),
-              );
-            }
-          } else {
-            throw Exception('Created project has no ID');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Project created successfully'),
+                behavior: SnackBarBehavior.fixed,
+              ),
+            );
           }
         } else {
-          final errorData = json.decode(response.body);
+          final errorData = json.decode(utf8.decode(response.bodyBytes));
           throw Exception(errorData['detail'] ?? 'Unknown error occurred');
         }
       } catch (error) {
@@ -399,134 +441,119 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
   // Add these new methods for universe management
   Widget _buildUniversesTab() {
-    return Stack(
-      children: [
-        FutureBuilder<List<dynamic>>(
-          future: _fetchUniverses(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-            final universes = snapshot.data ?? [];
+    if (_universes.isEmpty) {
+      return _buildEmptyUniversesState();
+    }
 
-            if (universes.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.public_off,
-                      size: 64,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .secondary
-                          .withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No universes found',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.secondary,
-                          ),
-                    ),
-                  ],
-                ),
-              );
-            }
+    return GridView.builder(
+      controller: _universesScrollController,
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.3,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _displayedUniverses.length + (_isLoadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index == _displayedUniverses.length) {
+          return _buildLoadingIndicator();
+        }
+        return _buildUniverseCard(_displayedUniverses[index]);
+      },
+    );
+  }
 
-            return GridView.builder(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 1.3,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-              ),
-              itemCount: universes.length,
-              itemBuilder: (context, index) {
-                final universe = universes[index];
-                return Card(
-                  elevation: 4,
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              UniverseScreen(universeId: universe['id']),
-                        ),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.public,
-                                  color: Theme.of(context).colorScheme.primary),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  universe['name'],
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              PopupMenuButton(
-                                itemBuilder: (context) => [
-                                  PopupMenuItem(
-                                    child: const Text('Edit'),
-                                    onTap: () => _showUniverseDialog(
-                                      universeId: universe['id'],
-                                      universeName: universe['name'],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    child: const Text('Delete'),
-                                    onTap: () =>
-                                        _deleteUniverse(universe['id']),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: Text(
-                              universe['description'] ?? 'No description',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 3,
-                            ),
-                          ),
-                          const Spacer(),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Projects: ${universe['project_count'] ?? 0}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              Text(
-                                'Entries: ${universe['entry_count'] ?? 0}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
+    );
+  }
+
+  Widget _buildUniverseCard(Map<String, dynamic> universe) {
+    final universeId = universe['id']?.toString();
+    if (universeId == null) {
+      return const SizedBox(); // Skip rendering invalid universes
+    }
+
+    return Card(
+      elevation: 4,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => UniverseScreen(universeId: universe['id']),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.public,
+                      color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      universe['name'],
+                      style: Theme.of(context).textTheme.titleMedium,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                );
-              },
-            );
-          },
+                  PopupMenuButton(
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        child: const Text('Edit'),
+                        onTap: () => _showUniverseDialog(
+                          universeId: universe['id'],
+                          universeName: universe['name'],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        child: const Text('Delete'),
+                        onTap: () => _deleteUniverse(universe['id']),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Text(
+                  universe['description'] ?? 'No description',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 3,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Projects: ${universe['project_count'] ?? 0}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Text(
+                    'Entries: ${universe['entry_count'] ?? 0}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 
@@ -585,28 +612,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     }
 
     if (_projects.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.folder_open,
-              size: 64,
-              color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No projects found',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-            ),
-          ],
-        ),
-      );
+      return _buildEmptyProjectsState();
     }
 
     return GridView.builder(
+      controller: _projectsScrollController,
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
@@ -614,10 +624,12 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
       ),
-      itemCount: _projects.length,
+      itemCount: _displayedProjects.length + (_isLoadingMore ? 1 : 0),
       itemBuilder: (context, index) {
-        final project = _projects[index];
-        return _buildProjectCard(project);
+        if (index == _displayedProjects.length) {
+          return _buildLoadingIndicator();
+        }
+        return _buildProjectCard(_displayedProjects[index]);
       },
     );
   }
@@ -903,6 +915,81 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ],
         );
       },
+    );
+  }
+
+  // Add empty state widgets
+  Widget _buildEmptyProjectsState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.folder_off,
+            size: 64,
+            color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Projects Found',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Create a new project to get started',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _showProjectDialog,
+            icon: const Icon(Icons.add),
+            label: const Text('Create Project'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyUniversesState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.public_off,
+            size: 64,
+            color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Universes Found',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Create a new universe to get started',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _showUniverseDialog,
+            icon: const Icon(Icons.add),
+            label: const Text('Create Universe'),
+          ),
+        ],
+      ),
     );
   }
 }

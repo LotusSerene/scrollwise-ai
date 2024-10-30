@@ -9,7 +9,7 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../utils/text_utils.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
+import 'package:http_parser/http_parser.dart';
 
 class Editor extends StatefulWidget {
   final String projectId;
@@ -29,18 +29,73 @@ class _EditorState extends State<Editor> {
       TextEditingController();
   String? _error;
 
+  // Add new state variables
+  bool _mounted = true;
+  bool _isLoading = false;
+  final ScrollController _chapterListController = ScrollController();
+  final int _itemsPerPage = 10;
+  List<dynamic> _displayedChapters = [];
+  bool _isLoadingMore = false;
+
   @override
   void initState() {
     super.initState();
+    _chapterListController.addListener(_onScroll);
     _fetchChapters();
     if (widget.chapterId != null) {
       _loadChapter(widget.chapterId!);
     }
   }
 
-  Future<void> _fetchChapters() async {
+  @override
+  void dispose() {
+    _mounted = false;
+    _chapterListController.dispose();
+    _chapterTitleController.dispose();
+    _chapterContentController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_chapterListController.position.pixels >=
+        _chapterListController.position.maxScrollExtent * 0.8) {
+      _loadMoreChapters();
+    }
+  }
+
+  void _loadMoreChapters() {
+    if (_isLoadingMore) return;
+
     final appState = Provider.of<AppState>(context, listen: false);
-    setState(() {
+    final startIndex = _displayedChapters.length;
+    if (startIndex >= appState.chapters.length) return;
+
+    _safeSetState(() {
+      _isLoadingMore = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final newItems =
+          appState.chapters.skip(startIndex).take(_itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedChapters.addAll(newItems);
+        _isLoadingMore = false;
+      });
+    });
+  }
+
+  Future<void> _fetchChapters() async {
+    _safeSetState(() {
+      _isLoading = true;
       _error = null;
     });
 
@@ -51,22 +106,28 @@ class _EditorState extends State<Editor> {
         headers: headers,
       );
 
+      if (!_mounted) return;
+
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
         final List<dynamic> chapters = jsonResponse['chapters'];
-        appState.setChapters(chapters);
+        Provider.of<AppState>(context, listen: false).setChapters(chapters);
+
+        _safeSetState(() {
+          _displayedChapters = chapters.take(_itemsPerPage).toList();
+          _isLoading = false;
+        });
       } else {
-        final errorMessage = 'Error fetching chapters: ${response.statusCode}';
-        print(errorMessage);
-        setState(() {
-          _error = errorMessage;
+        _safeSetState(() {
+          _error = 'Error fetching chapters: ${response.statusCode}';
+          _isLoading = false;
         });
       }
     } catch (error) {
-      final errorMessage = 'Error fetching chapters: $error';
-      print(errorMessage);
-      setState(() {
-        _error = errorMessage;
+      if (!_mounted) return;
+      _safeSetState(() {
+        _error = 'Error fetching chapters: $error';
+        _isLoading = false;
       });
     }
   }
@@ -250,42 +311,107 @@ class _EditorState extends State<Editor> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['txt', 'md', 'doc', 'docx'],
+        allowedExtensions: ['txt', 'md', 'pdf', 'doc', 'docx'],
         allowMultiple: true,
+        withData: true,
       );
 
       if (result != null) {
         for (var file in result.files) {
-          if (file.path != null) {
-            final content = await File(file.path!).readAsString();
-            final title = file.name
-                .replaceAll(RegExp(r'\.[^/.]+$'), ''); // Remove extension
+          if (file.bytes == null) {
+            Fluttertoast.showToast(
+                msg: 'Error: Could not read file ${file.name}');
+            continue;
+          }
 
-            // Create new chapter
-            final response = await http.post(
-              Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-              headers: await getAuthHeaders(),
-              body: json.encode({
-                'title': title,
-                'content': content,
-                'project_id': widget.projectId,
-              }),
+          String content;
+          final title = file.name
+              .replaceAll(RegExp(r'\.[^/.]+$'), ''); // Remove extension
+
+          // Handle text files directly
+          if (file.extension?.toLowerCase() == 'txt' ||
+              file.extension?.toLowerCase() == 'md') {
+            content = utf8.decode(file.bytes!);
+            await _createChapterFromContent(title, content);
+          }
+          // Handle other document types
+          else {
+            // Create multipart request for document processing
+            final request = http.MultipartRequest(
+              'POST',
+              Uri.parse(
+                  '$apiUrl/documents/extract?project_id=${widget.projectId}'),
             );
 
-            if (response.statusCode == 201) {
-              Fluttertoast.showToast(msg: 'Imported: $title');
+            request.headers.addAll(await getAuthHeaders());
+            request.files.add(
+              http.MultipartFile.fromBytes(
+                'file',
+                file.bytes!,
+                filename: file.name,
+                contentType:
+                    MediaType.parse(_getContentType(file.extension ?? '')),
+              ),
+            );
+
+            final streamedResponse = await request.send();
+            final response = await http.Response.fromStream(streamedResponse);
+
+            if (response.statusCode == 200) {
+              content = json.decode(utf8.decode(response.bodyBytes))['text'];
+              await _createChapterFromContent(title, content);
             } else {
-              Fluttertoast.showToast(msg: 'Error importing: $title');
+              Fluttertoast.showToast(msg: 'Error processing: ${file.name}');
+              continue;
             }
           }
         }
         // Refresh chapter list
-        Provider.of<AppState>(context, listen: false)
+        await Provider.of<AppState>(context, listen: false)
             .fetchChapters(widget.projectId);
       }
     } catch (error) {
       print('Error importing documents: $error');
       Fluttertoast.showToast(msg: 'Error importing documents');
+    }
+  }
+
+  Future<void> _createChapterFromContent(String title, String content) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
+        headers: await getAuthHeaders(),
+        body: json.encode({
+          'title': title,
+          'content': content,
+          'project_id': widget.projectId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        Fluttertoast.showToast(msg: 'Imported: $title');
+      } else {
+        Fluttertoast.showToast(msg: 'Error importing: $title');
+      }
+    } catch (error) {
+      print('Error creating chapter: $error');
+      Fluttertoast.showToast(msg: 'Error creating chapter: $title');
+    }
+  }
+
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+      case 'docx':
+        return 'application/msword';
+      case 'txt':
+        return 'text/plain';
+      case 'md':
+        return 'text/markdown';
+      default:
+        return 'application/octet-stream';
     }
   }
 
@@ -367,16 +493,29 @@ class _EditorState extends State<Editor> {
   }
 
   Widget _buildChapterList(AppState appState) {
+    if (_isLoading) {
+      return _buildLoadingIndicator();
+    }
+
     if (_error != null) {
       return _buildErrorState();
     }
 
+    if (_displayedChapters.isEmpty) {
+      return _buildEmptyState();
+    }
+
     return Expanded(
       child: ListView.builder(
+        controller: _chapterListController,
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: appState.chapters.length,
+        itemCount: _displayedChapters.length + (_isLoadingMore ? 1 : 0),
         itemBuilder: (context, index) {
-          final chapter = appState.chapters[index];
+          if (index == _displayedChapters.length) {
+            return _buildLoadingIndicator();
+          }
+
+          final chapter = _displayedChapters[index];
           final isSelected = _selectedChapter != null &&
               _selectedChapter['id'] == chapter['id'];
 
@@ -594,6 +733,40 @@ class _EditorState extends State<Editor> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ],
         ),
+      ),
+    );
+  }
+
+  // Add new widgets for different states
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.book_outlined,
+            size: 48,
+            color: Theme.of(context).colorScheme.secondary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No chapters yet',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Create a new chapter to get started',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
       ),
     );
   }

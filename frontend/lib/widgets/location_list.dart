@@ -7,6 +7,10 @@ class LocationList extends StatefulWidget {
   final List<LocationConnection> connections;
   final Function(Location) onEdit;
   final Function(String) onDelete;
+  final Function(List<String>) onBatchDelete;
+  final Function(String) onDeleteConnection;
+  final Function(LocationConnection) onUpdateConnection;
+  final int itemsPerPage = 10;
 
   const LocationList({
     Key? key,
@@ -14,6 +18,9 @@ class LocationList extends StatefulWidget {
     required this.connections,
     required this.onEdit,
     required this.onDelete,
+    required this.onBatchDelete,
+    required this.onDeleteConnection,
+    required this.onUpdateConnection,
   }) : super(key: key);
 
   @override
@@ -23,45 +30,117 @@ class LocationList extends StatefulWidget {
 class _LocationListState extends State<LocationList> {
   Set<String> selectedLocations = {};
   bool isSelectionMode = false;
+  bool _mounted = true;
+  bool _isLoading = false;
+  final ScrollController _scrollController = ScrollController();
+  int _currentPage = 0;
+  List<Location> _displayedLocations = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _loadMoreItems();
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (_mounted && mounted) {
+      setState(fn);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent * 0.8) {
+      _loadMoreItems();
+    }
+  }
+
+  void _loadMoreItems() {
+    if (_isLoading) return;
+
+    _safeSetState(() {
+      _isLoading = true;
+    });
+
+    // Simulate loading delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_mounted) return;
+
+      final startIndex = _currentPage * widget.itemsPerPage;
+      final endIndex = startIndex + widget.itemsPerPage;
+      final newItems =
+          widget.locations.skip(startIndex).take(widget.itemsPerPage).toList();
+
+      _safeSetState(() {
+        _displayedLocations.addAll(newItems);
+        _currentPage++;
+        _isLoading = false;
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     if (widget.locations.isEmpty) {
-      return Card(
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          alignment: Alignment.center,
-          child: Column(
-            children: [
-              Icon(
-                Icons.location_off,
-                size: 48,
-                color: Theme.of(context).colorScheme.secondary,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'No locations created yet',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ],
-          ),
-        ),
-      );
+      return _buildEmptyState();
     }
 
     return Column(
       children: [
         if (isSelectionMode) _buildSelectionControls(),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: widget.locations.length,
-          itemBuilder: (context, index) {
-            final location = widget.locations[index];
-            return _buildLocationCard(location);
-          },
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            itemCount: _displayedLocations.length + (_isLoading ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == _displayedLocations.length) {
+                return _buildLoadingIndicator();
+              }
+              return _buildLocationCard(_displayedLocations[index]);
+            },
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.location_off,
+              size: 48,
+              color: Theme.of(context).colorScheme.secondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No locations created yet',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(),
     );
   }
 
@@ -106,7 +185,7 @@ class _LocationListState extends State<LocationList> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: InkWell(
         onLongPress: () {
-          setState(() {
+          _safeSetState(() {
             isSelectionMode = true;
             selectedLocations.add(location.id);
           });
@@ -118,7 +197,7 @@ class _LocationListState extends State<LocationList> {
                 ? Checkbox(
                     value: selectedLocations.contains(location.id),
                     onChanged: (bool? value) {
-                      setState(() {
+                      _safeSetState(() {
                         if (value == true) {
                           selectedLocations.add(location.id);
                         } else {
@@ -236,7 +315,7 @@ class _LocationListState extends State<LocationList> {
       LocationConnection conn, Location connectedLocation) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: Theme.of(context).colorScheme.surfaceVariant,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -250,30 +329,85 @@ class _LocationListState extends State<LocationList> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  connectedLocation.name,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Text(
+                    connectedLocation.name,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
+                ),
+                PopupMenuButton(
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      child: const Text('Edit'),
+                      onTap: () => _editLocationConnection(conn),
+                    ),
+                    PopupMenuItem(
+                      child: const Text('Delete'),
+                      onTap: () => _deleteLocationConnection(conn.id),
+                    ),
+                  ],
                 ),
               ],
             ),
             if (conn.travelRoute != null) ...[
               const SizedBox(height: 8),
-              Text(
-                'Travel Route: ${conn.travelRoute}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.route,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        conn.travelRoute!,
+                        style: TextStyle(
+                          color:
+                              Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
             if (conn.culturalExchange != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Cultural Exchange: ${conn.culturalExchange}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.people,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        conn.culturalExchange!,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -283,14 +417,57 @@ class _LocationListState extends State<LocationList> {
     );
   }
 
+  Future<void> _editLocationConnection(LocationConnection connection) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Connection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              decoration: const InputDecoration(labelText: 'Travel Route'),
+              controller: TextEditingController(text: connection.travelRoute),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Cultural Exchange'),
+              controller:
+                  TextEditingController(text: connection.culturalExchange),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              // Handle save
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      widget.onUpdateConnection(connection);
+    }
+  }
+
   void _selectAll() {
-    setState(() {
+    _safeSetState(() {
       selectedLocations = widget.locations.map((e) => e.id).toSet();
     });
   }
 
   void _deselectAll() {
-    setState(() {
+    _safeSetState(() {
       selectedLocations.clear();
       isSelectionMode = false;
     });
@@ -321,13 +498,111 @@ class _LocationListState extends State<LocationList> {
     );
 
     if (confirm == true) {
-      for (final locationId in selectedLocations.toList()) {
-        await widget.onDelete(locationId);
-      }
-      setState(() {
+      await widget.onBatchDelete(selectedLocations.toList());
+      _safeSetState(() {
         selectedLocations.clear();
         isSelectionMode = false;
       });
+    }
+  }
+
+  void _deleteLocationConnection(String connectionId) {
+    widget.onDeleteConnection(connectionId);
+  }
+
+  Widget _buildLocationConnectionsList(Location location) {
+    final locationConnections = widget.connections
+        .where((conn) =>
+            conn.location1Id == location.id || conn.location2Id == location.id)
+        .toList();
+
+    if (locationConnections.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            'Connected Locations',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: locationConnections.length,
+          itemBuilder: (context, index) {
+            final conn = locationConnections[index];
+            final connectedLocation = widget.locations.firstWhere(
+              (l) =>
+                  l.id ==
+                  (conn.location1Id == location.id
+                      ? conn.location2Id
+                      : conn.location1Id),
+            );
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              child: ListTile(
+                leading: const Icon(Icons.compare_arrows),
+                title: Text(connectedLocation.name),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (conn.travelRoute.isNotEmpty)
+                      Text('Travel: ${conn.travelRoute}'),
+                    if (conn.culturalExchange.isNotEmpty)
+                      Text('Exchange: ${conn.culturalExchange}'),
+                  ],
+                ),
+                trailing: PopupMenuButton(
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      child: const Text('Edit'),
+                      onTap: () => _editLocationConnection(conn),
+                    ),
+                    PopupMenuItem(
+                      child: const Text('Delete'),
+                      onTap: () => _showDeleteConnectionDialog(conn.id),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showDeleteConnectionDialog(String connectionId) async {
+    final bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Connection'),
+        content: const Text('Are you sure you want to delete this connection?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      widget.onDeleteConnection(connectionId);
     }
   }
 }

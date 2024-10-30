@@ -829,7 +829,17 @@ class Database:
     async def delete_event(self, event_id: str, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
             try:
-                # First verify the event exists and belongs to the user/project
+                # First delete any event connections that reference this event
+                await session.execute(
+                    delete(EventConnection).where(
+                        or_(
+                            EventConnection.event1_id == event_id,
+                            EventConnection.event2_id == event_id
+                        )
+                    )
+                )
+                
+                # Then delete the event itself
                 event = await session.get(Event, event_id)
                 if event and event.user_id == user_id and event.project_id == project_id:
                     await session.delete(event)
