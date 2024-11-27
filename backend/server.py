@@ -33,6 +33,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 import pdfplumber
 import io
+
 # Load environment variables
 load_dotenv()
 
@@ -208,14 +209,6 @@ class ProjectUpdate(BaseModel):
     universe_id: Optional[str] = None
     target_word_count: Optional[int] = None
 
-
-class CollaborationCreate(BaseModel):
-    permissions: Dict[str, bool]
-    expires_in_days: Optional[int] = 30
-
-class CollaborationAccept(BaseModel):
-    access_token: str
-
 # Universe model
 class UniverseCreate(BaseModel):
     name: str
@@ -389,14 +382,13 @@ chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
 codex_item_router = APIRouter(prefix="/codex-items", tags=["Codex Items"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
 settings_router = APIRouter(prefix="/settings", tags=["Settings"])
-preset_router = APIRouter(prefix="/presets", tags=["Presets"])  # New router for presets
+preset_router = APIRouter(prefix="/presets", tags=["Presets"]) 
 project_router = APIRouter(prefix="/projects", tags=["Projects"])
 universe_router = APIRouter(prefix="/universes", tags=["Universes"])
-codex_router = APIRouter(prefix="/codex", tags=["Codex"])  # New router for codex
+codex_router = APIRouter(prefix="/codex", tags=["Codex"])
 relationship_router = APIRouter(prefix="/relationships", tags=["Relationships"])
 event_router = APIRouter(prefix="/events", tags=["Events"])
 location_router = APIRouter(prefix="/locations", tags=["Locations"])
-collaboration_router = APIRouter(prefix="/collaborations", tags=["Collaborations"])
 
 # Project routes
 @project_router.put("/{project_id}/target-word-count")
@@ -681,33 +673,15 @@ async def generate_chapters(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-async def check_project_access(
-    project_id: str,
-    user_id: str,
-    required_permission: str
-) -> bool:
-    # Check if user is project owner
-    project = await db_instance.get_project(project_id, user_id)
-    if project:
-        return True
-        
-    # Check if user has collaboration access
-    collaborations = await db_instance.get_project_collaborations(project_id, user_id)
-    for collab in collaborations:
-        if (collab['status'] == 'active' and 
-            collab['collaborator_id'] == user_id and 
-            collab['permissions'].get(required_permission, False)):
-            return True
-            
-    return False
-
 @chapter_router.get("/{chapter_id}")
 async def get_chapter(
     chapter_id: str,
     project_id: str,
     current_user: User = Depends(get_current_active_user)
 ):
-    if not await check_project_access(project_id, current_user.id, 'read_chapters'):
+    # Only check project ownership
+    project = await db_instance.get_project(project_id, current_user.id)
+    if not project:
         raise HTTPException(status_code=403, detail="Not authorized to access this project")
     try:
         chapter = await db_instance.get_chapter(chapter_id, current_user.id, project_id)
@@ -746,8 +720,8 @@ async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: 
                 chapter.content,
                 {
                     "title": chapter.title,
-                    "id": chapter_id,
-                    "type": "chapter"
+                    "item_id": chapter_id,
+                    "item_type": "chapter"
                 }
             )
 
@@ -771,20 +745,20 @@ async def update_chapter(chapter_id: str, chapter: ChapterUpdate, project_id: st
             raise HTTPException(status_code=404, detail="Chapter not found")
 
         updated_chapter = await db_instance.update_chapter(
-                chapter_id,
-                chapter.title,  # Removed encoding/decoding
-                chapter.content,  # Removed encoding/decoding
-                current_user.id,
-                project_id
-            )
+            chapter_id,  # Use chapter_id directly instead of embedding_id
+            chapter.title,  # Access attributes directly
+            chapter.content,
+            current_user.id,
+            project_id
+        )
 
         # Update in knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
-                chapter_id,
+                existing_chapter.get('embedding_id'),  # Use get() to safely access embedding_id
                 'update',
                 new_content=chapter.content,
-                new_metadata={"title": chapter.title, "id": chapter_id, "type": "chapter"}
+                new_metadata={"title": chapter.title, "item_id": chapter_id, "item_type": "chapter"}
             )
 
         return updated_chapter
@@ -804,11 +778,9 @@ async def delete_chapter(chapter_id: str, project_id: str, current_user: User = 
         if chapter.get('embedding_id'):
             async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
                 await agent_manager.update_or_remove_from_knowledge_base(
-                    {"item_id": chapter_id, "item_type": "chapter"},
-                    "delete"
+                    chapter['embedding_id'],
+                    'delete'
                 )
-        else:
-            logger.warning(f"No embedding_id found for chapter {chapter_id}. Skipping knowledge base deletion.")
 
         # Delete from database and ensure it's committed
         success = await db_instance.delete_chapter(chapter_id, current_user.id, project_id)
@@ -860,8 +832,8 @@ async def generate_codex_item(
                 generated_item["description"],
                 {
                     "name": generated_item["name"],
-                    "id": item_id,
-                    "type": codex_type.value,
+                    "item_id": item_id,
+                    "item_type": codex_type.value,
                     "subtype": subtype.value if subtype else None
                 }
             )
@@ -1014,8 +986,8 @@ async def create_codex_item(codex_item: CodexItemCreate, project_id: str, curren
                 codex_item.description,
                 {
                     "name": codex_item.name,
-                    "id": item_id,
-                    "type": codex_item.type,
+                    "item_id": item_id,
+                    "item_type": codex_item.type,
                     "subtype": codex_item.subtype
                 }
             )
@@ -1036,14 +1008,22 @@ async def update_codex_item(item_id: str, codex_item: CodexItemUpdate, project_i
         if not existing_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
 
-        updated_item = await db_instance.update_codex_item(item_id, codex_item.name, codex_item.description, codex_item.type, codex_item.subtype, current_user.id, project_id)
+        updated_item = await db_instance.update_codex_item(
+            item_id,
+            codex_item.name,
+            codex_item.description,
+            codex_item.type,
+            codex_item.subtype,
+            current_user.id,
+            project_id
+        )
 
         # Update in knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             metadata = {
                 "name": codex_item.name,
-                "id": item_id,
-                "type": codex_item.type,
+                "item_id": item_id,
+                "item_type": codex_item.type,
                 "subtype": codex_item.subtype
             }
 
@@ -1080,8 +1060,8 @@ async def delete_codex_item(item_id: str, project_id: str, current_user: User = 
         if codex_item.get('embedding_id'):
             async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
                 await agent_manager.update_or_remove_from_knowledge_base(
-                    {"item_id": item_id, "item_type": codex_item['type']},
-                    "delete"
+                    codex_item['embedding_id'],
+                    'delete'
                 )
         else:
             logger.warning(f"No embedding_id found for codex item {item_id}. Skipping knowledge base deletion.")
@@ -1349,34 +1329,53 @@ async def update_project_universe(project_id: str, universe: Dict[str, Any], cur
         logger.error(f"Error updating project universe: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@project_router.post("/")
-async def create_project(project: ProjectCreate, current_user: User = Depends(get_current_active_user)):
+@project_router.post("/", response_model=Dict[str, Any])
+async def create_project(
+    project: ProjectCreate,
+    current_user: User = Depends(get_current_active_user)
+):
     try:
-        project_id = await db_instance.create_project(project.name, project.description, current_user.id, project.universe_id)
-        return {"message": "Project created successfully", "project_id": project_id}
+        project_id = await db_instance.create_project(
+            name=project.name,
+            description=project.description,
+            user_id=current_user.id,
+            universe_id=project.universe_id
+        )
+        
+        # Fetch the created project to return its details
+        new_project = await db_instance.get_project(project_id, current_user.id)
+        if not new_project:
+            raise HTTPException(status_code=404, detail="Project not found after creation")
+            
+        return {"message": "Project created successfully", "project": new_project}
     except Exception as e:
         logger.error(f"Error creating project: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating project: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @project_router.get("/")
 async def get_projects(current_user: User = Depends(get_current_active_user)):
     try:
+        # Get user's own projects
         projects = await db_instance.get_projects(current_user.id)
-        # Add stats to each project
+        
+        # Add stats for each project
         for project in projects:
             stats = await get_project_stats(project['id'], current_user.id)
             project.update(stats)
+            
         return {"projects": projects}
     except Exception as e:
-        logger.error(f"Error fetching projects: {str(e)}")
+        logger.error(f"Error getting projects: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @project_router.get("/{project_id}")
 async def get_project(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         project = await db_instance.get_project(project_id, current_user.id)
         if project:
+            # Add stats to the project
+            stats = await get_project_stats(project_id, current_user.id)
+            project.update(stats)
             return project
         raise HTTPException(status_code=404, detail="Project not found")
     except Exception as e:
@@ -1384,16 +1383,20 @@ async def get_project(project_id: str, current_user: User = Depends(get_current_
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @project_router.put("/{project_id}")
-async def update_project(project_id: str, project: ProjectUpdate, current_user: User = Depends(get_current_active_user)):
+async def update_project(
+    project_id: str, 
+    project: ProjectUpdate, 
+    current_user: User = Depends(get_current_active_user)
+):
     try:
         updated_project = await db_instance.update_project(
-                project_id,
-                project.name,
-                project.description,
-                current_user.id,
-                project.universe_id,
-                project.target_word_count
-            )
+            project_id,
+            project.name,
+            project.description,
+            current_user.id,
+            project.universe_id,
+            project.target_word_count
+        )
         if updated_project:
             return updated_project
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1402,7 +1405,10 @@ async def update_project(project_id: str, project: ProjectUpdate, current_user: 
         raise HTTPException(status_code=500, detail=str(e))
 
 @project_router.delete("/{project_id}")
-async def delete_project(project_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_project(
+    project_id: str, 
+    current_user: User = Depends(get_current_active_user)
+):
     try:
         success = await db_instance.delete_project(project_id, current_user.id)
         if success:
@@ -1954,9 +1960,9 @@ async def create_event(
                 "event",
                 event_data['description'],
                 {
-                    "id": event_id,
+                    "item_id": event_id,
                     "title": event_data['title'],
-                    "type": "event",
+                    "item_type": "event",
                     "date": event_data['date'],
                     "character_id": event_data.get('character_id'),
                     "location_id": event_data.get('location_id')
@@ -2164,9 +2170,9 @@ async def analyze_chapter_locations(
                     "location",
                     f"{location['name']}: {location['description']}",
                     {
-                        "id": location['id'],  # Now using id from the location returned by agent_manager
+                        "item_id": location['id'],  # Now using id from the location returned by agent_manager
                         "name": location['name'],
-                        "type": "location",
+                        "item_type": "location",
                         "coordinates": location.get('coordinates')
                     }
                 )
@@ -2245,9 +2251,8 @@ async def delete_location(
         
         # Delete from knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-            # Update: Fix the parameter names in the metadata dictionary
             await agent_manager.update_or_remove_from_knowledge_base(
-                {"item_id": location_id, "item_type": "location"},  # Changed from "id" to "item_id"
+                {"item_id": location_id, "item_type": "location"},
                 "delete"
             )
             # Delete any associated connections
@@ -2255,7 +2260,7 @@ async def delete_location(
             for conn in connections:
                 if conn['location1_id'] == location_id or conn['location2_id'] == location_id:
                     await agent_manager.update_or_remove_from_knowledge_base(
-                        {"item_id": conn['id'], "item_type": "location_connection"},  # Changed from "id" to "item_id"
+                        {"item_id": conn['id'], "item_type": "location_connection"},
                         "delete"
                     )
         
@@ -2278,149 +2283,7 @@ async def get_location_connections(
 
 
 
-#Collaboration endpoints
-@collaboration_router.get("")
-async def get_user_collaborations(current_user: User = Depends(get_current_active_user)):
-    try:
-        collaborations = await db_instance.get_user_collaborations(current_user.id)
-        return {"collaborations": collaborations}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@collaboration_router.get("/project/{project_id}/permissions")
-async def get_project_permissions(
-    project_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        # Check if user is project owner
-        project = await db_instance.get_project(project_id, current_user.id)
-        is_owner = project is not None
-
-        if is_owner:
-            # Return all permissions for owner
-            return {
-                "is_owner": True,
-                "permissions": {
-                    "read_chapters": True,
-                    "write_chapters": True,
-                    "manage_codex": True,
-                    "manage_characters": True,
-                    "manage_timeline": True,
-                    "check_validity": True,
-                    "manage_knowledge_base": True,
-                    "generate_chapters": True,
-                    "refresh_data": True
-                }
-            }
-
-        # Get collaboration permissions
-        collaboration = await db_instance.get_project_collaboration(project_id, current_user.id)
-        if collaboration:
-            return {
-                "is_owner": False,
-                "permissions": collaboration.permissions
-            }
-
-        # No permissions
-        return {
-            "is_owner": False,
-            "permissions": {}
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting project permissions: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error getting permissions")
-
-
-@collaboration_router.delete("/{collaboration_id}")
-async def leave_collaboration(
-    collaboration_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        success = await db_instance.leave_collaboration(
-            collaboration_id=collaboration_id,
-            user_id=current_user.id
-        )
-        if not success:
-            raise HTTPException(status_code=404, detail="Collaboration not found")
-        return {"message": "Successfully left collaboration"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@collaboration_router.post("/{project_id}/create-token")
-async def create_collaboration_token(
-    project_id: str,
-    collaboration: CollaborationCreate,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        # Verify user owns the project
-        project = await db_instance.get_project(project_id, current_user.id)
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        access_token = await db_instance.create_collaboration_token(
-            project_id=project_id,
-            owner_id=current_user.id,
-            permissions=collaboration.permissions,
-            expires_in_days=collaboration.expires_in_days
-        )
-        
-        return {"access_token": access_token}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@collaboration_router.post("/accept")
-async def accept_collaboration(
-    collaboration: CollaborationAccept,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        result = await db_instance.accept_collaboration(
-            access_token=collaboration.access_token,
-            collaborator_id=current_user.id
-        )
-        return result
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@collaboration_router.delete("/{collaboration_id}")
-async def revoke_collaboration(
-    collaboration_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        success = await db_instance.revoke_collaboration(
-            collaboration_id=collaboration_id,
-            owner_id=current_user.id
-        )
-        if not success:
-            raise HTTPException(status_code=404, detail="Collaboration not found")
-        return {"message": "Collaboration revoked successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@collaboration_router.get("/project/{project_id}")
-async def get_project_collaborations(
-    project_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    try:
-        collaborations = await db_instance.get_project_collaborations(
-            project_id=project_id,
-            user_id=current_user.id
-        )
-        return {"collaborations": collaborations}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 # Add the router to the app
-app.include_router(collaboration_router)
 app.include_router(auth_router)
 app.include_router(chapter_router)
 app.include_router(codex_item_router)
@@ -2429,10 +2292,10 @@ app.include_router(location_router)
 app.include_router(knowledge_base_router)
 app.include_router(settings_router)
 app.include_router(preset_router)
-app.include_router(project_router)
 app.include_router(universe_router)
 app.include_router(codex_router)
 app.include_router(relationship_router)
+app.include_router(project_router)
 
 
 if __name__ == "__main__":

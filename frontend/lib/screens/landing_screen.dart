@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'package:flutter/scheduler.dart';
 
@@ -36,27 +35,15 @@ class LandingScreen extends StatelessWidget {
         ],
       ),
       body: AnimatedBackground(
-        child: RawScrollbar(
-          thumbColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-          radius: const Radius.circular(20),
-          thickness: 8,
-          thumbVisibility: true,
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              physics: const BouncingScrollPhysics(),
-              scrollbars: false,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  _buildHeroSection(context),
-                  _buildFeaturesSection(context),
-                  _buildUseCasesSection(context),
-                  _buildAISection(context),
-                  _buildCTASection(context),
-                ],
-              ),
-            ),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildHeroSection(context),
+              _buildFeaturesSection(context),
+              _buildUseCasesSection(context),
+              _buildAISection(context),
+              _buildCTASection(context),
+            ],
           ),
         ),
       ),
@@ -827,7 +814,6 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
       },
       child: Stack(
         children: [
-          // Gradient background
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -842,7 +828,6 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
               ),
             ),
           ),
-          // Parallax background words
           CustomPaint(
             painter: BackgroundPainter(
               words: _words,
@@ -851,8 +836,7 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
             ),
             size: Size.infinite,
           ),
-          // Main content with parallax effect
-          ParallaxContent(child: widget.child),
+          widget.child,
         ],
       ),
     );
@@ -931,55 +915,4 @@ class BackgroundPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant BackgroundPainter oldDelegate) => true;
-}
-
-// Add this new widget for parallax scrolling
-class ParallaxContent extends StatefulWidget {
-  final Widget child;
-
-  const ParallaxContent({Key? key, required this.child}) : super(key: key);
-
-  @override
-  State<ParallaxContent> createState() => _ParallaxContentState();
-}
-
-class _ParallaxContentState extends State<ParallaxContent> {
-  final _scrollController = ScrollController();
-  double _scroll = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  void _onScroll() {
-    setState(() {
-      _scroll = _scrollController.offset;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RawScrollbar(
-      thumbColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-      radius: const Radius.circular(20),
-      thickness: 8,
-      thumbVisibility: true,
-      controller: _scrollController,
-      child: SingleChildScrollView(
-        controller: _scrollController,
-        child: Transform.translate(
-          offset: Offset(0, _scroll * 0.1), // Parallax effect
-          child: widget.child,
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
 }

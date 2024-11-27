@@ -14,9 +14,14 @@ import 'package:http_parser/http_parser.dart';
 class Editor extends StatefulWidget {
   final String projectId;
   final String? chapterId;
+  final bool readOnly;
 
-  const Editor({Key? key, required this.projectId, this.chapterId})
-      : super(key: key);
+  const Editor({
+    Key? key,
+    required this.projectId,
+    this.chapterId,
+    this.readOnly = false,
+  }) : super(key: key);
 
   @override
   State<Editor> createState() => _EditorState();
@@ -100,29 +105,18 @@ class _EditorState extends State<Editor> {
     });
 
     try {
-      final headers = await getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-        headers: headers,
-      );
+      await Provider.of<AppState>(context, listen: false)
+          .fetchChapters(widget.projectId);
 
       if (!_mounted) return;
 
-      if (response.statusCode == 200) {
-        final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-        final List<dynamic> chapters = jsonResponse['chapters'];
-        Provider.of<AppState>(context, listen: false).setChapters(chapters);
-
-        _safeSetState(() {
-          _displayedChapters = chapters.take(_itemsPerPage).toList();
-          _isLoading = false;
-        });
-      } else {
-        _safeSetState(() {
-          _error = 'Error fetching chapters: ${response.statusCode}';
-          _isLoading = false;
-        });
-      }
+      _safeSetState(() {
+        _displayedChapters = Provider.of<AppState>(context, listen: false)
+            .chapters
+            .take(_itemsPerPage)
+            .toList();
+        _isLoading = false;
+      });
     } catch (error) {
       if (!_mounted) return;
       _safeSetState(() {
@@ -218,9 +212,7 @@ class _EditorState extends State<Editor> {
           _selectedChapter = null;
         });
         Fluttertoast.showToast(msg: 'Chapter deleted successfully');
-        // Add this line to refresh chapters from server
-        await Provider.of<AppState>(context, listen: false)
-            .fetchChapters(widget.projectId);
+        _fetchChapters();
       } else {
         final jsonResponse = json.decode(response.body);
         final errorMessage = jsonResponse['error'] ?? 'Error deleting chapter';
@@ -528,13 +520,15 @@ class _EditorState extends State<Editor> {
                   ? Theme.of(context).colorScheme.primary
                   : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
             ),
-            trailing: IconButton(
-              icon: Icon(
-                Icons.delete,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              onPressed: () => _showDeleteDialog(chapter['id']),
-            ),
+            trailing: widget.readOnly
+                ? null
+                : IconButton(
+                    icon: Icon(
+                      Icons.delete,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    onPressed: () => _showDeleteDialog(chapter['id']),
+                  ),
             selected: isSelected,
             selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
             shape: RoundedRectangleBorder(
@@ -548,6 +542,8 @@ class _EditorState extends State<Editor> {
   }
 
   Widget _buildCreateChapterButton() {
+    if (widget.readOnly) return const SizedBox.shrink();
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ElevatedButton.icon(
@@ -583,17 +579,19 @@ class _EditorState extends State<Editor> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            onPressed: _importDocuments,
-            tooltip: 'Import documents',
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: _handleSaveChapter,
-            icon: const Icon(Icons.save),
-            label: Text(_selectedChapter != null ? 'Save' : 'Create'),
-          ),
+          if (!widget.readOnly) ...[
+            IconButton(
+              icon: const Icon(Icons.upload_file),
+              onPressed: _importDocuments,
+              tooltip: 'Import documents',
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: _handleSaveChapter,
+              icon: const Icon(Icons.save),
+              label: Text(_selectedChapter != null ? 'Save' : 'Create'),
+            ),
+          ],
         ],
       ),
     );
@@ -639,9 +637,10 @@ class _EditorState extends State<Editor> {
               ),
             TextField(
               controller: _chapterTitleController,
+              readOnly: widget.readOnly,
               decoration: InputDecoration(
                 labelText: 'Chapter Title',
-                hintText: 'Enter chapter title...',
+                hintText: widget.readOnly ? null : 'Enter chapter title...',
                 prefixIcon: const Icon(Icons.title),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -652,12 +651,14 @@ class _EditorState extends State<Editor> {
             Expanded(
               child: TextField(
                 controller: _chapterContentController,
+                readOnly: widget.readOnly,
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
                 decoration: InputDecoration(
                   labelText: 'Chapter Content',
-                  hintText: 'Start writing your chapter...',
+                  hintText:
+                      widget.readOnly ? null : 'Start writing your chapter...',
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),

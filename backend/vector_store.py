@@ -22,6 +22,8 @@ def flatten_metadata(metadata):
 class VectorStore:
     def __init__(self, user_id, project_id, api_key, embeddings_model):
         self.chroma_url = os.getenv("CHROMA_SERVER_URL", "http://localhost:8000")
+        parsed_url = self.chroma_url.replace("http://", "").replace("https://", "")
+        self.host = parsed_url.split(':')[0]
         self.chroma_port = int(os.getenv("CHROMA_SERVER_PORT", "8000"))
         self.user_id = user_id
         self.project_id = project_id
@@ -29,39 +31,30 @@ class VectorStore:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
-        #self.logger.debug(f"Initializing VectorStore for user: {user_id}")
-        
         try:
-            #self.logger.debug("Initializing GoogleGenerativeAIEmbeddings")
             self.embeddings = GoogleGenerativeAIEmbeddings(
                 model=embeddings_model, google_api_key=self.api_key
             )
-            #self.logger.debug("GoogleGenerativeAIEmbeddings initialized successfully")
         except Exception as e:
             self.logger.error(f"Error initializing GoogleGenerativeAIEmbeddings: {str(e)}")
             raise
 
         try:
-            #self.logger.debug("Initializing Chroma client")
-            chroma_client = chromadb.HttpClient(host=self.chroma_url, port=self.chroma_port, settings=Settings(anonymized_telemetry=False))
-            #self.logger.debug("Chroma client initialized successfully")
+            chroma_client = chromadb.HttpClient(
+                host=self.host,
+                port=self.chroma_port,
+                settings=Settings(anonymized_telemetry=False)
+            )
             
-            #self.logger.debug("Initializing Chroma vector store")
             collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
             self.vector_store = Chroma(
                 client=chroma_client,
                 collection_name=collection_name,
                 embedding_function=self.embeddings,
             )
-            #self.logger.debug("Chroma vector store initialized successfully")
-            #self.logger.info(f"Vector store initialized for user: {user_id} and project: {project_id}")
         except Exception as e:
             self.logger.error(f"Error initializing Chroma vector store: {str(e)}")
             raise
-
-        #self.logger.info(
-        #    f"VectorStore initialized for user: {user_id} with embeddings model: {embeddings_model}"
-        #)
 
     async def add_to_knowledge_base(self, text: str, metadata: Dict[str, Any] = None) -> str:
         """Add single text to the vector store."""

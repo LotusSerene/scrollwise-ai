@@ -327,7 +327,8 @@ class _QueryState extends State<Query> {
         children: [
           if (isLoading)
             LinearProgressIndicator(
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              backgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
                 Theme.of(context).colorScheme.primary,
               ),
@@ -342,7 +343,8 @@ class _QueryState extends State<Query> {
                   decoration: InputDecoration(
                     hintText: 'Ask a question...',
                     filled: true,
-                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    fillColor:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
                       borderSide: BorderSide.none,

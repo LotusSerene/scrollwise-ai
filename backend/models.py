@@ -13,6 +13,14 @@ class CodexItemType(str, Enum):
     RELATIONSHIP = "relationship"
     BACKSTORY = "character_backstory"
 
+class CodexExtractionTypes(str, Enum):
+    CHARACTER = "character"
+    WORLDBUILDING = "worldbuilding"
+    ITEM = "item"
+    LORE = "lore"
+    FACTION = "faction"
+
+
 
 class WorldbuildingSubtype(str, Enum):
     HISTORY = "history"

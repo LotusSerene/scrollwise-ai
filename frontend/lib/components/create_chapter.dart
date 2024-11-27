@@ -10,8 +10,13 @@ import '../providers/app_state.dart';
 
 class CreateChapter extends StatefulWidget {
   final String projectId;
+  final bool readOnly;
 
-  const CreateChapter({Key? key, required this.projectId}) : super(key: key);
+  const CreateChapter({
+    Key? key,
+    required this.projectId,
+    this.readOnly = false,
+  }) : super(key: key);
 
   @override
   State<CreateChapter> createState() => _CreateChapterState();
@@ -130,8 +135,9 @@ class _CreateChapterState extends State<CreateChapter> {
   }
 
   Future<void> _handleSubmit(BuildContext context) async {
+    final appState = Provider.of<AppState>(context, listen: false);
+
     if (_formKey.currentState!.validate()) {
-      final appState = Provider.of<AppState>(context, listen: false);
       appState.updateGenerationProgress(
         isGenerating: true,
         currentChapter: 0,

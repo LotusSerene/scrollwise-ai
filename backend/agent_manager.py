@@ -24,20 +24,17 @@ import json
 import re
 # Load environment variables
 load_dotenv()
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from vector_store import VectorStore
 from langchain.output_parsers import OutputFixingParser
 from langchain_community.cache import SQLiteCache
 from langchain_core.globals import set_llm_cache
-from langchain_core.rate_limiters import InMemoryRateLimiter
 from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain.chains.summarize import load_summarize_chain
 import asyncio
 from langchain.callbacks.base import BaseCallbackHandler
 from datetime import timedelta
-from models import ChapterValidation, CodexItem, CriterionScore, CodexItemType, WorldbuildingSubtype
+from models import ChapterValidation, CodexItem, CriterionScore,  WorldbuildingSubtype, CodexItemType, CodexExtractionTypes
 
 # Add at the top with other imports
 PROCESS_TYPES = {
@@ -325,7 +322,8 @@ class AgentManager:
                 max_input_tokens=self.MAX_INPUT_TOKENS,
                 caching=True,
                 streaming=True,
-                callbacks=[rate_limiter]
+                callbacks=[rate_limiter],
+                convert_system_message_to_human=True
             )
 
             self._llm_cache[model] = llm
@@ -780,21 +778,24 @@ class AgentManager:
         async def retrieve_with_history(query: str) -> List[Document]:
             # Use the condense question prompt to get the standalone question
             condense_question_prompt = ChatPromptTemplate.from_messages([
-                ("system", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
+                ("human", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
             ])
             
-            # Prepare chat history
+            # Prepare chat history - ensure alternating human/ai messages
             messages = []
-            for message in chat_history:
+            for i, message in enumerate(chat_history):
                 if isinstance(message, dict):
                     if message.get('type') == 'human':
                         messages.append(HumanMessage(content=message['content']))
                     elif message.get('type') == 'ai':
-                        messages.append(AIMessage(content=message['content']))
+                        # Only add AI message if previous message was human
+                        if messages and isinstance(messages[-1], HumanMessage):
+                            messages.append(AIMessage(content=message['content']))
                 elif isinstance(message, (HumanMessage, AIMessage)):
-                    messages.append(message)
+                    if isinstance(message, HumanMessage) or (messages and isinstance(messages[-1], HumanMessage)):
+                        messages.append(message)
                     
             # Get the standalone question
             chain = condense_question_prompt | qa_llm | StrOutputParser()
@@ -806,9 +807,9 @@ class AgentManager:
             # Use similarity search instead of retriever
             return await self.vector_store.similarity_search(standalone_question, k=5)
 
-        # Create the QA chain
+        # Create the QA chain with proper message ordering
         qa_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
+            ("human", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             ("human", "Context: {context}"),
@@ -1086,7 +1087,7 @@ class AgentManager:
             # Get existing codex items from vector store for comparison
             existing_items = await self.vector_store.similarity_search(
                 query_text=chapter,
-                filter={"type": {"$in": [t.value for t in CodexItemType]}},  # Use enum values
+                filter={"type": {"$in": [t.value for t in CodexExtractionTypes]}},  # Use CodexExtractionTypes instead
                 k=50  # Adjust as needed
             )
             
@@ -1131,7 +1132,7 @@ class AgentManager:
                 result = await extraction_chain.ainvoke({
                     "chapter": chunk,
                     "existing_names": ", ".join(existing_names),
-                    "valid_types": ", ".join([t.value for t in CodexItemType]),
+                    "valid_types": ", ".join([t.value for t in CodexExtractionTypes]),  # Use CodexExtractionTypes
                     "valid_subtypes": ", ".join([t.value for t in WorldbuildingSubtype]),
                     "format_instructions": parser.get_format_instructions()
                 })
@@ -1749,42 +1750,27 @@ class AgentManager:
                     deduped_result = result.deduplicate_connections()
                     
                     for connection in deduped_result.connections:
-                        # Skip connections with null IDs
-                        if not connection.event1_id or not connection.event2_id:
+                        # Skip if connection already exists
+                        conn_key = tuple(sorted([connection.event1_id, connection.event2_id]))
+                        if conn_key in existing_keys:
                             continue
-                            
-                        # Check if connection already exists
-                        conn_key = connection.get_connection_key()
-                        exists = False
-                        for existing in saved_connections:
-                            if conn_key == existing.get_connection_key():
-                                exists = True
-                                break
-                                
-                        if not exists:
-                            # Create a new EventConnection with the connection ID
-                            connection_id = await db_instance.create_event_connection(
-                                event1_id=connection.event1_id,
-                                event2_id=connection.event2_id,
-                                connection_type=connection.connection_type,
-                                description=connection.description,
-                                impact=connection.impact,
-                                project_id=self.project_id,
-                                user_id=self.user_id
-                            )
-                            
-                            # Create a new EventConnection object with the ID
-                            saved_connection = EventConnection(
-                                id=connection_id,
-                                event1_id=connection.event1_id,
-                                event2_id=connection.event2_id,
-                                connection_type=connection.connection_type,
-                                description=connection.description,
-                                impact=connection.impact,
-                                characters_involved=connection.characters_involved,
-                                location_relation=connection.location_relation
-                            )
-                            saved_connections.append(saved_connection)
+
+                        # Create new connection
+                        connection_id = await db_instance.create_event_connection(
+                            event1_id=connection.event1_id,
+                            event2_id=connection.event2_id,
+                            connection_type=connection.connection_type,
+                            description=connection.description,
+                            impact=connection.impact,
+                            project_id=self.project_id,
+                            user_id=self.user_id
+                        )
+
+                        saved_connection = EventConnection(
+                            id=connection_id,
+                            **connection.dict()
+                        )
+                        saved_connections.append(saved_connection)
 
             return saved_connections
         except ValidationError as e:

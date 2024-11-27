@@ -34,15 +34,7 @@ class _DashboardState extends State<Dashboard> {
     _fetchData();
   }
 
-  // Remove didChangeDependencies as it's causing extra refreshes
-  // @override
-  // void didChangeDependencies() {
-  //   super.didChangeDependencies();
-  //   Provider.of<AppState>(context, listen: false).refreshProjectData();
-  // }
-
   Future<void> _fetchData() async {
-    // Avoid fetching if widget is disposed
     if (!mounted) return;
 
     setState(() {
@@ -51,55 +43,42 @@ class _DashboardState extends State<Dashboard> {
     });
 
     try {
-      // Only fetch progress data once
-      await Provider.of<AppState>(context, listen: false)
-          .fetchProgressData(widget.projectId);
-
       final headers = await getAuthHeaders();
+      final appState = Provider.of<AppState>(context, listen: false);
+
+      // Fetch chapters
       final chapterResponse = await http.get(
         Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
         headers: headers,
       );
+
+      if (chapterResponse.statusCode == 200) {
+        final chapterJsonResponse =
+            json.decode(utf8.decode(chapterResponse.bodyBytes));
+        appState.setChapters(chapterJsonResponse['chapters']);
+
+        _wordCount = 0;
+        for (var chapter in chapterJsonResponse['chapters']) {
+          _wordCount += getWordCount(chapter['content']);
+        }
+      }
+
+      // Fetch codex items
       final codexResponse = await http.get(
         Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
         headers: headers,
       );
 
-      // Check if widget is still mounted before updating state
-      if (!mounted) return;
-
-      if (chapterResponse.statusCode == 200 &&
-          codexResponse.statusCode == 200) {
-        final chapterJsonResponse =
-            json.decode(utf8.decode(chapterResponse.bodyBytes));
+      if (codexResponse.statusCode == 200) {
         final codexJsonResponse =
             json.decode(utf8.decode(codexResponse.bodyBytes));
+        appState.setCodexItems(codexJsonResponse['codex_items']);
+      }
 
-        if (mounted) {
-          Provider.of<AppState>(context, listen: false)
-              .setChapters(chapterJsonResponse['chapters']);
-          Provider.of<AppState>(context, listen: false)
-              .setCodexItems(codexJsonResponse['codex_items']);
-
-          _wordCount = 0;
-          for (var chapter in chapterJsonResponse['chapters']) {
-            _wordCount += getWordCount(chapter['content']);
-          }
-
-          widget.onProgressChanged(chapterJsonResponse['chapters'].length,
-              codexJsonResponse['codex_items'].length, _wordCount);
-
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _error = 'Error fetching data';
-            _isLoading = false;
-          });
-        }
+      if (mounted) {
+        widget.onProgressChanged(
+            appState.chapters.length, appState.codexItems.length, _wordCount);
+        setState(() => _isLoading = false);
       }
     } catch (error) {
       if (mounted) {
@@ -220,9 +199,8 @@ class _DashboardState extends State<Dashboard> {
             appState.chapters.length,
             Icons.book,
             Theme.of(context).colorScheme.primary,
-            () => Navigator.pushNamed(context, '/chapters',
-                    arguments: widget.projectId)
-                .then((_) => _fetchData()),
+            true,
+            true,
           ),
         ),
         const SizedBox(width: 16),
@@ -232,22 +210,39 @@ class _DashboardState extends State<Dashboard> {
             appState.codexItems.length,
             Icons.list_alt,
             Theme.of(context).colorScheme.secondary,
-            () => Navigator.pushNamed(context, '/codex',
-                    arguments: widget.projectId)
-                .then((_) => _fetchData()),
+            true,
+            true,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildProgressCard(
-      String title, int value, IconData icon, Color color, VoidCallback onTap) {
+  Widget _buildProgressCard(String title, int value, IconData icon, Color color,
+      bool canView, bool canEdit) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          // Navigate based on card type
+          if (title == 'Chapters') {
+            Navigator.pushNamed(
+              context,
+              '/chapters',
+              arguments: {
+                'projectId': widget.projectId,
+                'readOnly': false,
+              },
+            ).then((_) => _fetchData());
+          } else if (title == 'Codex Entries') {
+            Navigator.pushNamed(
+              context,
+              '/codex',
+              arguments: widget.projectId,
+            ).then((_) => _fetchData());
+          }
+        },
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(24.0),

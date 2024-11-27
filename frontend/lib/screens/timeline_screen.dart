@@ -647,140 +647,24 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   @override
   Widget build(BuildContext context) {
-    final canAnalyze = events.length >= 2 || locations.length >= 2;
-
     return Scaffold(
       body: Column(
         children: [
-          // AppBar section
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Theme.of(context).colorScheme.primary,
-                  Theme.of(context).colorScheme.primaryContainer,
-                ],
-              ),
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  // Top actions row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const SizedBox(width: 48), // Balance for actions
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24.0),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Timeline & Locations',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineMedium
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onPrimary,
-                                    ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Track events and important locations',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onPrimary
-                                          .withOpacity(0.8),
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.refresh),
-                            onPressed: _loadData,
-                            color: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.analytics),
-                            onPressed: canAnalyze ? _analyzeConnections : null,
-                            color: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.auto_awesome),
-                            onPressed: _analyzeChapters,
-                            color: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Updated TabBar with 4 tabs
           TabBar(
             controller: _tabController,
-            isScrollable: true, // Allow tabs to scroll
-            tabs: [
-              Tab(
-                icon: const Icon(Icons.event),
-                text: 'Events (${events.length})',
-              ),
-              Tab(
-                icon: const Icon(Icons.place),
-                text: 'Locations (${locations.length})',
-              ),
-              Tab(
-                icon: const Icon(Icons.compare_arrows),
-                text: 'Event Connections (${eventConnections.length})',
-              ),
-              Tab(
-                icon: const Icon(Icons.compare_arrows),
-                text: 'Location Connections (${locationConnections.length})',
-              ),
+            tabs: const [
+              Tab(text: 'Events'),
+              Tab(text: 'Locations'),
+              Tab(text: 'Event Connections'),
+              Tab(text: 'Location Connections'),
             ],
           ),
-
-          // Updated TabBarView with 4 views
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                EventList(
-                  events: events,
-                  connections: eventConnections,
-                  onEdit: _editEvent,
-                  onDelete: _deleteEvent,
-                  onDeleteConnection: _deleteEventConnection,
-                  onUpdateConnection: _updateEventConnection,
-                ),
-                LocationList(
-                  locations: locations,
-                  connections: locationConnections,
-                  onEdit: _editLocation,
-                  onDelete: (id) =>
-                      _deleteLocation(id, skipConfirmation: false),
-                  onBatchDelete: _batchDeleteLocations,
-                  onDeleteConnection: _deleteLocationConnection,
-                  onUpdateConnection: _updateLocationConnection,
-                ),
+                _buildEventsView(),
+                _buildLocationsView(),
                 _buildEventConnectionsView(),
                 _buildLocationConnectionsView(),
               ],
@@ -910,7 +794,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           child: const Icon(Icons.place),
           label: 'Add Location',
           onTap: () {
-            _tabController.animateTo(1); // Switch to locations tab
+            _tabController.animateTo(1);
             _showCreateDialog();
           },
         ),

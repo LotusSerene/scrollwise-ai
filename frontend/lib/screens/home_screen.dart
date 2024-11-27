@@ -10,13 +10,10 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../components/editor.dart';
 import '../components/codex_generation.dart';
-import '../utils/auth.dart';
-import '../utils/constants.dart';
+
 import './character_relationships_screen.dart';
 import './character_journey_screen.dart';
 import './timeline_screen.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -27,14 +24,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   TabController? _tabController;
-  Map<String, bool> _permissions = {};
-  bool _isOwner = false;
-  late Future<void> _permissionsFuture;
+  late Future<void> _initFuture;
 
   @override
   void initState() {
     super.initState();
-    _permissionsFuture = _loadPermissions();
+    _initFuture = Future.delayed(Duration.zero);
   }
 
   @override
@@ -43,110 +38,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  Future<void> _loadPermissions() async {
-    final appState = Provider.of<AppState>(context, listen: false);
-    final projectId = appState.currentProjectId;
-
-    if (projectId == null) return;
-
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/collaborations/project/$projectId/permissions'),
-        headers: await getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        setState(() {
-          _permissions = Map<String, bool>.from(data['permissions']);
-          _isOwner = data['is_owner'];
-        });
-      } else {
-        setState(() {
-          _permissions = {};
-          _isOwner = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _permissions = {};
-        _isOwner = false;
-      });
-    }
-  }
-
-  void _initializeTabController(List<TabItem> authorizedTabs) {
-    // Dispose of the old controller if it exists
+  void _initializeTabController(List<TabItem> tabs) {
     _tabController?.dispose();
-
-    // Create a new controller with the current number of tabs
     _tabController = TabController(
-      length: authorizedTabs.length,
+      length: tabs.length,
       vsync: this,
       initialIndex: 0,
     );
   }
 
-  bool _hasPermission(String permission) {
-    if (_isOwner) return true;
-    return _permissions[permission] == true;
-  }
-
-  List<TabItem> _getAuthorizedTabs() {
-    final List<TabItem> authorizedTabs = [];
-
-    // Dashboard is always visible
-    authorizedTabs.add(TabItem(icon: Icons.dashboard, label: 'Dashboard'));
-
-    // Editor requires write_chapters permission
-    if (_hasPermission('write_chapters')) {
-      authorizedTabs.add(TabItem(icon: Icons.edit, label: 'Editor'));
-    }
-
-    // Codex requires manage_codex permission
-    if (_hasPermission('manage_codex')) {
-      authorizedTabs.add(TabItem(icon: Icons.book, label: 'Codex'));
-      authorizedTabs
-          .add(TabItem(icon: Icons.auto_awesome, label: 'Codex Generation'));
-    }
-
-    // Character features require manage_characters permission
-    if (_hasPermission('manage_characters')) {
-      authorizedTabs
-          .add(TabItem(icon: Icons.people, label: 'Character Relationships'));
-      authorizedTabs
-          .add(TabItem(icon: Icons.timeline, label: 'Character Journey'));
-    }
-
-    // Timeline requires manage_timeline permission
-    if (_hasPermission('manage_timeline')) {
-      authorizedTabs.add(TabItem(icon: Icons.schedule, label: 'Timeline'));
-    }
-
-    // Validity checks require check_validity permission
-    if (_hasPermission('check_validity')) {
-      authorizedTabs.add(TabItem(icon: Icons.check_circle, label: 'Validity'));
-    }
-
-    // Knowledge base features require manage_knowledge_base permission
-    if (_hasPermission('manage_knowledge_base')) {
-      authorizedTabs
-          .add(TabItem(icon: Icons.psychology, label: 'Knowledge Base'));
-      authorizedTabs.add(TabItem(icon: Icons.search, label: 'Query'));
-    }
-
-    // Chapter generation requires generate_chapters permission
-    if (_hasPermission('generate_chapters')) {
-      authorizedTabs.add(TabItem(icon: Icons.add_circle, label: 'Generate'));
-    }
-
-    // Project settings only available to owner
-    if (_isOwner) {
-      authorizedTabs
-          .add(TabItem(icon: Icons.settings, label: 'Project Settings'));
-    }
-
-    return authorizedTabs;
+  List<TabItem> _getTabs() {
+    return [
+      TabItem(icon: Icons.dashboard, label: 'Dashboard'),
+      TabItem(icon: Icons.edit, label: 'Editor'),
+      TabItem(icon: Icons.book, label: 'Codex'),
+      TabItem(icon: Icons.auto_awesome, label: 'Codex Generation'),
+      TabItem(icon: Icons.people, label: 'Character Relationships'),
+      TabItem(icon: Icons.timeline, label: 'Character Journey'),
+      TabItem(icon: Icons.schedule, label: 'Timeline'),
+      TabItem(icon: Icons.check_circle, label: 'Validity'),
+      TabItem(icon: Icons.psychology, label: 'Knowledge Base'),
+      TabItem(icon: Icons.search, label: 'Query'),
+      TabItem(icon: Icons.add_circle, label: 'Generate'),
+      TabItem(icon: Icons.settings, label: 'Project Settings'),
+    ];
   }
 
   Widget _buildNoProjectSelected() {
@@ -187,23 +102,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
 
     return FutureBuilder<void>(
-      future: _permissionsFuture,
+      future: _initFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+        final tabs = _getTabs();
+
+        if (_tabController?.length != tabs.length) {
+          _initializeTabController(tabs);
         }
 
-        // Get authorized tabs after permissions are loaded
-        final authorizedTabs = _getAuthorizedTabs();
-
-        // Initialize tab controller if needed
-        if (_tabController?.length != authorizedTabs.length) {
-          _initializeTabController(authorizedTabs);
-        }
-
-        // If we don't have a tab controller yet, show loading
         if (_tabController == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
@@ -221,14 +127,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ],
             ),
             actions: [
-              if (_hasPermission('refresh_data'))
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  tooltip: 'Refresh',
-                  onPressed: () {
-                    appState.refreshProjectData();
-                  },
-                ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Refresh',
+                onPressed: () => appState.refreshProjectData(),
+              ),
               IconButton(
                 icon: const Icon(Icons.exit_to_app),
                 tooltip: 'Back to Projects',
@@ -243,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 isScrollable: true,
                 indicatorWeight: 3,
                 indicatorColor: Theme.of(context).colorScheme.primary,
-                tabs: authorizedTabs
+                tabs: tabs
                     .map((tab) => Tab(
                           icon: Icon(tab.icon, size: 20),
                           text: tab.label,
@@ -255,9 +158,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           body: TabBarView(
             controller: _tabController,
             physics: const NeverScrollableScrollPhysics(),
-            children: authorizedTabs.map((tab) {
-              return _buildTabContent(tab.label, projectId);
-            }).toList(),
+            children: tabs
+                .map((tab) => _buildTabContent(tab.label, projectId))
+                .toList(),
           ),
         );
       },
@@ -265,99 +168,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildTabContent(String tabLabel, String projectId) {
-    try {
-      switch (tabLabel) {
-        case 'Dashboard':
-          return Dashboard(
-            projectId: projectId,
-            onProgressChanged: (chapters, codexEntries, wordCount) {
-              Provider.of<AppState>(context, listen: false)
-                  .updateProgress(chapters, codexEntries, wordCount);
-            },
-          );
-        case 'Editor':
-          if (!_hasPermission('write_chapters')) {
-            print('No write_chapters permission');
-            return _buildNoPermissionView('write_chapters');
-          }
-          return Editor(projectId: projectId);
-        case 'Codex':
-          return _hasPermission('manage_codex')
-              ? Codex(projectId: projectId)
-              : _buildNoPermissionView('manage_codex');
-        case 'Codex Generation':
-          return _hasPermission('manage_codex')
-              ? CodexGeneration(projectId: projectId)
-              : _buildNoPermissionView('manage_codex');
-        case 'Character Relationships':
-          return _hasPermission('manage_characters')
-              ? CharacterRelationshipsScreen(projectId: projectId)
-              : _buildNoPermissionView('manage_characters');
-        case 'Character Journey':
-          return _hasPermission('manage_characters')
-              ? CharacterJourneyScreen(projectId: projectId)
-              : _buildNoPermissionView('manage_characters');
-        case 'Timeline':
-          return _hasPermission('manage_timeline')
-              ? TimelineScreen(projectId: projectId)
-              : _buildNoPermissionView('manage_timeline');
-        case 'Validity':
-          return _hasPermission('check_validity')
-              ? Validity(projectId: projectId)
-              : _buildNoPermissionView('check_validity');
-        case 'Knowledge Base':
-          return _hasPermission('manage_knowledge_base')
-              ? KnowledgeBase(projectId: projectId)
-              : _buildNoPermissionView('manage_knowledge_base');
-        case 'Query':
-          if (!_hasPermission('manage_knowledge_base')) {
-            print('No manage_knowledge_base permission');
-            return _buildNoPermissionView('manage_knowledge_base');
-          }
-          return Query(projectId: projectId);
-        case 'Generate':
-          return _hasPermission('generate_chapters')
-              ? CreateChapter(projectId: projectId)
-              : _buildNoPermissionView('generate_chapters');
-        case 'Project Settings':
-          return _isOwner
-              ? ProjectSettings(projectId: projectId)
-              : _buildNoPermissionView('owner');
-        default:
-          return const Center(child: Text('Unknown tab'));
-      }
-    } catch (e) {
-      print('Error building tab content: $e');
-      return Center(child: Text('Error loading content: $e'));
+    switch (tabLabel) {
+      case 'Dashboard':
+        return Dashboard(
+          projectId: projectId,
+          onProgressChanged: (chapters, codexEntries, wordCount) {
+            Provider.of<AppState>(context, listen: false)
+                .updateProgress(chapters, codexEntries, wordCount);
+          },
+        );
+      case 'Editor':
+        return Editor(projectId: projectId, readOnly: false);
+      case 'Codex':
+        return Codex(projectId: projectId);
+      case 'Codex Generation':
+        return CodexGeneration(projectId: projectId);
+      case 'Character Relationships':
+        return CharacterRelationshipsScreen(projectId: projectId);
+      case 'Character Journey':
+        return CharacterJourneyScreen(projectId: projectId);
+      case 'Timeline':
+        return TimelineScreen(projectId: projectId);
+      case 'Validity':
+        return Validity(projectId: projectId);
+      case 'Knowledge Base':
+        return KnowledgeBase(projectId: projectId);
+      case 'Query':
+        return Query(projectId: projectId);
+      case 'Generate':
+        return CreateChapter(projectId: projectId);
+      case 'Project Settings':
+        return ProjectSettings(projectId: projectId);
+      default:
+        return const Center(child: Text('Unknown tab'));
     }
-  }
-
-  Widget _buildNoPermissionView(String permission) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.lock_outline,
-            size: 64,
-            color: Theme.of(context).colorScheme.error,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No Permission',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.error,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'You need the "$permission" permission to access this feature',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
   }
 }
 

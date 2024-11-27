@@ -8,7 +8,6 @@ import '../providers/app_state.dart';
 import 'dart:async';
 import 'universe_screen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
-import 'collaboration_screen.dart';
 
 final GlobalKey<FormState> _formKey = GlobalKey<FormState>(); // Form Key
 
@@ -25,7 +24,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   bool _isLoading = true;
   bool _isLoadingMore = false;
   List<dynamic> _projects = [];
-  List<dynamic> _collaborations = [];
   List<dynamic> _displayedProjects = [];
   final List<dynamic> _universes = [];
   final List<dynamic> _displayedUniverses = [];
@@ -41,14 +39,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   // Add TabController
   late TabController _tabController;
 
-  final TextEditingController _tokenController =
-      TextEditingController(); // Add this line
-
   @override
   void initState() {
     super.initState();
-    // Initialize TabController
-    _tabController = TabController(length: 3, vsync: this);
+    // Initialize TabController with 2 tabs instead of 3
+    _tabController = TabController(length: 2, vsync: this);
     _projectsScrollController.addListener(_onProjectsScroll);
     _universesScrollController.addListener(_onUniversesScroll);
     _fetchData();
@@ -140,16 +135,12 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       await Future.wait([
         _fetchProjects(),
         _fetchUniverses(),
-        _fetchCollaborations(),
       ]);
     } catch (error) {
       print('Error fetching data: $error');
       if (!_mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error fetching data: ${error.toString()}'),
-          behavior: SnackBarBehavior.fixed, // Use fixed instead of floating
-        ),
+        SnackBar(content: Text('Error fetching data: ${error.toString()}')),
       );
     } finally {
       if (_mounted) {
@@ -175,8 +166,8 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       if (!_mounted) return;
 
       if (response.statusCode == 200) {
-        final projects =
-            json.decode(utf8.decode(response.bodyBytes))['projects'];
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        final projects = data['projects'];
         _safeSetState(() {
           _projects = projects;
           _displayedProjects = projects.take(_itemsPerPage).toList();
@@ -209,27 +200,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     }
   }
 
-  Future<void> _fetchCollaborations() async {
-    if (!_mounted) return;
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/collaborations'),
-        headers: await getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        if (!_mounted) return;
-        setState(() {
-          _collaborations =
-              json.decode(utf8.decode(response.bodyBytes))['collaborations'];
-        });
-      }
-    } catch (error) {
-      print('Error fetching collaborations: $error');
-      rethrow;
-    }
-  }
-
   Future<void> _createProject() async {
     if (_projectFormKey.currentState!.validate()) {
       try {
@@ -246,7 +216,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         };
 
         final response = await http.post(
-          Uri.parse('$apiUrl/projects'),
+          Uri.parse('$apiUrl/projects/'),
           headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );
@@ -585,90 +555,25 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        drawer: _buildDrawer(), // Add the drawer here
-        appBar: AppBar(
-          title: const Text('Your Projects'),
-          bottom: TabBar(
-            controller: _tabController,
-            tabs: [
-              Tab(
-                icon: const Icon(Icons.folder_special),
-                text: 'Projects (${_projects.length})',
-              ),
-              const Tab(
-                icon: Icon(Icons.public),
-                text: 'Universes',
-              ),
-              Tab(
-                icon: const Icon(Icons.people),
-                text: 'Collaborations (${_collaborations.length})',
-              ),
-            ],
-          ),
-        ),
-        floatingActionButton: _buildFloatingActionButton(),
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildProjectsTab(),
-            _buildUniversesTab(),
-            _buildCollaborationsTab(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProjectsTab() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_projects.isEmpty) {
-      return _buildEmptyProjectsState();
-    }
-
-    return GridView.builder(
-      controller: _projectsScrollController,
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 1.3,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-      ),
-      itemCount: _displayedProjects.length + (_isLoadingMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index == _displayedProjects.length) {
-          return _buildLoadingIndicator();
-        }
-        return _buildProjectCard(_displayedProjects[index]);
-      },
-    );
-  }
-
   Widget _buildProjectCard(Map<String, dynamic> project) {
     final projectId = project['id']?.toString();
     if (projectId == null) {
-      return const SizedBox(); // Skip rendering invalid projects
+      return const SizedBox();
     }
 
     return Card(
       elevation: 4,
       child: InkWell(
         onTap: () {
-          Provider.of<AppState>(context, listen: false)
-              .setCurrentProject(projectId);
-          Navigator.pushReplacementNamed(
+          final appState = Provider.of<AppState>(context, listen: false);
+          appState.setCurrentProject(projectId);
+          Navigator.pushNamed(
             context,
             '/home',
             arguments: projectId,
-          );
+          ).then((_) {
+            _fetchData();
+          });
         },
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -685,26 +590,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.people),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => CollaborationScreen(
-                                projectId: project['id'],
-                                projectName: project['name'],
-                              ),
-                            ),
-                          );
-                        },
-                        tooltip: 'Manage Collaborations',
-                      ),
-                      _buildUniverseDropdown(project),
-                    ],
-                  ),
+                  _buildUniverseDropdown(project),
                 ],
               ),
               const SizedBox(height: 8),
@@ -1030,210 +916,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     );
   }
 
-  Widget _buildCollaborationsTab() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_collaborations.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.people_outline,
-              size: 64,
-              color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No collaborations found',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Join a project using a collaboration token',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.person_add),
-              label: const Text('Join Collaboration'),
-              onPressed: _showJoinCollaborationDialog,
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _collaborations.length,
-      itemBuilder: (context, index) {
-        final collaboration = _collaborations[index];
-        return Card(
-          elevation: 4,
-          child: ListTile(
-            leading: const Icon(Icons.folder_shared),
-            title: Text(collaboration['project_name']),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Owner: ${collaboration['owner_name']}'),
-                Text('Status: ${collaboration['status']}'),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 4,
-                  children:
-                      (collaboration['permissions'] as Map<String, dynamic>)
-                          .entries
-                          .where((e) => e.value == true)
-                          .map((e) => Chip(
-                                label: Text(
-                                  e.key.replaceAll('_', ' ').toUpperCase(),
-                                  style: const TextStyle(fontSize: 10),
-                                ),
-                              ))
-                          .toList(),
-                ),
-              ],
-            ),
-            trailing: PopupMenuButton(
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  child: const Text('View Project'),
-                  onTap: () {
-                    Provider.of<AppState>(context, listen: false)
-                        .setCurrentProject(collaboration['project_id']);
-                    Navigator.pushReplacementNamed(
-                      context,
-                      '/home',
-                      arguments: collaboration['project_id'],
-                    );
-                  },
-                ),
-                if (collaboration['status'] == 'active')
-                  PopupMenuItem(
-                    child: const Text('Leave Collaboration'),
-                    onTap: () => _leaveCollaboration(collaboration['id']),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _showJoinCollaborationDialog() async {
-    final token = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Join Collaboration'),
-        content: Form(
-          // Wrap with Form
-          key: _formKey, // Assign Form Key
-          child: TextFormField(
-            controller: _tokenController, // Use TextEditingController
-            decoration: const InputDecoration(
-              labelText: 'Collaboration Token',
-              hintText: 'Enter the token you received',
-            ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Please enter a token';
-              }
-              return null;
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          ElevatedButton(
-            child: const Text('Join'),
-            onPressed: () {
-              if (_formKey.currentState?.validate() ?? false) {
-                _formKey.currentState?.save();
-                Navigator.of(context).pop(_tokenController.text);
-              } else {
-                // Handle validation errors, perhaps show a Snackbar
-              }
-            },
-          ),
-        ],
-      ),
-    );
-
-    if (token != null && token.isNotEmpty) {
-      try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/collaborations/accept'),
-          headers: {
-            ...await getAuthHeaders(),
-            'Content-Type': 'application/json',
-          },
-          body: json.encode({'access_token': token}),
-        );
-
-        if (response.statusCode == 200) {
-          await _fetchCollaborations();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Successfully joined collaboration')),
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error joining collaboration: $e')),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _leaveCollaboration(String collaborationId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$apiUrl/collaborations/$collaborationId'),
-        headers: await getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        await _fetchCollaborations();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Successfully left collaboration')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error leaving collaboration: $e')),
-        );
-      }
-    }
-  }
-
   Widget _buildFloatingActionButton() {
-    if (_tabController.index == 2) {
-      // Collaborations tab
-      return FloatingActionButton(
-        onPressed: _showJoinCollaborationDialog,
-        child: const Icon(Icons.person_add),
-      );
-    }
-
     return SpeedDial(
       icon: Icons.add,
       activeIcon: Icons.close,
@@ -1249,6 +932,68 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           onTap: () => _showUniverseDialog(),
         ),
       ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Projects'),
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'Projects'),
+              Tab(text: 'Universes'),
+            ],
+          ),
+        ),
+        drawer: _buildDrawer(),
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildProjectsTab(),
+            _buildUniversesTab(),
+          ],
+        ),
+        floatingActionButton: _buildFloatingActionButton(),
+      ),
+    );
+  }
+
+  Widget _buildProjectsTab() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_projects.isEmpty) {
+      return _buildEmptyProjectsState();
+    }
+
+    return GridView.builder(
+      controller: _projectsScrollController,
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.3,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _displayedProjects.length + (_isLoadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index == _displayedProjects.length) {
+          return _buildLoadingIndicator();
+        }
+        return _buildProjectCard(_displayedProjects[index]);
+      },
     );
   }
 }

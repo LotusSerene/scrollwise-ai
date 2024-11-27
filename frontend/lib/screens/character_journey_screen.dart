@@ -245,40 +245,25 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 24),
-            Expanded(
-              child: _buildCharacterList(),
+    return Consumer<AppState>(
+      builder: (context, appState, child) {
+        return Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(),
+                const SizedBox(height: 24),
+                Expanded(
+                  child: _buildCharacterList(),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-      floatingActionButton: Consumer<AppState>(
-        builder: (context, appState, child) {
-          final isGenerating =
-              appState.characterJourneyState['isGenerating'] as bool;
-          return FloatingActionButton.extended(
-            onPressed: isGenerating ? null : _updateCharacterInformation,
-            icon: isGenerating
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Icon(Icons.update),
-            label: Text(isGenerating ? 'Updating...' : 'Update All'),
-          );
-        },
-      ),
+          ),
+          floatingActionButton: _buildUpdateButton(appState),
+        );
+      },
     );
   }
 
@@ -531,6 +516,24 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildUpdateButton(AppState appState) {
+    final isGenerating = appState.characterJourneyState['isGenerating'] as bool;
+    return FloatingActionButton.extended(
+      onPressed: isGenerating ? null : _updateCharacterInformation,
+      icon: isGenerating
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : const Icon(Icons.update),
+      label: Text(isGenerating ? 'Updating...' : 'Update All'),
     );
   }
 }
