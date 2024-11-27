@@ -1,0 +1,11 @@
+.aider*
+node_modules/
+.env
+chrome_data/
+chrome.log
+.vscode/
+_pycache_/
+.venv/
+*.log
+.env
+frontend/chroma_data
