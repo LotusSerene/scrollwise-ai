@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
+import 'package:provider/provider.dart';
+import '../providers/app_state.dart';
 
 class Codex extends StatefulWidget {
   final String projectId;
@@ -87,35 +89,27 @@ class _CodexState extends State<Codex> {
   }
 
   Future<void> _fetchCodexItems() async {
+    if (!_mounted) return;
+
     setState(() {
       _isLoading = true;
       _error = '';
     });
 
     try {
-      final headers = await getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
-        headers: headers,
-      );
-      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-      if (response.statusCode == 200 && !jsonResponse.containsKey('error')) {
-        if (mounted) {
-          setState(() {
-            _codexItems = jsonResponse['codex_items'];
-            _isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _error = jsonResponse['error'] ?? 'Error fetching codex items';
-            _isLoading = false;
-          });
-        }
+      await Provider.of<AppState>(context, listen: false)
+          .fetchCodexItems(widget.projectId);
+
+      if (_mounted) {
+        final appState = Provider.of<AppState>(context, listen: false);
+        setState(() {
+          _codexItems = appState.codexItems;
+          _displayedItems = _codexItems.take(_itemsPerPage).toList();
+          _isLoading = false;
+        });
       }
     } catch (error) {
-      if (mounted) {
+      if (_mounted) {
         setState(() {
           _error = 'Error fetching codex items: $error';
           _isLoading = false;

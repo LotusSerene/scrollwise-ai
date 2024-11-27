@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import '../utils/auth.dart';
-import '../utils/constants.dart';
 
 class ChaptersScreen extends StatefulWidget {
   final String projectId;
@@ -32,30 +28,21 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
     });
 
     try {
-      final headers = await getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-        headers: headers,
-      );
+      await Provider.of<AppState>(context, listen: false)
+          .fetchChapters(widget.projectId);
 
-      if (response.statusCode == 200) {
-        final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-        final List<dynamic> chapters = jsonResponse['chapters'];
-        Provider.of<AppState>(context, listen: false).setChapters(chapters);
+      if (mounted) {
         setState(() {
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _error = 'Error fetching chapters: ${response.statusCode}';
           _isLoading = false;
         });
       }
     } catch (error) {
-      setState(() {
-        _error = 'Error fetching chapters: $error';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = 'Error fetching chapters: $error';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -83,7 +70,8 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
       );
     }
 
-    return Scaffold( // Wrapped ListView.builder in Scaffold
+    return Scaffold(
+      // Wrapped ListView.builder in Scaffold
       appBar: AppBar(title: const Text('Chapters')),
       body: RefreshIndicator(
         onRefresh: _fetchChapters,
@@ -94,7 +82,8 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
             return ListTile(
               title: Text(chapter['title']),
               onTap: () {
-                Navigator.pushNamed(context, '/editor', arguments: chapter['id']);
+                Navigator.pushNamed(context, '/editor',
+                    arguments: chapter['id']);
               },
             );
           },

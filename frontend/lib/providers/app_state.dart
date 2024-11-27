@@ -208,12 +208,18 @@ class AppState extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
-        setChapters(data['chapters']);
+        final chapters = data['chapters'];
+        if (chapters == null) {
+          throw Exception('Invalid response format: missing chapters key');
+        }
+        setChapters(chapters);
       } else {
-        print('Error fetching chapters: ${response.statusCode}');
+        throw Exception('Failed to fetch chapters: ${response.statusCode}');
       }
     } catch (error) {
       print('Error fetching chapters: $error');
+      // Rethrow to allow UI to handle the error
+      rethrow;
     }
   }
 
@@ -227,12 +233,43 @@ class AppState extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
-        setCodexItems(data['codex_items']);
+        final items = data['codex_items'];
+        if (items == null) {
+          throw Exception('Invalid response format: missing codex_items key');
+        }
+        setCodexItems(items);
       } else {
-        print('Error fetching codex items: ${response.statusCode}');
+        throw Exception('Failed to fetch codex items: ${response.statusCode}');
       }
     } catch (error) {
       print('Error fetching codex items: $error');
+      rethrow;
+    }
+  }
+
+  Future<void> fetchValidityChecks(String projectId) async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('$apiUrl/validity-checks?project_id=$projectId'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        final checks = data['validity_checks'];
+        if (checks == null) {
+          throw Exception(
+              'Invalid response format: missing validity_checks key');
+        }
+        setValidityChecks(checks);
+      } else {
+        throw Exception(
+            'Failed to fetch validity checks: ${response.statusCode}');
+      }
+    } catch (error) {
+      print('Error fetching validity checks: $error');
+      rethrow;
     }
   }
 
