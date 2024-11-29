@@ -46,7 +46,7 @@
 | `get_characters`                               | [x]    | Converted to Supabase query                                             |
 | `get_events`                                   | [x]    | Converted to Supabase query                                             |
 | `get_locations`                                | [x]    | Converted to Supabase query                                             |
-| `mark_latest_chapter_processed`                | []     |                                                                         |
+| `mark_latest_chapter_processed`                | [x]     |  Converted to supabase query                                                                       |
 | `is_chapter_processed`                         | []     |                                                                         |
 | `get_model_settings`                           | []     |                                                                         |
 | `save_validity_check`                          | []     |                                                                         |
