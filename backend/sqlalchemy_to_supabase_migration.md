@@ -33,7 +33,7 @@
 | `update_codex_item_embedding_id`               | []     |                                                                         |
 | `create_project`                               | []     |                                                                         |
 | `get_projects_by_universe`                     | []     |                                                                         |
-| `get_project`                                  | []     |                                                                         |
+| `get_project`                                  | [x]     | Converted to Supabase query                                             |
 | `update_project`                               | []     |                                                                         |
 | `update_project_universe`                      | []     |                                                                         |
 | `delete_project`                               | []     |                                                                         |

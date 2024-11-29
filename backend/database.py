@@ -934,15 +934,15 @@ class Database:
                 raise
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                project = await session.get(Project, project_id)
-                if project and project.user_id == user_id:
-                    return project.to_dict()
-                raise Exception("Project not found")  # Add a specific exception message
-            except Exception as e:
-                self.logger.error(f"Error getting project: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('projects').select('*').eq('id', project_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                return None
+        except Exception as e:
+            self.logger.error(f"Error getting project: {str(e)}")
+            raise
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
