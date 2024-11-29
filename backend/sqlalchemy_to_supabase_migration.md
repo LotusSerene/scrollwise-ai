@@ -43,7 +43,7 @@
 | `delete_universe`                              | [x]     | Converted to Supabase query                                             |
 | `get_universe_codex`                           | [x]    | Converted to Supabase query                                             |
 | `get_universe_knowledge_base`                  | [x]    | Converted to Supabase query                                             |
-| `get_characters`                               | []     |                                                                         |
+| `get_characters`                               | [x]    | Converted to Supabase query                                             |
 | `get_events`                                   | []     |                                                                         |
 | `get_locations`                                | []     |                                                                         |
 | `mark_latest_chapter_processed`                | []     |                                                                         |

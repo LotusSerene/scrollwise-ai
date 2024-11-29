@@ -1049,31 +1049,24 @@ class Database:
             self.logger.error(f"Error getting universe knowledge base: {str(e)}")
             raise
 
-    async def get_characters(self, user_id: str, project_id: str, character_id: Optional[str] = None, name: Optional[str] = None):
-        async with await self.get_session() as session:
-            try:
-                query = select(CodexItem).where(
-                    and_(
-                        CodexItem.user_id == user_id,
-                        CodexItem.project_id == project_id,
-                        CodexItem.type == CodexItemType.CHARACTER.value
-                    )
-                )
-                
-                if character_id:
-                    query = query.filter_by(id=character_id)
-                if name:
-                    query = query.filter_by(name=name)
-                
-                characters = await session.execute(query)
-                characters = characters.scalars().all()
-                
-                if character_id or name:
-                    return characters[0].to_dict() if characters else None
-                return [character.to_dict() for character in characters]
-            except Exception as e:
-                self.logger.error(f"Error getting characters: {str(e)}")
-                raise
+    async def get_characters(self, user_id: str, project_id: str, character_id: Optional[str] = None, name: Optional[str] = None) -> List[Dict[str, Any]]:
+        try:
+            query = self.supabase.table('codex_items').select('*').eq('user_id', user_id).eq('project_id', project_id).eq('type', CodexItemType.CHARACTER.value)
+            
+            if character_id:
+                query = query.eq('id', character_id)
+            if name:
+                query = query.eq('name', name)
+            
+            response = query.execute()
+            characters = response.data
+            
+            if character_id or name:
+                return characters[0] if characters else None
+            return characters
+        except Exception as e:
+            self.logger.error(f"Error getting characters: {str(e)}")
+            raise
 
 
     async def get_events(self, project_id: str, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
