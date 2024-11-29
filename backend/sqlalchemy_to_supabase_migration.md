@@ -26,8 +26,8 @@
 | `create_location`                              | [x]     | Converted to Supabase query                                             |
 | `delete_location`                              | [x]    | Converted to Supabase query                                             |
 | `delete_event`                                 | [x]    | Converted to Supabase query                                             |
-| `mark_chapter_processed`                        | []     |                                                                         |
-| `is_chapter_processed_for_type`                | [x]    | Converted to Supabase query                                             |
+| `mark_chapter_processed`                        | [x]     | Converted to Supabase query                                             |
+| `is_chapter_processed_for_type`                | [x]     | Converted to Supabase query                                             |
 | `get_event_by_id`                              | []     |                                                                         |
 | `get_location_by_id`                           | []     |                                                                         |
 | `update_codex_item_embedding_id`               | []     |                                                                         |
