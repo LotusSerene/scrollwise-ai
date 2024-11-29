@@ -1,11 +1,29 @@
-.aider*
-node_modules/
-.env
-chrome_data/
-chrome.log
+# IDE and editor directories
 .vscode/
+
+# Python specific
 _pycache_/
 .venv/
-*.log
+backend/__pycache__/*
+*.db
+backend/.langchain.db
+
+
+# Environment variables
 .env
-frontend/chroma_data
+
+# Log files
+*.log
+chrome.log
+
+# Aider specific
+.aider*
+
+# Chroma specific
+chroma_data/*
+frontend/chroma_data/
+
+# Project specific
+chrome_data/
+TODOLIST.md
+changelog.md
