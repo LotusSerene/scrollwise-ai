@@ -919,19 +919,16 @@ class Database:
             raise
 
     async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                project = await session.get(Project, project_id)
-                if project and project.user_id == user_id:
-                    project.universe_id = universe_id
-                    project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return project.to_dict()
-                raise
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating project universe: {str(e)}")
-                raise
+        try:
+            updates = {"universe_id": universe_id, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
+            response = self.supabase.table('projects').update(updates).eq('id', project_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Project not found")
+        except Exception as e:
+            self.logger.error(f"Error updating project universe: {str(e)}")
+            raise
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
