@@ -1006,49 +1006,48 @@ class Database:
             raise
 
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
-        async with await self.get_session() as session:
-            try:
-                # Fetch all projects for the given universe
-                projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
-                projects = projects.scalars().all()
-                project_ids = [project.id for project in projects]
+        try:
+            # Fetch all projects for the given universe
+            projects_response = self.supabase.table('projects').select('*').eq('universe_id', universe_id).eq('user_id', user_id).execute()
+            projects = projects_response.data
+            project_ids = [project['id'] for project in projects]
 
-                # Initialize the result dictionary
-                knowledge_base = {project.id: [] for project in projects}
+            # Initialize the result dictionary
+            knowledge_base = {project['id']: [] for project in projects}
 
-                # Fetch chapters and codex items with pagination
-                for project_id in project_ids:
-                    chapters = await session.execute(select(Chapter).filter_by(project_id=project_id).limit(limit).offset(offset))
-                    codex_items = await session.execute(select(CodexItem).filter_by(project_id=project_id).limit(limit).offset(offset))
+            # Fetch chapters and codex items with pagination
+            for project_id in project_ids:
+                chapters_response = self.supabase.table('chapters').select('*').eq('project_id', project_id).limit(limit).offset(offset).execute()
+                codex_items_response = self.supabase.table('codex_items').select('*').eq('project_id', project_id).limit(limit).offset(offset).execute()
 
-                    chapters = chapters.scalars().all()
-                    codex_items = codex_items.scalars().all()
+                chapters = chapters_response.data
+                codex_items = codex_items_response.data
 
-                    for chapter in chapters:
-                        knowledge_base[project_id].append({
-                            'id': chapter.id,
-                            'type': 'chapter',
-                            'title': chapter.title,
-                            'content': chapter.content,
-                            'embedding_id': chapter.embedding_id
-                        })
+                for chapter in chapters:
+                    knowledge_base[project_id].append({
+                        'id': chapter['id'],
+                        'type': 'chapter',
+                        'title': chapter['title'],
+                        'content': chapter['content'],
+                        'embedding_id': chapter['embedding_id']
+                    })
 
-                    for item in codex_items:
-                        knowledge_base[project_id].append({
-                            'id': item.id,
-                            'type': 'codex_item',
-                            'name': item.name,
-                            'description': item.description,
-                            'embedding_id': item.embedding_id
-                        })
+                for item in codex_items:
+                    knowledge_base[project_id].append({
+                        'id': item['id'],
+                        'type': 'codex_item',
+                        'name': item['name'],
+                        'description': item['description'],
+                        'embedding_id': item['embedding_id']
+                    })
 
-                # Remove any empty projects
-                knowledge_base = {k: v for k, v in knowledge_base.items() if v}
+            # Remove any empty projects
+            knowledge_base = {k: v for k, v in knowledge_base.items() if v}
 
-                return knowledge_base
-            except Exception as e:
-                self.logger.error(f"Error getting locations: {str(e)}")
-                raise
+            return knowledge_base
+        except Exception as e:
+            self.logger.error(f"Error getting universe knowledge base: {str(e)}")
+            raise
 
     async def get_characters(self, user_id: str, project_id: str, character_id: Optional[str] = None, name: Optional[str] = None):
         async with await self.get_session() as session:
