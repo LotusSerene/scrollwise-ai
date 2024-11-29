@@ -92,29 +92,33 @@ class _LocationListState extends State<LocationList> {
       return _buildEmptyState();
     }
 
-    return Stack(
-      children: [
-        if (isSelectionMode)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildSelectionControls(),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 800),
+      child: Stack(
+        children: [
+          if (isSelectionMode)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildSelectionControls(),
+            ),
+          Padding(
+            padding: EdgeInsets.only(top: isSelectionMode ? 60.0 : 0),
+            child: ListView.builder(
+              shrinkWrap: true,
+              controller: _scrollController,
+              itemCount: _displayedLocations.length + (_isLoading ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (index == _displayedLocations.length) {
+                  return _buildLoadingIndicator();
+                }
+                return _buildLocationCard(_displayedLocations[index]);
+              },
+            ),
           ),
-        Padding(
-          padding: EdgeInsets.only(top: isSelectionMode ? 60.0 : 0),
-          child: ListView.builder(
-            controller: _scrollController,
-            itemCount: _displayedLocations.length + (_isLoading ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index == _displayedLocations.length) {
-                return _buildLoadingIndicator();
-              }
-              return _buildLocationCard(_displayedLocations[index]);
-            },
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

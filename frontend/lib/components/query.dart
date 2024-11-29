@@ -57,15 +57,14 @@ class _QueryState extends State<Query> {
     if (_queryController.text.isEmpty) return;
 
     final appState = Provider.of<AppState>(context, listen: false);
-    final currentHistory =
-        List<Map<String, dynamic>>.from(appState.queryState['chatHistory']);
+    final currentHistory = List<Map<String, dynamic>>.from(
+        appState.queryState['chatHistory'] ?? []);
+    final userMessage = {'type': 'human', 'content': _queryController.text};
 
+    // Update state immediately with user message
     appState.updateQueryProgress(
       isLoading: true,
-      chatHistory: [
-        ...currentHistory,
-        {'type': 'human', 'content': _queryController.text}
-      ],
+      chatHistory: [...currentHistory, userMessage],
       lastQuery: _queryController.text,
     );
 
@@ -110,16 +109,17 @@ class _QueryState extends State<Query> {
         // Save chat history
         await _saveChatHistory();
       } else {
-        // Remove the user's message if the request failed
+        // Keep the user message even if the request fails
         appState.updateQueryProgress(
           isLoading: false,
-          chatHistory: currentHistory,
+          chatHistory: [...currentHistory, userMessage],
         );
       }
     } catch (error) {
+      // Keep the user message even if the request fails
       appState.updateQueryProgress(
         isLoading: false,
-        chatHistory: currentHistory,
+        chatHistory: [...currentHistory, userMessage],
       );
     }
   }
@@ -162,7 +162,13 @@ class _QueryState extends State<Query> {
   Widget _buildChatArea() {
     return Consumer<AppState>(
       builder: (context, appState, child) {
-        final chatHistory = appState.queryState['chatHistory'];
+        final chatHistory = appState.queryState['chatHistory'] ?? [];
+
+        if (chatHistory.isEmpty) {
+          return const Center(
+            child: Text('Start a conversation by asking a question'),
+          );
+        }
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -172,6 +178,13 @@ class _QueryState extends State<Query> {
             reverse: false,
             itemBuilder: (context, index) {
               final message = chatHistory[index];
+              // Ensure we have both type and content
+              if (message == null ||
+                  message['type'] == null ||
+                  message['content'] == null) {
+                print('Invalid message at index $index: $message');
+                return const SizedBox.shrink();
+              }
               final isUser = message['type'] == 'human';
               return _buildMessageBubble(message, isUser);
             },
