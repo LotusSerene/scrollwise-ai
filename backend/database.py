@@ -1843,6 +1843,17 @@ class Database:
             self.logger.exception(f"Error approving user: {str(e)}") # Log the full traceback
             return False # Return False to indicate failure
 
+    async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
+        try:
+            # Delete event where id, user_id, and project_id match
+            response = self.supabase.table('events').delete().eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            
+            # Return True if something was deleted, False otherwise
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting event: {str(e)}")
+            raise
+
 
 db_instance = Database()
 
