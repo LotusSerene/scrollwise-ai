@@ -7,6 +7,24 @@ _pycache_/
 backend/__pycache__/*
 *.db
 backend/.langchain.db
+*.pyc
+.env
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend specific gitignore
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub/
+.dart_tool/
+*.iml
+*.iws
+.idea/
 
 
 # Environment variables
@@ -27,3 +45,8 @@ frontend/chroma_data/
 chrome_data/
 TODOLIST.md
 changelog.md
+
+# Root level gitignore
+.DS_Store
+.env
+*.log
