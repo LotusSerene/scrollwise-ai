@@ -30,7 +30,7 @@
 | `is_chapter_processed_for_type`                | [x]     | Converted to Supabase query                                             |
 | `get_event_by_id`                              | [x]    | Converted to Supabase query                                             |
 | `get_location_by_id`                           | []     |                                                                         |
-| `update_codex_item_embedding_id`               | []     |                                                                         |
+| `update_codex_item_embedding_id`               | [x]    | Converted to Supabase query                                             |
 | `create_project`                               | []     |                                                                         |
 | `get_projects_by_universe`                     | []     |                                                                         |
 | `get_project`                                  | [x]     | Converted to Supabase query                                             |

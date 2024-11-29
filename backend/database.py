@@ -838,18 +838,16 @@ class Database:
             raise
 
     async def update_codex_item_embedding_id(self, item_id, embedding_id):
-        async with await self.get_session() as session:
-            try:
-                codex_item = await session.get(CodexItem, item_id)
-                if codex_item:
-                    codex_item.embedding_id = embedding_id
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
-                raise
+        try:
+            updates = {"embedding_id": embedding_id, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
+            response = self.supabase.table('codex_items').update(updates).eq('id', item_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            else:
+                raise Exception("Failed to update codex item embedding_id")
+        except Exception as e:
+            self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
+            raise
 
 
     async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
