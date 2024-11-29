@@ -11,7 +11,7 @@
 | `create_chapter`                                | [x]     | Converted to Supabase query                                             |
 | `update_chapter`                                | [x]     | Converted to Supabase query                                             |
 | `delete_chapter`                                | [x]     | Converted to Supabase query                                             |
-| `get_chapter`                                   | []     |                                                                         |
+| `get_chapter`                                   | [x]    | Converted to Supabase query                                             |
 | `get_all_validity_checks`                      | [x]     | Converted to Supabase query                                             |
 | `delete_validity_check`                        | []     |                                                                         |
 | `create_codex_item`                             | []     |                                                                         |

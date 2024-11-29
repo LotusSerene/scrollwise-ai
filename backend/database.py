@@ -587,15 +587,15 @@ class Database:
             raise
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
-                    return chapter.to_dict()
-                raise Exception("Chapter not found")  # Add a specific exception message
-            except Exception as e:
-                self.logger.error(f"Error getting chapter: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chapters').select('*').eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Chapter not found")
+        except Exception as e:
+            self.logger.error(f"Error getting chapter: {str(e)}")
+            raise
 
     async def get_all_validity_checks(self, user_id: str, project_id: str):
         try:
