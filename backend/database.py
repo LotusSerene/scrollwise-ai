@@ -533,14 +533,12 @@ class Database:
             return None
 
     async def get_all_chapters(self, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                chapters = await session.execute(select(Chapter).filter_by(user_id=user_id, project_id=project_id).order_by(Chapter.chapter_number))
-                chapters = chapters.scalars().all()
-                return [chapter.to_dict() for chapter in chapters]
-            except Exception as e:
-                self.logger.error(f"Error fetching all chapters: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chapters').select('*').eq('user_id', user_id).eq('project_id', project_id).order('chapter_number').execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error fetching all chapters: {str(e)}")
+            raise
 
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         async with await self.get_session() as session:
