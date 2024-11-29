@@ -541,37 +541,27 @@ class Database:
             raise
 
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
-        async with await self.get_session() as session:
-            try:
-                # Log initial chapter creation attempt
-               # self.logger.info(f"Creating new chapter - Title: {title}, User: {user_id}, Project: {project_id}")
-                
-                # Get the highest chapter number for this project if not provided
-                if chapter_number is None:
-                    latest_chapter = await session.execute(select(Chapter).filter_by(project_id=project_id).order_by(Chapter.chapter_number.desc()))
-                    latest_chapter = latest_chapter.scalars().first()
-                    chapter_number = (latest_chapter.chapter_number + 1) if latest_chapter else 1
-                    #self.logger.debug(f"Assigned chapter number: {chapter_number}")
-
-                chapter = Chapter(
-                    id=str(uuid.uuid4()),
-                    title=title,
-                    content=content,
-                    chapter_number=chapter_number,
-                    user_id=user_id,
-                    project_id=project_id,
-                    embedding_id=embedding_id,
-                    processed_types=[]
-                )
-                session.add(chapter)
-                await session.commit()
-                
-                #self.logger.info(f"Successfully created chapter - ID: {chapter.id}, Number: {chapter_number}")
-                return chapter.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating chapter: {str(e)}", exc_info=True)
-                raise
+        try:
+            current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            chapter_data = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "content": content,
+                "chapter_number": chapter_number,
+                "user_id": user_id,
+                "project_id": project_id,
+                "embedding_id": embedding_id,
+                "processed_types": [],
+                "created_at": current_time.isoformat()
+            }
+            response = self.supabase.table('chapters').insert(chapter_data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create chapter")
+        except Exception as e:
+            self.logger.error(f"Error creating chapter: {str(e)}")
+            raise
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
         async with await self.get_session() as session:

@@ -8,7 +8,7 @@
 | `create_user`                                   | []     |                                                                         |
 | `get_user_by_email`                             | []     |                                                                         |
 | `get_all_chapters`                              | [x]    | Converted to Supabase query                                             |
-| `create_chapter`                                | []     |                                                                         |
+| `create_chapter`                                | [x]     | Converted to Supabase query                                             |
 | `update_chapter`                                | []     |                                                                         |
 | `delete_chapter`                                | []     |                                                                         |
 | `get_chapter`                                   | []     |                                                                         |
