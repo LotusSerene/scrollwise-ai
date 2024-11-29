@@ -23,4 +23,5 @@ typing-extensions==4.9.0
 asyncio==3.4.3
 backoff==2.2.2
 prometheus-client==0.18.0
+supabase==2.10.0
 

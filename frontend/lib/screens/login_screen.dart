@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../utils/auth.dart';
-import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import '../widgets/privacy_policy_dialog.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -28,27 +26,30 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response =
-            await http.post(Uri.parse('$apiUrl/auth/token'), headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }, body: {
-          'username': _emailController.text,
-          'password': _passwordController.text,
-        });
+        final response = await Supabase.instance.client.auth.signInWithPassword(
+          email: _emailController.text,
+          password: _passwordController.text,
+        );
 
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['access_token'] != null) {
-            widget.onLogin(data['access_token']);
-            await setAuthToken(data['access_token']); // Store the token
-            Fluttertoast.showToast(msg: 'Login successful!');
-            Navigator.pushReplacementNamed(
-                context, '/projects'); // Changed to '/projects'
+        if (response.session != null) {
+          final approvalStatus = await Supabase.instance.client
+              .from('user_approvals')
+              .select('is_approved')
+              .eq('id', response.user!.id)
+              .single();
+
+          if (approvalStatus['is_approved'] == true) {
+            widget.onLogin(response.session!.accessToken);
+            await setAuthToken(response.session!.accessToken);
+            Navigator.pushReplacementNamed(context, '/projects');
           } else {
-            Fluttertoast.showToast(msg: 'Invalid credentials');
+            await Supabase.instance.client.auth.signOut();
+            Fluttertoast.showToast(
+              msg:
+                  'Your account is pending approval. Please wait for admin confirmation.',
+              toastLength: Toast.LENGTH_LONG,
+            );
           }
-        } else {
-          Fluttertoast.showToast(msg: 'Error logging in');
         }
       } catch (error) {
         print('Login error: $error');
@@ -68,27 +69,23 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/auth/register'), // Corrected endpoint
-          headers: {'Content-Type': 'application/json'}, // Use JSON for body
-          body: json.encode({
-            // Encode body as JSON
-            'username': _emailController.text,
-            'password': _passwordController.text,
-          }),
+        final response = await Supabase.instance.client.auth.signUp(
+          email: _emailController.text,
+          password: _passwordController.text,
         );
 
-        if (response.statusCode == 201) {
-          // Successful registration
+        if (response.user != null) {
           Fluttertoast.showToast(
-              msg: 'Registration successful! You can now log in.');
-          // Optionally clear the form fields:
+              msg:
+                  'Registration successful! Please check your email to verify your account.');
           _emailController.clear();
           _passwordController.clear();
         } else {
           Fluttertoast.showToast(msg: 'Registration failed. Please try again.');
-          // Handle other status codes or errors from the backend if needed
         }
+      } on AuthException catch (error) {
+        print('Registration error: $error');
+        Fluttertoast.showToast(msg: error.message);
       } catch (error) {
         print('Registration error: $error');
         Fluttertoast.showToast(msg: 'Error during registration.');

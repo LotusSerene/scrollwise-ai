@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 from base64 import b64encode, b64decode
 from models import CodexItemType, WorldbuildingSubtype
+from supabase import create_client, Client
 
 load_dotenv()
 
@@ -470,81 +471,66 @@ class Database:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        self.connection_service = ConnectionService(self.logger)
         
-        # Initialize encryption key
-        encryption_key = os.getenv('ENCRYPTION_KEY')
-        if not encryption_key:
-            # Generate a new key if none exists
-            encryption_key = Fernet.generate_key()
-        
-        self.fernet = Fernet(encryption_key)
-        
-        db_url = os.getenv('DATABASE_URL')
-        if not db_url:
-            raise ValueError("DATABASE_URL environment variable is not set")
-        
-        # Convert the database URL to use the async driver
-        if db_url.startswith('postgresql://'):
-            db_url = db_url.replace('postgresql://', 'postgresql+asyncpg://', 1)
-        
-        # Remove QueuePool and use default async pool settings
-        self.engine = create_async_engine(
-            db_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_size=20,
-            max_overflow=10,
-            pool_recycle=3600
-        )
-        self.Session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        if not supabase_url or not supabase_key:
+            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables must be set")
+            
+        self.supabase: Client = create_client(supabase_url, supabase_key)
+
+    async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
+        try:
+            response = self.supabase.table('projects').select('*').eq('user_id', user_id).execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting projects: {str(e)}")
+            raise
+
+    async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
+        try:
+            response = self.supabase.table('universes').select('*').eq('user_id', user_id).execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting universes: {str(e)}")
+            raise
+
+    async def check_user_approval(self, user_id: str) -> bool:
+        try:
+            response = self.supabase.table('user_approvals').select('is_approved').eq('id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0].get('is_approved', False)
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking user approval: {str(e)}")
+            return False
 
     async def initialize(self):
-        """Initialize the database by creating all tables."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        """Initialize the database connection."""
+        # No need for explicit initialization with Supabase
+        pass
 
-    async def get_session(self):
-        return self.Session()
+    async def create_user(self, email: str, password: str):
+        try:
+            # Use Supabase auth to create user
+            response = await self.supabase.auth.sign_up({
+                "email": email,
+                "password": password
+            })
+            return response.user.id
+        except Exception as e:
+            self.logger.error(f"Error creating user: {str(e)}")
+            raise
 
-    async def create_user(self, email, password):
-        async with await self.get_session() as session:
-            try:
-                user = User(id=str(uuid.uuid4()), email=email, password=password)
-                session.add(user)
-                await session.commit()
-                return user.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating user: {str(e)}")
-                raise Exception("Chapter not found")
-
-    async def get_user_by_email(self, email):
-        async with await self.get_session() as session:
-            try:
-                user = await session.execute(select(User).filter_by(email=email))
-                user = user.scalars().first()
-                if user:
-                    # Decrypt API key if it exists
-                    api_key = None
-                    if user.api_key:
-                        try:
-                            encrypted_key = b64decode(user.api_key)
-                            api_key = self.fernet.decrypt(encrypted_key).decode()
-                        except Exception as e:
-                            self.logger.error(f"Error decrypting API key: {str(e)}")
-                    
-                    return {
-                        'id': user.id,
-                        'username': user.email,
-                        'hashed_password': user.password,
-                        'email': user.email,
-                        'api_key': api_key,
-                        'model_settings': json.loads(user.model_settings) if user.model_settings else None
-                    }
-            except Exception as e:
-                self.logger.error(f"Error getting user by email: {str(e)}")
-                raise
+    async def get_user_by_email(self, email: str):
+        try:
+            # Query Supabase for user
+            response = await self.supabase.from_('users').select('*').eq('email', email).single()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting user: {str(e)}")
+            return None
 
     async def get_all_chapters(self, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -602,8 +588,6 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error getting chapter: {str(e)}")
                 raise
-
-
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
         async with await self.get_session() as session:
@@ -933,36 +917,31 @@ class Database:
 
 
     async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
-        async with await self.get_session() as session:
-            try:
-                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
-                project = Project(
-                    id=str(uuid.uuid4()),
-                    name=name,
-                    description=description,
-                    user_id=user_id,
-                    universe_id=universe_id,
-                    created_at=current_time,
-                    updated_at=current_time
-                )
-                session.add(project)
-                await session.commit()
-                return project.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating project: {str(e)}")
-                raise
+        try:
+            current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            
+            # Create project data
+            project_data = {
+                "name": name,
+                "description": description,
+                "user_id": user_id,
+                "universe_id": universe_id,
+                "created_at": current_time.isoformat(),
+                "updated_at": current_time.isoformat()
+            }
+            
+            # Insert into Supabase
+            response = self.supabase.table('projects').insert(project_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create project")
+                
+        except Exception as e:
+            self.logger.error(f"Error creating project: {str(e)}")
+            raise
 
-
-    async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                projects = await session.execute(select(Project).filter_by(user_id=user_id))
-                projects = projects.scalars().all()
-                return [project.to_dict() for project in projects]
-            except Exception as e:
-                self.logger.error(f"Error getting universes: {str(e)}")
-                raise
 
     async def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1036,15 +1015,6 @@ class Database:
                 self.logger.error(f"Error deleting project: {str(e)}")
                 raise
 
-    async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                universes = await session.execute(select(Universe).filter_by(user_id=user_id))
-                universes = universes.scalars().all()
-                return [universe.to_dict() for universe in universes]
-            except Exception as e:
-                self.logger.error(f"Error fetching universes: {str(e)}")
-                raise
 
     async def create_universe(self, name: str, user_id: str, description: Optional[str] = None) -> str:
         async with await self.get_session() as session:
@@ -1251,7 +1221,6 @@ class Database:
                 self.logger.error(f"Error checking chapter processed status: {str(e)}")
                 raise
 
-
     async def get_model_settings(self, user_id):
         async with await self.get_session() as session:
             try:
@@ -1430,9 +1399,6 @@ class Database:
                 self.logger.error(f"Error getting preset by name: {str(e)}")
                 raise
 
-
-    # Add methods to update embedding_id for existing chapters and codex_items 
-
     async def update_chapter_embedding_id(self, chapter_id, embedding_id):
         async with await self.get_session() as session:
             try:
@@ -1490,7 +1456,6 @@ class Database:
                 self.logger.error(f"Error saving relationship analysis: {str(e)}")
                 raise
 
-
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
@@ -1526,8 +1491,6 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error getting character relationships: {str(e)}")
                 raise
-
-
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1591,8 +1554,6 @@ class Database:
                 self.logger.error(f"Error creating event: {str(e)}")
                 raise
 
-
-
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
             try:
@@ -1621,7 +1582,6 @@ class Database:
             except Exception as e:
                 self.logger.error(f"Error updating event: {str(e)}")
                 raise
-
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         async with await self.get_session() as session:
@@ -1689,7 +1649,6 @@ class Database:
                 self.logger.error(f"Error creating character relationship: {str(e)}")
                 raise
 
-
     async def update_event(self, event_id: str, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
             try:
@@ -1719,7 +1678,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error getting event by title: {str(e)}")
                 raise
-
 
     async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
@@ -1759,8 +1717,6 @@ class Database:
                 self.logger.error(f"Error updating character relationship: {str(e)}")
                 raise
 
-
-    
     async def get_location_by_name(self, name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
             try:
@@ -1778,7 +1734,6 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error getting location by ID: {str(e)}")
                 raise
-
 
     async def dispose(self):
         """Dispose of the engine and close all connections."""
@@ -1823,7 +1778,6 @@ class Database:
                 self.logger.error(f"Error creating location connection: {str(e)}")
                 raise
 
-
     async def create_event_connection(
         self,
         event1_id: str,
@@ -1858,7 +1812,6 @@ class Database:
 
     async def get_location_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         return await self.connection_service.get_connections(LocationConnection, project_id, user_id)
-
 
     async def get_event_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         return await self.connection_service.get_connections(EventConnection, project_id, user_id)
@@ -1943,6 +1896,14 @@ class Database:
                 await session.rollback()
                 self.logger.error(f"Error deleting event connection: {str(e)}")
                 raise
+
+    async def approve_user(self, user_id: str) -> bool:
+        try:
+            await self.supabase.table('user_approvals').update({'is_approved': True}).eq('id', user_id)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error approving user: {str(e)}")
+            return False
 
 
 db_instance = Database()

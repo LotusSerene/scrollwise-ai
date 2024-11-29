@@ -33,6 +33,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 import pdfplumber
 import io
+from supabase import create_client, Client
 
 # Load environment variables
 load_dotenv()
@@ -248,19 +249,40 @@ def get_password_hash(password):
 
 
 async def get_user(username: str):
-    user_dict = await db_instance.get_user_by_email(username)
-    if user_dict:
-        return UserInDB(**user_dict)
-    return None
+    try:
+        user = await db_instance.supabase.table('users').select('*').eq('email', username).single()
+        return user.data if user else None
+    except Exception as e:
+        logger.error(f"Error getting user: {str(e)}")
+        return None
 
 
 async def authenticate_user(username: str, password: str):
-    user = await get_user(username)
-    if not user:
+    try:
+        logger.info(f"Attempting to authenticate user: {username}")
+        response = await db_instance.supabase.auth.sign_in_with_password({
+            "email": username,
+            "password": password
+        })
+        logger.info(f"Supabase auth response: {response}")
+        
+        if response.user:
+            # Check if user is approved
+            approval = await db_instance.check_user_approval(response.user.id)
+            logger.info(f"User approval status: {approval}")
+            
+            if not approval:
+                logger.warning(f"User {username} not approved")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Account pending approval"
+                )
+            return response.user
+        logger.warning(f"Authentication failed for user: {username}")
         return False
-    if not verify_password(password, user.hashed_password):
+    except Exception as e:
+        logger.error(f"Authentication error: {str(e)}")
         return False
-    return user
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -282,30 +304,46 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        user_id: str = payload.get("user_id")
-        if username is None or user_id is None:
-            raise credentials_exception
-        token_data = TokenData(username=username, user_id=user_id)
-    except JWTError:
-        raise credentials_exception
-    user = await get_user(username=token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
+        # Get user data synchronously since get_user doesn't need to be awaited
+        user_response = db_instance.supabase.auth.get_user(token)
+        
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Check if user is approved
+        approval = await db_instance.check_user_approval(user_response.user.id)
+        if not approval:
+            raise HTTPException(
+                status_code=403,
+                detail="Account pending approval"
+            )
+            
+        return user_response.user
+    except Exception as e:
+        logger.error(f"Error validating token: {str(e)}")
+        logger.error(f"Token received: {token}")  # Add this for debugging
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if current_user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
+async def get_current_active_user(current_user = Depends(get_current_user)):
+    try:
+        # For Supabase users, we'll consider them active if they're approved
+        approval = await db_instance.check_user_approval(current_user.id)
+        if not approval:
+            raise HTTPException(status_code=400, detail="Inactive user")
+        return current_user
+    except Exception as e:
+        logger.error(f"Error getting active user: {str(e)}")
+        raise HTTPException(status_code=400, detail="Error validating user status")
 
 async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a project including chapter count and word count."""
@@ -507,23 +545,18 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
 # Auth routes
 @auth_router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    try:
-        user = await authenticate_user(form_data.username, form_data.password)
-        if not user:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-                data={"sub": user.username, "user_id": user.id}, expires_delta=access_token_expires
+    user = await authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        return {"access_token": access_token, "token_type": "bearer"}
-    except Exception as e:
-        logger.error(f"Error in login_for_access_token: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+    
+    access_token = create_access_token(
+        data={"sub": user.email, "user_id": user.id}
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @auth_router.post("/register", status_code=201)
 async def register(user: User):
@@ -1893,7 +1926,16 @@ async def delete_location_connection(
                 {"item_id": connection_id, "item_type": "location_connection"},
                 "delete"
             )
-        return {"message": "Connection deleted successfully"}
+            # Delete any associated connections
+            connections = await db_instance.get_location_connections(project_id, current_user.id)
+            for conn in connections:
+                if conn['location1_id'] == connection_id or conn['location2_id'] == connection_id:
+                    await agent_manager.update_or_remove_from_knowledge_base(
+                        {"item_id": conn['id'], "item_type": "location_connection"},
+                        "delete"
+                    )
+        
+        return {"message": "Location and associated connections deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting location connection: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

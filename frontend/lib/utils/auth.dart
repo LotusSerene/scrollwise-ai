@@ -2,26 +2,23 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 const String utf8Charset = 'UTF-8';
 
 Future<String?> getAuthToken() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getString('token');
+  final session = supabase.Supabase.instance.client.auth.currentSession;
+  return session?.accessToken;
 }
 
 Future<String?> getUserId() async {
-  final token = await getAuthToken();
-  if (token != null) {
-    final decodedToken = JwtDecoder.decode(token);
-    return decodedToken['sub'];
-  }
-  return null;
+  final session = supabase.Supabase.instance.client.auth.currentSession;
+  return session?.user.id;
 }
 
 Future<void> setAuthToken(String token) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setString('token', token);
+  // No need to manually set token when using Supabase
+  // Supabase handles token storage internally
 }
 
 Future<void> removeAuthToken() async {
