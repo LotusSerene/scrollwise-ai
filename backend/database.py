@@ -1082,19 +1082,16 @@ class Database:
             raise
 
     async def get_locations(self, user_id: str, project_id: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                query = select(Location).filter_by(
-                    user_id=user_id,
-                    project_id=project_id
-                )
-                if k is not None:
-                    query = query.limit(k)
-                locations = await session.execute(query)
-                return [location.to_dict() for location in locations.scalars().all()]
-            except Exception as e:
-                self.logger.error(f"Error getting locations: {str(e)}")
-                raise
+        try:
+            query = self.supabase.table('locations').select('*').eq('user_id', user_id).eq('project_id', project_id)
+            if k is not None:
+                query = query.limit(k)
+            response = query.execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting locations: {str(e)}")
+            raise
+
 
     async def mark_latest_chapter_processed(self, project_id: str, process_type: str):
         async with await self.get_session() as session:
