@@ -940,24 +940,24 @@ class Database:
 
 
     async def create_universe(self, name: str, user_id: str, description: Optional[str] = None) -> str:
-        async with await self.get_session() as session:
-            try:
-                current_time = datetime.now(timezone.utc).replace(tzinfo=None)
-                universe = Universe(
-                    id=str(uuid.uuid4()),
-                    name=name,
-                    description=description,
-                    user_id=user_id,
-                    created_at=current_time,
-                    updated_at=current_time
-                )
-                session.add(universe)
-                await session.commit()
-                return universe.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating universe: {str(e)}")
-                raise ValueError(str(e))
+        try:
+            current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            universe_data = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "description": description,
+                "user_id": user_id,
+                "created_at": current_time.isoformat(),
+                "updated_at": current_time.isoformat()
+            }
+            response = self.supabase.table('universes').insert(universe_data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create universe")
+        except Exception as e:
+            self.logger.error(f"Error creating universe: {str(e)}")
+            raise ValueError(str(e))
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
