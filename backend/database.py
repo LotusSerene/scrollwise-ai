@@ -649,21 +649,16 @@ class Database:
             raise
 
     async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                codex_item = await session.get(CodexItem, item_id)
-                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
-                    codex_item.name = name
-                    codex_item.description = description
-                    codex_item.type = type
-                    codex_item.subtype = subtype
-                    codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return codex_item.to_dict()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating codex item: {str(e)}")
-                raise
+        try:
+            updates = {"name": name, "description": description, "type": type, "subtype": subtype, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
+            response = self.supabase.table('codex_items').update(updates).eq('id', item_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Failed to update codex item")
+        except Exception as e:
+            self.logger.error(f"Error updating codex item: {str(e)}")
+            raise
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:

@@ -16,7 +16,7 @@
 | `delete_validity_check`                        | [x]     | Converted to Supabase query                                             |
 | `create_codex_item`                             | [x]     | Converted to Supabase query                                             |
 | `get_all_codex_items`                           | [x]     | Converted to Supabase query                                             |
-| `update_codex_item`                             | []     |                                                                         |
+| `update_codex_item`                             | [x]     | Converted to Supabase query                                             |
 | `delete_codex_item`                             | []     |                                                                         |
 | `get_codex_item_by_id`                          | []     |                                                                         |
 | `save_api_key`                                 | []     |                                                                         |
