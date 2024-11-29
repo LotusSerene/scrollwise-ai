@@ -616,7 +616,6 @@ class Database:
             self.logger.error(f"Error deleting validity check: {str(e)}")
             raise
 
-
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -679,19 +678,30 @@ class Database:
             self.logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
 
-    async def save_api_key(self, user_id, api_key):
-        async with await self.get_session() as session:
-            try:
-                user = await session.get(User, user_id)
-                if user:
-                    # Encrypt the API key before saving
-                    encrypted_key = self.fernet.encrypt(api_key.encode())
-                    user.api_key = b64encode(encrypted_key).decode()
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving API key: {str(e)}")
-                raise
+    async def save_api_key(self, user_id: str, api_key: str):
+        try:
+            # Encrypt the API key before saving
+            encrypted_key = self.fernet.encrypt(api_key.encode())
+            encoded_key = b64encode(encrypted_key).decode()
+            
+            # Update or insert the API key in Supabase
+            update_data = {
+                "api_key": encoded_key,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Using upsert to handle both insert and update cases
+            response = self.supabase.table('users').upsert({
+                "id": user_id,
+                **update_data
+            }).execute()
+            
+            if not response.data:
+                raise Exception("Failed to save API key")
+                
+        except Exception as e:
+            self.logger.error(f"Error saving API key: {str(e)}")
+            raise
 
     async def get_api_key(self, user_id):
         async with await self.get_session() as session:

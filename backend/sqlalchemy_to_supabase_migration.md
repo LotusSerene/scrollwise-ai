@@ -19,9 +19,9 @@
 | `update_codex_item`                             | [x]     | Converted to Supabase query                                             |
 | `delete_codex_item`                             | [x]     | Converted to Supabase query                                             |
 | `get_codex_item_by_id`                          | [x]     | Converted to Supabase query                                             |
-| `save_api_key`                                 | []     |                                                                         |
-| `get_api_key`                                  | []     |                                                                         |
-| `remove_api_key`                               | []     |                                                                         |
+| `save_api_key`                                 | [x]     | Converted to Supabase upsert                                             |
+| `get_api_key`                                  | []     |                                |
+| `remove_api_key`                               | []     |                     |
 | `save_model_settings`                           | []     |                                                                         |
 | `create_location`                              | []     |                                                                         |
 | `delete_location`                              | []     |                                                                         |
