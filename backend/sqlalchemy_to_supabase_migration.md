@@ -23,7 +23,7 @@
 | `get_api_key`                                  | [x]     | Converted to Supabase query                                             |
 | `remove_api_key`                               | [x]     | Converted to Supabase query                                             |
 | `save_model_settings`                           | [x]     | Converted to Supabase query                                             |
-| `create_location`                              | []     |                                                                         |
+| `create_location`                              | [x]     | Converted to Supabase query                                             |
 | `delete_location`                              | []     |                                                                         |
 | `delete_event`                                 | []     |                                                                         |
 | `mark_chapter_processed`                        | []     |                                                                         |
