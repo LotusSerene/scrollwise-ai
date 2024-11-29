@@ -576,21 +576,15 @@ class Database:
             raise
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
-        async with await self.get_session() as session:
-            try:
-                # First, delete related validity checks
-                await session.execute(delete(ValidityCheck).where(ValidityCheck.chapter_id == chapter_id, ValidityCheck.user_id == user_id, ValidityCheck.project_id == project_id))
-
-                # Then, delete the chapter
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
-                    await session.delete(chapter)
-                    await session.commit()
-                    return True
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting chapter: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chapters').delete().eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            else:
+                return False
+        except Exception as e:
+            self.logger.error(f"Error deleting chapter: {str(e)}")
+            raise
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
