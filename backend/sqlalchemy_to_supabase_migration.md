@@ -3,7 +3,7 @@
 | Method Name                                      | Status | Notes                                                                 |
 |-------------------------------------------------|--------|-------------------------------------------------------------------------|
 | `get_projects`                                  | [x]     | Converted to Supabase query                                             |
-| `get_universes`                                | []     |                                                                         |
+| `get_universes`                                | [x]     | Converted to Supabase query                                             |
 | `check_user_approval`                           | []     |                                                                         |
 | `create_user`                                   | []     |                                                                         |
 | `get_user_by_email`                             | []     |                                                                         |
