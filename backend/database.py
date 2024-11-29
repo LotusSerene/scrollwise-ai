@@ -761,29 +761,23 @@ class Database:
             raise
 
     async def delete_location(self, location_id: str, project_id: str, user_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                # First verify the location exists and belongs to the user/project
-                location = await session.get(Location, location_id)
-                if location and location.user_id == user_id and location.project_id == project_id:
-                    # Delete associated connections first
-                    await session.execute(
-                        delete(LocationConnection).where(
-                            or_(
-                                LocationConnection.location1_id == location_id,
-                                LocationConnection.location2_id == location_id
-                            )
-                        )
-                    )
-                    # Then delete the location
-                    await session.delete(location)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting location: {str(e)}")
-                raise
+        try:
+            # First delete associated connections
+            response = self.supabase.table('location_connections').delete().or_(
+                f"location1_id=eq.{location_id}",
+                f"location2_id=eq.{location_id}"
+            ).execute()
+            if not response.data:
+                raise Exception("Failed to delete location connections")
+
+            # Then delete the location
+            response = self.supabase.table('locations').delete().eq('id', location_id).eq('project_id', project_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error deleting location: {str(e)}")
+            raise
 
     async def delete_event(self, event_id: str, project_id: str, user_id: str) -> bool:
         async with await self.get_session() as session:
