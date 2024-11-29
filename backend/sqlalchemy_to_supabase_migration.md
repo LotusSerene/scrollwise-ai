@@ -21,7 +21,7 @@
 | `get_codex_item_by_id`                          | [x]     | Converted to Supabase query                                             |
 | `save_api_key`                                 | [x]     | Converted to Supabase upsert                                             |
 | `get_api_key`                                  | [x]     | Converted to Supabase query                                             |
-| `remove_api_key`                               | []     |                     |
+| `remove_api_key`                               | [x]     | Converted to Supabase query                                             |
 | `save_model_settings`                           | []     |                                                                         |
 | `create_location`                              | []     |                                                                         |
 | `delete_location`                              | []     |                                                                         |

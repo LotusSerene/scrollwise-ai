@@ -718,16 +718,13 @@ class Database:
             raise
 
     async def remove_api_key(self, user_id):
-        async with await self.get_session() as session:
-            try:
-                user = await session.get(User, user_id)
-                if user:
-                    user.api_key = None
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error removing API key: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('users').update({'api_key': None}).eq('id', user_id).execute()
+            if not response.data:
+                raise Exception("Failed to remove API key")
+        except Exception as e:
+            self.logger.error(f"Error removing API key: {str(e)}")
+            raise
 
     async def save_model_settings(self, user_id, settings):
         async with await self.get_session() as session:
