@@ -1094,23 +1094,28 @@ class Database:
 
 
     async def mark_latest_chapter_processed(self, project_id: str, process_type: str):
-        async with await self.get_session() as session:
-            try:
-                latest_chapter = await session.execute(select(Chapter).filter(
-                    Chapter.project_id == project_id
-                ).order_by(Chapter.chapter_number.desc()))
-                latest_chapter = latest_chapter.scalars().first()
+        try:
+            # Fetch the latest chapter
+            response = self.supabase.table('chapters').select('*').eq('project_id', project_id).order('chapter_number', desc=True).limit(1).execute()
+            if not response.data or len(response.data) == 0:
+                raise Exception("Latest chapter not found")
 
-                if latest_chapter:
-                    if not latest_chapter.processed_types:
-                        latest_chapter.processed_types = []
-                    if process_type not in latest_chapter.processed_types:
-                        latest_chapter.processed_types.append(process_type)
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
-                raise
+            latest_chapter = response.data[0]
+            processed_types = latest_chapter.get('processed_types', [])
+
+            # Update processed_types if the process_type is not already present
+            if process_type not in processed_types:
+                processed_types.append(process_type)
+                updates = {
+                    "processed_types": processed_types,
+                    "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                }
+                response = self.supabase.table('chapters').update(updates).eq('id', latest_chapter['id']).execute()
+                if not response.data:
+                    raise Exception("Failed to update chapter processed types")
+        except Exception as e:
+            self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
+            raise
 
     async def is_chapter_processed(self, chapter_id: str, process_type: str) -> bool:
         async with await self.get_session() as session:
