@@ -1902,8 +1902,8 @@ class Database:
             await self.supabase.table('user_approvals').update({'is_approved': True}).eq('id', user_id)
             return True
         except Exception as e:
-            self.logger.error(f"Error approving user: {str(e)}")
-            return False
+            self.logger.exception(f"Error approving user: {str(e)}") # Log the full traceback
+            return False # Return False to indicate failure
 
 
 db_instance = Database()
