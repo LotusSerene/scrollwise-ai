@@ -564,18 +564,16 @@ class Database:
             raise
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter and chapter.user_id == user_id and chapter.project_id == project_id:
-                    chapter.title = title
-                    chapter.content = content
-                    await session.commit()
-                    return chapter.to_dict()
-                raise
-            except Exception as e:
-                self.logger.error(f"Error getting chapter: {str(e)}")
-                raise
+        try:
+            updates = {"title": title, "content": content}
+            response = self.supabase.table('chapters').update(updates).eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Failed to update chapter")
+        except Exception as e:
+            self.logger.error(f"Error updating chapter: {str(e)}")
+            raise
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
         async with await self.get_session() as session:
