@@ -960,15 +960,14 @@ class Database:
             raise ValueError(str(e))
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                universe = await session.get(Universe, universe_id)
-                if universe and universe.user_id == user_id:
-                    return universe.to_dict()
-                raise
-            except Exception as e:
-                self.logger.error(f"Error updating universe: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('universes').select('*').eq('id', universe_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting universe: {str(e)}")
+            raise
 
 
     async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:

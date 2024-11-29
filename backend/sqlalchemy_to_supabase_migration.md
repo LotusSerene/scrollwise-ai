@@ -38,7 +38,7 @@
 | `update_project_universe`                      | [x]     | Converted to Supabase query                                                                            |
 | `delete_project`                               | [x]     | Converted to Supabase query                                             |
 | `create_universe`                              | [x]     | Converted to Supabase query                                             |
-| `get_universe`                                 | []     |                                                                         |
+| `get_universe`                                 | [x]    | Converted to Supabase query                                             |
 | `update_universe`                              | []     |                                                                         |
 | `delete_universe`                              | [x]     | Converted to Supabase query                                             |
 | `get_universe_codex`                           | []     |                                                                         |
