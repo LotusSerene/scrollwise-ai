@@ -661,30 +661,12 @@ class Database:
             raise
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                # First, delete related character relationship analyses
-                await session.execute(delete(CharacterRelationshipAnalysis).where(
-                    (CharacterRelationshipAnalysis.character1_id == item_id) |
-                    (CharacterRelationshipAnalysis.character2_id == item_id)
-                ))
-
-                codex_item = await session.get(CodexItem, item_id)
-                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
-                    events = await session.execute(select(Event).filter_by(character_id=item_id))
-                    events = events.scalars().all()
-                    for event in events:
-                        event.character_id = None
-                        event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-
-                    await session.delete(codex_item)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting codex item: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('codex_items').delete().eq('id', item_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            return response.data and len(response.data) > 0
+        except Exception as e:
+            self.logger.error(f"Error deleting codex item: {str(e)}")
+            raise
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
