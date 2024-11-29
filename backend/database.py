@@ -805,15 +805,16 @@ class Database:
 
 
     async def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter and isinstance(chapter.processed_types, list):
-                    return process_type in chapter.processed_types
-                return False
-            except Exception as e:
-                self.logger.error(f"Error marking chapter as processed: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chapters').select('processed_types').eq('id', chapter_id).execute()
+            if response.data and len(response.data) > 0:
+                chapter = response.data[0]
+                processed_types = chapter.get('processed_types', [])
+                return process_type in processed_types
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking chapter processed status: {str(e)}")
+            raise
 
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
