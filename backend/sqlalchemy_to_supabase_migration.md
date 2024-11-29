@@ -45,7 +45,7 @@
 | `get_universe_knowledge_base`                  | [x]    | Converted to Supabase query                                             |
 | `get_characters`                               | [x]    | Converted to Supabase query                                             |
 | `get_events`                                   | [x]    | Converted to Supabase query                                             |
-| `get_locations`                                | []     |                                                                         |
+| `get_locations`                                | [x]    | Converted to Supabase query                                             |
 | `mark_latest_chapter_processed`                | []     |                                                                         |
 | `is_chapter_processed`                         | []     |                                                                         |
 | `get_model_settings`                           | []     |                                                                         |
