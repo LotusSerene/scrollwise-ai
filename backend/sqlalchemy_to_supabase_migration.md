@@ -15,7 +15,7 @@
 | `get_all_validity_checks`                      | [x]     | Converted to Supabase query                                             |
 | `delete_validity_check`                        | [x]     | Converted to Supabase query                                             |
 | `create_codex_item`                             | [x]     | Converted to Supabase query                                             |
-| `get_all_codex_items`                           | []     |                                                                         |
+| `get_all_codex_items`                           | [x]     | Converted to Supabase query                                             |
 | `update_codex_item`                             | []     |                                                                         |
 | `delete_codex_item`                             | []     |                                                                         |
 | `get_codex_item_by_id`                          | []     |                                                                         |

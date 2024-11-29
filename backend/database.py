@@ -641,14 +641,12 @@ class Database:
             raise
 
     async def get_all_codex_items(self, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                codex_items = await session.execute(select(CodexItem).filter_by(user_id=user_id, project_id=project_id))
-                codex_items = codex_items.scalars().all()
-                return [item.to_dict() for item in codex_items]
-            except Exception as e:
-                self.logger.error(f"Error getting all codex items: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('codex_items').select('*').eq('user_id', user_id).eq('project_id', project_id).execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting all codex items: {str(e)}")
+            raise
 
     async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
