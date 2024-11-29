@@ -41,7 +41,7 @@
 | `get_universe`                                 | [x]    | Converted to Supabase query                                             |
 | `update_universe`                              | [x]    | Converted to Supabase query                                             |
 | `delete_universe`                              | [x]     | Converted to Supabase query                                             |
-| `get_universe_codex`                           | []     |                                                                         |
+| `get_universe_codex`                           | [x]    | Converted to Supabase query                                             |
 | `get_universe_knowledge_base`                  | []     |                                                                         |
 | `get_characters`                               | []     |                                                                         |
 | `get_events`                                   | []     |                                                                         |

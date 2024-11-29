@@ -992,16 +992,18 @@ class Database:
             raise
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                codex_items = await session.execute(select(CodexItem).join(Project).filter(
-                    and_(Project.universe_id == universe_id, CodexItem.user_id == user_id)
-                ))
-                codex_items = codex_items.scalars().all()
-                return [item.to_dict() for item in codex_items]
-            except Exception as e:
-                self.logger.error(f"Error getting events: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('codex_items').select('*').join('projects', on='codex_items.project_id=projects.id').filter(
+                f"projects.universe_id=eq.{universe_id}",
+                f"codex_items.user_id=eq.{user_id}"
+            ).execute()
+            if response.data:
+                return [item for item in response.data]
+            else:
+                return []
+        except Exception as e:
+            self.logger.error(f"Error getting universe codex: {str(e)}")
+            raise
 
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
         async with await self.get_session() as session:
