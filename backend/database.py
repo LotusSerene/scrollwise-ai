@@ -828,15 +828,14 @@ class Database:
             raise
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                location = await session.get(Location, location_id)
-                if location and location.user_id == user_id and location.project_id == project_id:
-                    return location.to_dict()
-                return None
-            except Exception as e:
-                self.logger.error(f"Error getting location by ID: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('locations').select('*').eq('id', location_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting location by ID: {str(e)}")
+            raise
 
     async def update_codex_item_embedding_id(self, item_id, embedding_id):
         async with await self.get_session() as session:
