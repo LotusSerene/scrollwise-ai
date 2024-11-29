@@ -36,7 +36,7 @@
 | `get_project`                                  | [x]     | Converted to Supabase query                                             |
 | `update_project`                               | [x]    | Converted to Supabase query                                             |
 | `update_project_universe`                      | [x]     | Converted to Supabase query                                                                            |
-| `delete_project`                               | []     |                                                                         |
+| `delete_project`                               | [x]     | Converted to Supabase query                                             |
 | `create_universe`                              | []     |                                                                         |
 | `get_universe`                                 | []     |                                                                         |
 | `update_universe`                              | []     |                                                                         |
