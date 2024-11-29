@@ -29,13 +29,13 @@
 | `mark_chapter_processed`                        | [x]     | Converted to Supabase query                                             |
 | `is_chapter_processed_for_type`                | [x]     | Converted to Supabase query                                             |
 | `get_event_by_id`                              | [x]    | Converted to Supabase query                                             |
-| `get_location_by_id`                           | []     |                                                                         |
+| `get_location_by_id`                           | [x]    | Converted to Supabasequery                                                                  |
 | `update_codex_item_embedding_id`               | [x]    | Converted to Supabase query                                             |
 | `create_project`                               | [x]    | Converted to Supabase query                                             |
 | `get_projects_by_universe`                     | [x]    | Converted to Supabase query                                             |
 | `get_project`                                  | [x]     | Converted to Supabase query                                             |
 | `update_project`                               | [x]    | Converted to Supabase query                                             |
-| `update_project_universe`                      | []     |                                                                         |
+| `update_project_universe`                      | [x]     | Converted to Supabase query                                                                            |
 | `delete_project`                               | []     |                                                                         |
 | `create_universe`                              | []     |                                                                         |
 | `get_universe`                                 | []     |                                                                         |
