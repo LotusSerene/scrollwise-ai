@@ -818,15 +818,14 @@ class Database:
 
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                event = await session.get(Event, event_id)
-                if event and event.user_id == user_id and event.project_id == project_id:
-                    return event.to_dict()
-                raise
-            except Exception as e:
-                self.logger.error(f"Error checking chapter processed status: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('events').select('*').eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting event by ID: {str(e)}")
+            raise
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         async with await self.get_session() as session:
