@@ -772,80 +772,88 @@ class AgentManager:
         return results
 
     async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
-        qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
-        
-        # Create a history-aware retriever function
-        async def retrieve_with_history(query: str) -> List[Document]:
-            # Use the condense question prompt to get the standalone question
-            condense_question_prompt = ChatPromptTemplate.from_messages([
-                ("human", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
+        try:
+            qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
+            
+            # Create a history-aware retriever function
+            async def retrieve_with_history(query: str) -> List[Document]:
+                # Use the condense question prompt to get the standalone question
+                condense_question_prompt = ChatPromptTemplate.from_messages([
+                    ("human", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
+                    MessagesPlaceholder(variable_name="chat_history"),
+                    ("human", "{input}"),
+                ])
+                
+                # Prepare chat history - ensure alternating human/ai messages
+                messages = []
+                for i, message in enumerate(chat_history):
+                    if isinstance(message, dict):
+                        if message.get('type') == 'human':
+                            messages.append(HumanMessage(content=message['content']))
+                        elif message.get('type') == 'ai':
+                            # Only add AI message if previous message was human
+                            if messages and isinstance(messages[-1], HumanMessage):
+                                messages.append(AIMessage(content=message['content']))
+                    elif isinstance(message, (HumanMessage, AIMessage)):
+                        if isinstance(message, HumanMessage) or (messages and isinstance(messages[-1], HumanMessage)):
+                            messages.append(message)
+                    
+                # Get the standalone question
+                chain = condense_question_prompt | qa_llm | StrOutputParser()
+                standalone_question = await chain.ainvoke({
+                    "input": query,
+                    "chat_history": messages
+                })
+                
+                # Use similarity search instead of retriever
+                return await self.vector_store.similarity_search(standalone_question, k=5)
+
+            # Create the QA chain with proper message ordering
+            qa_prompt = ChatPromptTemplate.from_messages([
+                ("human", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
+                ("human", "Context: {context}"),
             ])
             
-            # Prepare chat history - ensure alternating human/ai messages
+            # Get relevant documents using our history-aware retriever
+            documents = await retrieve_with_history(query)
+            
+            # Format documents for the context
+            context = "\n\n".join(doc.page_content for doc in documents)
+            
+            # Prepare chat history for QA
             messages = []
-            for i, message in enumerate(chat_history):
+            for message in chat_history:
                 if isinstance(message, dict):
                     if message.get('type') == 'human':
                         messages.append(HumanMessage(content=message['content']))
                     elif message.get('type') == 'ai':
-                        # Only add AI message if previous message was human
-                        if messages and isinstance(messages[-1], HumanMessage):
-                            messages.append(AIMessage(content=message['content']))
+                        messages.append(AIMessage(content=message['content']))
                 elif isinstance(message, (HumanMessage, AIMessage)):
-                    if isinstance(message, HumanMessage) or (messages and isinstance(messages[-1], HumanMessage)):
-                        messages.append(message)
-                    
-            # Get the standalone question
-            chain = condense_question_prompt | qa_llm | StrOutputParser()
-            standalone_question = await chain.ainvoke({
-                "input": query,
-                "chat_history": messages
-            })
+                    messages.append(message)
             
-            # Use similarity search instead of retriever
-            return await self.vector_store.similarity_search(standalone_question, k=5)
+            # Get the answer
+            chain = qa_prompt | qa_llm | StrOutputParser()
+            answer = await chain.ainvoke({
+                "input": query,
+                "chat_history": messages,
+                "context": context
+            })
 
-        # Create the QA chain with proper message ordering
-        qa_prompt = ChatPromptTemplate.from_messages([
-            ("human", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            ("human", "Context: {context}"),
-        ])
-        
-        # Get relevant documents using our history-aware retriever
-        documents = await retrieve_with_history(query)
-        
-        # Format documents for the context
-        context = "\n\n".join(doc.page_content for doc in documents)
-        
-        # Prepare chat history for QA
-        messages = []
-        for message in chat_history:
-            if isinstance(message, dict):
-                if message.get('type') == 'human':
-                    messages.append(HumanMessage(content=message['content']))
-                elif message.get('type') == 'ai':
-                    messages.append(AIMessage(content=message['content']))
-            elif isinstance(message, (HumanMessage, AIMessage)):
-                messages.append(message)
-        
-        # Get the answer
-        chain = qa_prompt | qa_llm | StrOutputParser()
-        answer = await chain.ainvoke({
-            "input": query,
-            "chat_history": messages,
-            "context": context
-        })
+            # Format the response with source information
+            response = f"{answer}\n\nSources:\n"
+            for i, doc in enumerate(documents, 1):
+                source_info = f"Type: {doc.metadata.get('type', 'Unknown')}"
+                if 'name' in doc.metadata:
+                    source_info += f", Name: {doc.metadata['name']}"
+                response += f"{i}. {source_info}\n"
 
-        # Format the response with source information
-        response = f"{answer}\n"
-        for i, doc in enumerate(documents, 1):
-            response += f"{i}. {doc.metadata.get('')}\n"
+            return response
 
-        return response
+        except Exception as e:
+            self.logger.error(f"Error in generate_with_retrieval: {str(e)}")
+            return f"An error occurred while processing your query: {str(e)}"
 
     def _construct_query_context(self, relevant_docs: List[Document]) -> str:
         context = "\n".join([doc.page_content for doc in relevant_docs])
