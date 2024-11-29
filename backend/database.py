@@ -669,15 +669,15 @@ class Database:
             raise
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                codex_item = await session.get(CodexItem, item_id)
-                if codex_item and codex_item.user_id == user_id and codex_item.project_id == project_id:
-                    return codex_item.to_dict()
-                raise Exception("Codex item not found")  # Add a specific exception message
-            except Exception as e:
-                self.logger.error(f"Error getting API key: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('codex_items').select('*').eq('id', item_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Codex item not found")
+        except Exception as e:
+            self.logger.error(f"Error getting codex item by ID: {str(e)}")
+            raise
 
     async def save_api_key(self, user_id, api_key):
         async with await self.get_session() as session:

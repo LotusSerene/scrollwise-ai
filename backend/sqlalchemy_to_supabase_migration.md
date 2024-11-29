@@ -18,7 +18,7 @@
 | `get_all_codex_items`                           | [x]     | Converted to Supabase query                                             |
 | `update_codex_item`                             | [x]     | Converted to Supabase query                                             |
 | `delete_codex_item`                             | [x]     | Converted to Supabase query                                             |
-| `get_codex_item_by_id`                          | []     |                                                                         |
+| `get_codex_item_by_id`                          | [x]     | Converted to Supabase query                                             |
 | `save_api_key`                                 | []     |                                                                         |
 | `get_api_key`                                  | []     |                                                                         |
 | `remove_api_key`                               | []     |                                                                         |
