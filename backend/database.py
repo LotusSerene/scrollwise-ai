@@ -931,18 +931,12 @@ class Database:
             raise
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                project = await session.get(Project, project_id)
-                if project and project.user_id == user_id:
-                    await session.delete(project)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting project: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('projects').delete().eq('id', project_id).eq('user_id', user_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting project: {str(e)}")
+            raise
 
 
     async def create_universe(self, name: str, user_id: str, description: Optional[str] = None) -> str:
