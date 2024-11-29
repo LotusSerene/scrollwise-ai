@@ -987,18 +987,12 @@ class Database:
 
 
     async def delete_universe(self, universe_id: str, user_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                universe = await session.get(Universe, universe_id)
-                if universe and universe.user_id == user_id:
-                    await session.delete(universe)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting universe: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('universes').delete().eq('id', universe_id).eq('user_id', user_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting universe: {str(e)}")
+            raise
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:

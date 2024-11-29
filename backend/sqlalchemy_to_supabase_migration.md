@@ -40,7 +40,7 @@
 | `create_universe`                              | []     |                                                                         |
 | `get_universe`                                 | []     |                                                                         |
 | `update_universe`                              | []     |                                                                         |
-| `delete_universe`                              | []     |                                                                         |
+| `delete_universe`                              | [x]     | Converted to Supabase query                                             |
 | `get_universe_codex`                           | []     |                                                                         |
 | `get_universe_knowledge_base`                  | []     |                                                                         |
 | `get_characters`                               | []     |                                                                         |
