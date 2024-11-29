@@ -50,12 +50,12 @@ class AppTheme {
     primaryColor: _accentBlue,
     scaffoldBackgroundColor: _primaryDark,
     textTheme: _textTheme,
-    colorScheme: ColorScheme.dark(
+    colorScheme: const ColorScheme.dark(
       primary: _accentBlue,
       secondary: _accentTeal,
       surface: _surfaceColor,
-      background: _primaryDark,
       error: _errorColor,
+      secondaryContainer: _warningColor,
     ),
 
     // Card Theme
