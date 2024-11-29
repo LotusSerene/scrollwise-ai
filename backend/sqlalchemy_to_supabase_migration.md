@@ -5,7 +5,7 @@
 | `get_projects`                                  | [x]     | Converted to Supabase query                                             |
 | `get_universes`                                | [x]     | Converted to Supabase query                                             |
 | `check_user_approval`                           | [x]     | Converted to Supabase query                                             |
-| `create_user`                                   | []     |                                                                         |
+| `create_user`                                   | [x]     | Converted to Supabase auth API                                         |
 | `get_user_by_email`                             | []     |                                                                         |
 | `get_all_chapters`                              | [x]    | Converted to Supabase query                                             |
 | `create_chapter`                                | [x]     | Converted to Supabase query                                             |
