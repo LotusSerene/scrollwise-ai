@@ -32,7 +32,7 @@
 | `get_location_by_id`                           | []     |                                                                         |
 | `update_codex_item_embedding_id`               | [x]    | Converted to Supabase query                                             |
 | `create_project`                               | [x]    | Converted to Supabase query                                             |
-| `get_projects_by_universe`                     | []     |                                                                         |
+| `get_projects_by_universe`                     | [x]    | Converted to Supabase query                                             |
 | `get_project`                                  | [x]     | Converted to Supabase query                                             |
 | `update_project`                               | []     |                                                                         |
 | `update_project_universe`                      | []     |                                                                         |

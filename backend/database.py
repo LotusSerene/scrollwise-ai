@@ -878,14 +878,12 @@ class Database:
 
 
     async def get_projects_by_universe(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                projects = await session.execute(select(Project).filter_by(universe_id=universe_id, user_id=user_id))
-                projects = projects.scalars().all()
-                return [project.to_dict() for project in projects]
-            except Exception as e:
-                self.logger.error(f"Error getting universe: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('projects').select('*').eq('universe_id', universe_id).eq('user_id', user_id).execute()
+            return response.data
+        except Exception as e:
+            self.logger.error(f"Error getting universe: {str(e)}")
+            raise
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
