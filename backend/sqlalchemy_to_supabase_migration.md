@@ -13,7 +13,7 @@
 | `delete_chapter`                                | [x]     | Converted to Supabase query                                             |
 | `get_chapter`                                   | [x]    | Converted to Supabase query                                             |
 | `get_all_validity_checks`                      | [x]     | Converted to Supabase query                                             |
-| `delete_validity_check`                        | []     |                                                                         |
+| `delete_validity_check`                        | [x]     | Converted to Supabase query                                             |
 | `create_codex_item`                             | []     |                                                                         |
 | `get_all_codex_items`                           | []     |                                                                         |
 | `update_codex_item`                             | []     |                                                                         |

@@ -606,18 +606,15 @@ class Database:
             raise
 
     async def delete_validity_check(self, check_id, user_id, project_id):
-        async with await self.get_session() as session:
-            try:
-                validity_check = await session.get(ValidityCheck, check_id)
-                if validity_check and validity_check.user_id == user_id and validity_check.project_id == project_id:
-                    await session.delete(validity_check)
-                    await session.commit()
-                    return True
+        try:
+            response = self.supabase.table('validity_checks').delete().eq('id', check_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            else:
                 return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting validity check: {str(e)}")
-                raise
+        except Exception as e:
+            self.logger.error(f"Error deleting validity check: {str(e)}")
+            raise
 
 
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
