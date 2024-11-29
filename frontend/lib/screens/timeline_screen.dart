@@ -681,19 +681,21 @@ class _TimelineScreenState extends State<TimelineScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    return SingleChildScrollView(
+    return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildSectionHeader('Timeline', Icons.timeline),
-          EventList(
-            events: events,
-            connections: eventConnections,
-            onEdit: _editEvent,
-            onDelete: _deleteEvent,
-            onDeleteConnection: _deleteEventConnection,
-            onUpdateConnection: _updateEventConnection,
+          Expanded(
+            child: EventList(
+              events: events,
+              connections: eventConnections,
+              onEdit: _editEvent,
+              onDelete: _deleteEvent,
+              onDeleteConnection: _deleteEventConnection,
+              onUpdateConnection: _updateEventConnection,
+            ),
           ),
         ],
       ),
@@ -797,6 +799,16 @@ class _TimelineScreenState extends State<TimelineScreen>
             _tabController.animateTo(1);
             _showCreateDialog();
           },
+        ),
+        SpeedDialChild(
+          child: const Icon(Icons.auto_awesome),
+          label: 'Analyze New Events/Locations',
+          onTap: () => _analyzeChapters(),
+        ),
+        SpeedDialChild(
+          child: const Icon(Icons.compare_arrows),
+          label: 'Analyze Connections',
+          onTap: () => _analyzeConnections(),
         ),
       ],
     );
@@ -1005,14 +1017,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
+                        color: Theme.of(context).colorScheme.secondaryContainer,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         'Travel Route',
                         style: TextStyle(
                           color:
-                              Theme.of(context).colorScheme.onPrimaryContainer,
+                              Theme.of(context).colorScheme.onSecondaryContainer,
                           fontSize: 12,
                         ),
                       ),

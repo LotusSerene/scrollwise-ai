@@ -92,10 +92,17 @@ class _LocationListState extends State<LocationList> {
       return _buildEmptyState();
     }
 
-    return Column(
+    return Stack(
       children: [
-        if (isSelectionMode) _buildSelectionControls(),
-        Expanded(
+        if (isSelectionMode)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildSelectionControls(),
+          ),
+        Padding(
+          padding: EdgeInsets.only(top: isSelectionMode ? 60.0 : 0),
           child: ListView.builder(
             controller: _scrollController,
             itemCount: _displayedLocations.length + (_isLoading ? 1 : 0),
