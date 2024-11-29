@@ -704,18 +704,18 @@ class Database:
             raise
 
     async def get_api_key(self, user_id):
-        async with await self.get_session() as session:
-            try:
-                user = await session.get(User, user_id)
-                if user and user.api_key:
-                    # Decrypt the API key before returning
-                    encrypted_key = b64decode(user.api_key)
-                    decrypted_key = self.fernet.decrypt(encrypted_key)
-                    return decrypted_key.decode()
-                return None
-            except Exception as e:
-                self.logger.error(f"Error getting API key: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('users').select('api_key').eq('id', user_id).execute()
+            user = response.data[0] if response.data else None
+            if user and user['api_key']:
+                # Decrypt the API key before returning
+                encrypted_key = b64decode(user['api_key'])
+                decrypted_key = self.fernet.decrypt(encrypted_key)
+                return decrypted_key.decode()
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting API key: {str(e)}")
+            raise
 
     async def remove_api_key(self, user_id):
         async with await self.get_session() as session:
