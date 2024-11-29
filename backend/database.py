@@ -727,16 +727,17 @@ class Database:
             raise
 
     async def save_model_settings(self, user_id, settings):
-        async with await self.get_session() as session:
-            try:
-                user = await session.get(User, user_id)
-                if user:
-                    user.model_settings = json.dumps(settings)
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving model settings: {str(e)}")
-                raise
+        try:
+            update_data = {
+                "model_settings": json.dumps(settings),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('users').update(update_data).eq('id', user_id).execute()
+            if not response.data:
+                raise Exception("Failed to save model settings")
+        except Exception as e:
+            self.logger.error(f"Error saving model settings: {str(e)}")
+            raise
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
         async with await self.get_session() as session:

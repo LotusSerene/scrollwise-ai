@@ -22,7 +22,7 @@
 | `save_api_key`                                 | [x]     | Converted to Supabase upsert                                             |
 | `get_api_key`                                  | [x]     | Converted to Supabase query                                             |
 | `remove_api_key`                               | [x]     | Converted to Supabase query                                             |
-| `save_model_settings`                           | []     |                                                                         |
+| `save_model_settings`                           | [x]     | Converted to Supabase query                                             |
 | `create_location`                              | []     |                                                                         |
 | `delete_location`                              | []     |                                                                         |
 | `delete_event`                                 | []     |                                                                         |
