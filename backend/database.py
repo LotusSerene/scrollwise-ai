@@ -1130,22 +1130,22 @@ class Database:
             raise
 
     async def get_model_settings(self, user_id):
-        async with await self.get_session() as session:
-            try:
-                user = await session.get(User, user_id)
-                if user and user.model_settings:
-                    return json.loads(user.model_settings)
-                return {
-                    'mainLLM': 'gemini-1.5-pro-002',
-                    'checkLLM': 'gemini-1.5-pro-002',
-                    'embeddingsModel': 'models/text-embedding-004',
-                    'titleGenerationLLM': 'gemini-1.5-pro-002',
-                    'extractionLLM': 'gemini-1.5-pro-002',
-                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
-                }
-            except Exception as e:
-                self.logger.error(f"Error getting validity check: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('users').select('model_settings').eq('id', user_id).execute()
+            user = response.data[0] if response.data else None
+            if user and user['model_settings']:
+                return json.loads(user['model_settings'])
+            return {
+                'mainLLM': 'gemini-1.5-pro-002',
+                'checkLLM': 'gemini-1.5-pro-002',
+                'embeddingsModel': 'models/text-embedding-004',
+                'titleGenerationLLM': 'gemini-1.5-pro-002',
+                'extractionLLM': 'gemini-1.5-pro-002',
+                'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting model settings: {str(e)}")
+            raise
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         async with await self.get_session() as session:

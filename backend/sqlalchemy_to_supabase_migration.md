@@ -48,7 +48,7 @@
 | `get_locations`                                | [x]    | Converted to Supabase query                                             |
 | `mark_latest_chapter_processed`                | [x]     |  Converted to supabase query                                                                       |
 | `is_chapter_processed`                         | [x]    | Converted to Supabase query                                             |
-| `get_model_settings`                           | []     |                                                                         |
+| `get_model_settings`                           | [x]    | Converted to Supabase query                                             |
 | `save_validity_check`                          | []     |                                                                         |
 | `get_validity_check`                           | []     |                                                                         |
 | `save_chat_history`                            | []     |                                                                         |
