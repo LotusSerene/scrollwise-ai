@@ -780,29 +780,23 @@ class Database:
             raise
 
     async def delete_event(self, event_id: str, project_id: str, user_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                # First delete any event connections that reference this event
-                await session.execute(
-                    delete(EventConnection).where(
-                        or_(
-                            EventConnection.event1_id == event_id,
-                            EventConnection.event2_id == event_id
-                        )
-                    )
-                )
-                
-                # Then delete the event itself
-                event = await session.get(Event, event_id)
-                if event and event.user_id == user_id and event.project_id == project_id:
-                    await session.delete(event)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting event: {str(e)}")
-                raise
+        try:
+            # First delete any event connections that reference this event
+            response = self.supabase.table('event_connections').delete().or_(
+                f"event1_id=eq.{event_id}",
+                f"event2_id=eq.{event_id}"
+            ).execute()
+            if not response.data:
+                raise Exception("Failed to delete event connections")
+
+            # Then delete the event itself
+            response = self.supabase.table('events').delete().eq('id', event_id).eq('project_id', project_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error deleting event: {str(e)}")
+            raise
 
     async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
         async with await self.get_session() as session:
