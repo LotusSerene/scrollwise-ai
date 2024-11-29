@@ -779,39 +779,30 @@ class Database:
             self.logger.error(f"Error deleting location: {str(e)}")
             raise
 
-    async def delete_event(self, event_id: str, project_id: str, user_id: str) -> bool:
+    async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
         try:
-            # First delete any event connections that reference this event
-            response = self.supabase.table('event_connections').delete().or_(
-                f"event1_id=eq.{event_id}",
-                f"event2_id=eq.{event_id}"
-            ).execute()
-            if not response.data:
-                raise Exception("Failed to delete event connections")
+            # Fetch the chapter
+            response = self.supabase.table('chapters').select('processed_types').eq('id', chapter_id).eq('user_id', user_id).execute()
+            if not response.data or len(response.data) == 0:
+                raise Exception("Chapter not found")
 
-            # Then delete the event itself
-            response = self.supabase.table('events').delete().eq('id', event_id).eq('project_id', project_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            return False
+            chapter = response.data[0]
+            processed_types = chapter.get('processed_types', [])
+
+            # Update processed_types if the process_type is not already present
+            if process_type not in processed_types:
+                processed_types.append(process_type)
+                update_data = {
+                    "processed_types": processed_types,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }
+                response = self.supabase.table('chapters').update(update_data).eq('id', chapter_id).eq('user_id', user_id).execute()
+                if not response.data:
+                    raise Exception("Failed to update chapter processed types")
         except Exception as e:
-            self.logger.error(f"Error deleting event: {str(e)}")
+            self.logger.error(f"Error marking chapter as processed: {str(e)}")
             raise
 
-    async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter and chapter.user_id == user_id:
-                    if not chapter.processed_types:
-                        chapter.processed_types = []
-                    if process_type not in chapter.processed_types:
-                        chapter.processed_types.append(process_type)
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error marking chapter as processed: {str(e)}")
-                raise
 
     async def is_chapter_processed_for_type(self, chapter_id: str, process_type: str) -> bool:
         async with await self.get_session() as session:
