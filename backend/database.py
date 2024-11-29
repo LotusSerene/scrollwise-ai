@@ -971,18 +971,16 @@ class Database:
 
 
     async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                universe = await session.get(Universe, universe_id)
-                if universe and universe.user_id == user_id:
-                    universe.name = name
-                    await session.commit()
-                    return universe.to_dict()
-                raise
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating universe: {str(e)}")
-                raise
+        try:
+            updates = {"name": name, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
+            response = self.supabase.table('universes').update(updates).eq('id', universe_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Universe not found")
+        except Exception as e:
+            self.logger.error(f"Error updating universe: {str(e)}")
+            raise
 
 
     async def delete_universe(self, universe_id: str, user_id: str) -> bool:
