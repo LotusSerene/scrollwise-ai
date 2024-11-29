@@ -44,7 +44,7 @@
 | `get_universe_codex`                           | [x]    | Converted to Supabase query                                             |
 | `get_universe_knowledge_base`                  | [x]    | Converted to Supabase query                                             |
 | `get_characters`                               | [x]    | Converted to Supabase query                                             |
-| `get_events`                                   | []     |                                                                         |
+| `get_events`                                   | [x]    | Converted to Supabase query                                             |
 | `get_locations`                                | []     |                                                                         |
 | `mark_latest_chapter_processed`                | []     |                                                                         |
 | `is_chapter_processed`                         | []     |                                                                         |

@@ -1070,19 +1070,16 @@ class Database:
 
 
     async def get_events(self, project_id: str, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                query = select(Event).filter_by(
-                    user_id=user_id,
-                    project_id=project_id
-                )
-                if limit is not None:
-                    query = query.limit(limit)
-                events = await session.execute(query)
-                return [event.to_dict() for event in events.scalars().all()]
-            except Exception as e:
-                self.logger.error(f"Error getting events: {str(e)}")
-                raise
+        try:
+            query = self.supabase.table('events').select('*').eq('user_id', user_id).eq('project_id', project_id)
+            if limit is not None:
+                query = query.limit(limit)
+            response = query.execute()
+            events = response.data
+            return [event for event in events]
+        except Exception as e:
+            self.logger.error(f"Error getting events: {str(e)}")
+            raise
 
     async def get_locations(self, user_id: str, project_id: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
         async with await self.get_session() as session:
