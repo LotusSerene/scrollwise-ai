@@ -49,19 +49,19 @@
 | `mark_latest_chapter_processed`                | [x]     |  Converted to supabase query                                                                       |
 | `is_chapter_processed`                         | [x]    | Converted to Supabase query                                             |
 | `get_model_settings`                           | [x]    | Converted to Supabase query                                             |
-| `save_validity_check`                          | []     |                                                                         |
-| `get_validity_check`                           | []     |                                                                         |
-| `save_chat_history`                            | []     |                                                                         |
-| `get_chat_history`                             | []     |                                                                         |
-| `delete_chat_history`                          | []     |                                                                         |
-| `create_preset`                                | []     |                                                                         |
-| `get_presets`                                  | []     |                                                                         |
-| `delete_preset`                                | []     |                                                                         |
-| `get_preset_by_name`                           | []     |                                                                         |
-| `update_chapter_embedding_id`                  | []     |                                                                         |
-| `delete_character_relationship`                | []     |                                                                         |
-| `save_relationship_analysis`                   | []     |                                                                         |
-| `get_character_relationships`                  | []     |                                                                         |
+| `save_validity_check`                          | [x]     |  Converted to Supabase query                                                                         |
+| `get_validity_check`                           | [x]     |     Converted to Supabase query                                                                      |
+| `save_chat_history`                            | [x]     |       Converted to Supabase query                                                                    |
+| `get_chat_history`                             | [x]     | Converted to Supabase query                                                                          |
+| `delete_chat_history`                          | [x]     |   Converted to Supabase query                                                                        |
+| `create_preset`                                | [x]     |  Converted to Supabase query                                                                         |
+| `get_presets`                                  | [x]     |      Converted to Supabase query                                                                     |
+| `delete_preset`                                | [x]     |  Converted to Supabase query                                                                         |
+| `get_preset_by_name`                           | [x]     |   Converted to Supabase query                                                                        |
+| `update_chapter_embedding_id`                  | [x]     | Converted to Supabase query                                                                         |
+| `delete_character_relationship`                | [x]     | Converted to Supabase query                                                                         |
+| `save_relationship_analysis`                   | [x]     | Converted to Supabase query                                                                         |
+| `get_character_relationships`                  | [x]     |  Converted to Supabase query                                                                        |
 | `update_character_backstory`                   | []     |                                                                         |
 | `delete_character_backstory`                   | []     |                                                                         |
 | `get_chapter_count`                            | []     |                                                                         |

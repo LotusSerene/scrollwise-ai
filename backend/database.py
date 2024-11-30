@@ -1148,257 +1148,241 @@ class Database:
             raise
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                check = ValidityCheck(
-                    id=str(uuid.uuid4()),
-                    chapter_id=chapter_id,
-                    chapter_title=chapter_title,
-                    is_valid=is_valid,
-                    overall_score=overall_score,
-                    general_feedback=general_feedback,
-                    style_guide_adherence_score=style_guide_adherence_score,
-                    style_guide_adherence_explanation=style_guide_adherence_explanation,
-                    continuity_score=continuity_score,
-                    continuity_explanation=continuity_explanation,
-                    areas_for_improvement=areas_for_improvement,
-                    user_id=user_id,
-                    project_id=project_id
-                )
-                session.add(check)
-                await session.commit()
-                return check.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving validity check: {str(e)}")
-                raise
+        try:
+            validity_check_data = {
+                "id": str(uuid.uuid4()),
+                "chapter_id": chapter_id,
+                "chapter_title": chapter_title,
+                "is_valid": is_valid,
+                "overall_score": overall_score,
+                "general_feedback": general_feedback,
+                "style_guide_adherence_score": style_guide_adherence_score,
+                "style_guide_adherence_explanation": style_guide_adherence_explanation,
+                "continuity_score": continuity_score,
+                "continuity_explanation": continuity_explanation,
+                "areas_for_improvement": areas_for_improvement,
+                "user_id": user_id,
+                "project_id": project_id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('validity_checks').insert(validity_check_data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to save validity check")
+        except Exception as e:
+            self.logger.error(f"Error saving validity check: {str(e)}")
+            raise
 
     async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                validity_check = await session.get(ValidityCheck, chapter_id)
-                if validity_check and validity_check.user_id == user_id:
-                    return {
-                        'id': validity_check.id,
-                        'chapter_title': validity_check.chapter_title,
-                        'is_valid': validity_check.is_valid,
-                        'overall_score': validity_check.overall_score,
-                        'general_feedback': validity_check.general_feedback,
-                        'style_guide_adherence_score': validity_check.style_guide_adherence_score,
-                        'style_guide_adherence_explanation': validity_check.style_guide_adherence_explanation,
-                        'continuity_score': validity_check.continuity_score,
-                        'continuity_explanation': validity_check.continuity_explanation,
-                        'areas_for_improvement': validity_check.areas_for_improvement,
-                        'created_at': validity_check.created_at
-                    }
-                raise Exception("Validity check not found")  # Add a specific exception message
-            except Exception as e:
-                self.logger.error(f"Error getting validity check: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('validity_checks').select('*').eq('chapter_id', chapter_id).eq('user_id', user_id).execute()
+            if response.data and len(response.data) > 0:
+                validity_check = response.data[0]
+                return {
+                    'id': validity_check['id'],
+                    'chapter_title': validity_check['chapter_title'],
+                    'is_valid': validity_check['is_valid'],
+                    'overall_score': validity_check['overall_score'],
+                    'general_feedback': validity_check['general_feedback'],
+                    'style_guide_adherence_score': validity_check['style_guide_adherence_score'],
+                    'style_guide_adherence_explanation': validity_check['style_guide_adherence_explanation'],
+                    'continuity_score': validity_check['continuity_score'],
+                    'continuity_explanation': validity_check['continuity_explanation'],
+                    'areas_for_improvement': validity_check['areas_for_improvement'],
+                    'created_at': validity_check['created_at']
+                }
+            raise Exception("Validity check not found")
+        except Exception as e:
+            self.logger.error(f"Error getting validity check: {str(e)}")
+            raise
 
     async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
-        async with await self.get_session() as session:
-            try:
-                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
-                chat_history = chat_history.scalars().first()
+        try:
+            # First check if a chat history exists for this user and project
+            response = self.supabase.table('chat_history').select('id').eq('user_id', user_id).eq('project_id', project_id).execute()
+            
+            chat_data = {
+                "messages": json.dumps(messages),
+                "user_id": user_id,
+                "project_id": project_id
+            }
+            
+            if response.data and len(response.data) > 0:
+                # Update existing chat history
+                response = self.supabase.table('chat_history').update(chat_data).eq('user_id', user_id).eq('project_id', project_id).execute()
+            else:
+                # Create new chat history
+                chat_data["id"] = str(uuid.uuid4())
+                response = self.supabase.table('chat_history').insert(chat_data).execute()
                 
-                if chat_history:
-                    chat_history.messages = json.dumps(messages)
-                else:
-                    chat_history = ChatHistory(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        project_id=project_id,
-                        messages=json.dumps(messages)
-                    )
-                    session.add(chat_history)
-                await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving chat history: {str(e)}")
-                raise
+            if not response.data:
+                raise Exception("Failed to save chat history")
+                
+        except Exception as e:
+            self.logger.error(f"Error saving chat history: {str(e)}")
+            raise
 
     async def get_chat_history(self, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                chat_history = await session.execute(select(ChatHistory).filter_by(user_id=user_id, project_id=project_id))
-                chat_history = chat_history.scalars().first()
-                return json.loads(chat_history.messages) if chat_history else []
-            except Exception as e:
-                self.logger.error(f"Error getting chat history: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chat_history').select('messages').eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return json.loads(response.data[0]['messages'])
+            return []
+        except Exception as e:
+            self.logger.error(f"Error getting chat history: {str(e)}")
+            raise
 
 
     async def delete_chat_history(self, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                # Use select() to find the chat history by user_id and project_id
-                chat_history = await session.execute(
-                    select(ChatHistory)
-                    .filter_by(user_id=user_id, project_id=project_id)
-                )
-                chat_history = chat_history.scalars().first()
-                
-                if chat_history:
-                    await session.delete(chat_history)
-                    await session.commit()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting chat history: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('chat_history').delete().eq('user_id', user_id).eq('project_id', project_id).execute()
+            if not response.data:
+                raise Exception("Failed to delete chat history")
+        except Exception as e:
+            self.logger.error(f"Error deleting chat history: {str(e)}")
+            raise
+
 
 
     async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
-        async with await self.get_session() as session:
-            try:
-                # Check if a preset with the same name, user_id, and project_id already exists
-                existing_preset = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id, name=name))
-                existing_preset = existing_preset.scalars().first()
-                if existing_preset:
-                    raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
-                
-                preset = Preset(id=str(uuid.uuid4()), user_id=user_id, project_id=project_id, name=name, data=data)
-                session.add(preset)
-                await session.commit()
-                return preset.id
-            except ValueError as ve:
-                await session.rollback()
-                self.logger.error(f"Error creating preset: {str(ve)}")
-                raise
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating preset: {str(e)}")
-                raise
+        try:
+            # Check if a preset with the same name exists
+            response = self.supabase.table('presets').select('id').eq('user_id', user_id).eq('project_id', project_id).eq('name', name).execute()
+            if response.data and len(response.data) > 0:
+                raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
+            
+            # Create new preset
+            preset_data = {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "project_id": project_id,
+                "name": name,
+                "data": data
+            }
+            response = self.supabase.table('presets').insert(preset_data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create preset")
+        except ValueError as ve:
+            self.logger.error(f"Error creating preset: {str(ve)}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error creating preset: {str(e)}")
+            raise
 
     async def get_presets(self, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                presets = await session.execute(select(Preset).filter_by(user_id=user_id, project_id=project_id))
-                presets = presets.scalars().all()
-                return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
-            except Exception as e:
-                self.logger.error(f"Error getting presets: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('presets').select('*').eq('user_id', user_id).eq('project_id', project_id).execute()
+            return [{"id": preset['id'], "name": preset['name'], "data": preset['data']} for preset in response.data]
+        except Exception as e:
+            self.logger.error(f"Error getting presets: {str(e)}")
+            raise
+
 
     async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
-                preset = preset.scalars().first()
-                if preset:
-                    await session.delete(preset)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting preset: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('presets').delete().eq('name', preset_name).eq('user_id', user_id).eq('project_id', project_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting preset: {str(e)}")
+            raise
+
 
     async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                preset = await session.execute(select(Preset).filter_by(name=preset_name, user_id=user_id, project_id=project_id))
-                preset = preset.scalars().first()
-                if preset:
-                    return {"id": preset.id, "name": preset.name, "data": preset.data}
-                raise
-            except Exception as e:
-                self.logger.error(f"Error getting preset by name: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('presets').select('*').eq('name', preset_name).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                preset = response.data[0]
+                return {"id": preset['id'], "name": preset['name'], "data": preset['data']}
+            raise Exception("Preset not found")
+        except Exception as e:
+            self.logger.error(f"Error getting preset by name: {str(e)}")
+            raise
+
 
     async def update_chapter_embedding_id(self, chapter_id, embedding_id):
-        async with await self.get_session() as session:
-            try:
-                chapter = await session.get(Chapter, chapter_id)
-                if chapter:
-                    chapter.embedding_id = embedding_id
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
-                raise
+        try:
+            updates = {
+                "embedding_id": embedding_id,
+                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            }
+            response = self.supabase.table('chapters').update(updates).eq('id', chapter_id).execute()
+            if response.data and len(response.data) > 0:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+            raise
 
     async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                relationship = await session.execute(select(CharacterRelationship).join(
-                    CodexItem, CharacterRelationship.character_id == CodexItem.id
-                ).filter(
-                    CharacterRelationship.id == relationship_id,
-                    CodexItem.project_id == project_id,
-                    CodexItem.user_id == user_id
-                ))
-                relationship = relationship.scalars().first()
-                if relationship:
-                    await session.delete(relationship)
-                    await session.commit()
-                    return True
-                else:
-                    raise Exception("Relationship not found")
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting character relationship: {str(e)}")
-                raise
+        try:
+            # First verify the relationship exists and belongs to the project
+            response = self.supabase.table('character_relationships').select('*').eq('id', relationship_id).eq('project_id', project_id).execute()
+            if not response.data or len(response.data) == 0:
+                raise Exception("Relationship not found")
+                
+            # Delete the relationship
+            response = self.supabase.table('character_relationships').delete().eq('id', relationship_id).eq('project_id', project_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting character relationship: {str(e)}")
+            raise
+
 
     async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
-                                 description: str, user_id: str, project_id: str) -> str:
-        async with await self.get_session() as session:
-            try:
-                analysis = CharacterRelationshipAnalysis(
-                    id=str(uuid.uuid4()),
-                    character1_id=character1_id,
-                    character2_id=character2_id,
-                    relationship_type=relationship_type,
-                    description=description,
-                    user_id=user_id,
-                    project_id=project_id
-                )
-                session.add(analysis)
-                await session.commit()
-                return analysis.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving relationship analysis: {str(e)}")
-                raise
+                             description: str, user_id: str, project_id: str) -> str:
+        try:
+            analysis_data = {
+                "id": str(uuid.uuid4()),
+                "character1_id": character1_id,
+                "character2_id": character2_id,
+                "relationship_type": relationship_type,
+                "description": description,
+                "user_id": user_id,
+                "project_id": project_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('character_relationship_analyses').insert(analysis_data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to save relationship analysis")
+        except Exception as e:
+            self.logger.error(f"Error saving relationship analysis: {str(e)}")
+            raise
 
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                relationships = (
-                    await session.execute(select(CharacterRelationship)
-                    .join(
-                        CodexItem,
-                        CharacterRelationship.character_id == CodexItem.id
-                    )
-                    .filter(
-                        CodexItem.project_id == project_id,
-                        CodexItem.user_id == user_id
-                    ))
-                ).scalars().all()
+        try:
+            # Get relationships and join with codex_items to get character names
+            response = self.supabase.table('character_relationships').select(
+                'character_relationships.id',
+                'character_relationships.character_id',
+                'character_relationships.related_character_id',
+                'character_relationships.relationship_type',
+                'character_relationships.description',
+                'c1:codex_items(name).name as character1_name',
+                'c2:codex_items(name).name as character2_name'
+            ).eq('project_id', project_id).execute()
 
-                result = []
-                for rel in relationships:
-                    character1 = await session.get(CodexItem, rel.character_id)
-                    character2 = await session.get(CodexItem, rel.related_character_id)
-                    
-                    if character1 and character2:
-                        result.append({
-                            'id': rel.id,
-                            'character1_id': rel.character_id,
-                            'character2_id': rel.related_character_id,
-                            'character1_name': character1.name,
-                            'character2_name': character2.name,
-                            'relationship_type': rel.relationship_type,
-                            'description': rel.description or ''  # Add this line
-                        })
+            result = []
+            for rel in response.data:
+                result.append({
+                    'id': rel['id'],
+                    'character1_id': rel['character_id'],
+                    'character2_id': rel['related_character_id'],
+                    'character1_name': rel['c1']['name'],
+                    'character2_name': rel['c2']['name'],
+                    'relationship_type': rel['relationship_type'],
+                    'description': rel['description'] or ''
+                })
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting character relationships: {str(e)}")
+            raise
 
-                return result
-            except Exception as e:
-                self.logger.error(f"Error getting character relationships: {str(e)}")
-                raise
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
@@ -1603,27 +1587,19 @@ class Database:
                 raise
     
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                relationship = await session.execute(
-                    select(CharacterRelationship).join(
-                        CodexItem, CharacterRelationship.character_id == CodexItem.id
-                    ).filter(
-                        CharacterRelationship.id == relationship_id,
-                        CodexItem.project_id == project_id,
-                        CodexItem.user_id == user_id
-                    )
-                )
-                relationship = relationship.scalars().first()
-                if relationship:
-                    relationship.relationship_type = relationship_type
-                    await session.commit()
-                    return relationship.to_dict()
-                raise
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating character relationship: {str(e)}")
-                raise
+        try:
+            updates = {
+                "relationship_type": relationship_type,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('character_relationships').update(updates).eq('id', relationship_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            raise Exception("Failed to update character relationship")
+        except Exception as e:
+            self.logger.error(f"Error updating character relationship: {str(e)}")
+            raise
+
 
     async def get_location_by_name(self, name: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
