@@ -62,7 +62,7 @@
 | `delete_character_relationship`                | [x]     | Converted to Supabase query                                                                         |
 | `save_relationship_analysis`                   | [x]     | Converted to Supabase query                                                                         |
 | `get_character_relationships`                  | [x]     |  Converted to Supabase query                                                                        |
-| `update_character_backstory`                   | []     |                                                                         |
+| `update_character_backstory`                   | [x]    | Converted to Supabase query                                             |
 | `delete_character_backstory`                   | []     |                                                                         |
 | `get_chapter_count`                            | []     |                                                                         |
 | `create_event`                                 | []     |                                                                         |

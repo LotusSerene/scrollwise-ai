@@ -1385,22 +1385,27 @@ class Database:
 
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                character = await session.get(CodexItem, character_id)
-                if character:
-                    if character.user_id != user_id:
-                        raise ValueError(f"User {user_id} is not authorized to update character {character_id}")
-                    if character.project_id != project_id:
-                        raise ValueError(f"Character {character_id} does not belong to project {project_id}")
-                    character.backstory = backstory
-                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                else:
-                    raise ValueError(f"Character with ID {character_id} not found")
-            except Exception as e:
-                self.logger.error(f"Error updating character backstory: {str(e)}")
-                raise
+        try:
+            # Fetch the character
+            response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if not response.data or len(response.data) == 0:
+                raise ValueError(f"Character with ID {character_id} not found")
+
+            character = response.data[0]
+            if character['type'] != CodexItemType.CHARACTER.value:
+                raise ValueError(f"Character {character_id} is not of type CHARACTER")
+
+            # Update backstory and updated_at
+            update_data = {
+                "backstory": backstory,
+                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            }
+            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).execute()
+            if not response.data:
+                raise Exception("Failed to update character backstory")
+        except Exception as e:
+            self.logger.error(f"Error updating character backstory: {str(e)}")
+            raise
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
         async with await self.get_session() as session:
