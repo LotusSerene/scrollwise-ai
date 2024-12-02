@@ -1408,196 +1408,220 @@ class Database:
             raise
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                character = await session.get(CodexItem, character_id)
-                if character and character.user_id == user_id and character.project_id == project_id:
-                    character.backstory = None
-                    # Use a timezone-naive datetime
-                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                else:
-                    raise ValueError("Character not found")
-            except Exception as e:
-                self.logger.error(f"Error deleting character backstory: {str(e)}")
-                raise
+        try:
+            # Update the character's backstory to None and update the updated_at timestamp
+            update_data = {
+                "backstory": None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Update the character in Supabase
+            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            
+            if not response.data:
+                raise ValueError("Character not found")
+                
+        except Exception as e:
+            self.logger.error(f"Error deleting character backstory: {str(e)}")
+            raise
 
     async def get_chapter_count(self, project_id: str, user_id: str) -> int:
-        async with await self.get_session() as session:
-            chapters = await session.execute(select(Chapter).filter_by(project_id=project_id, user_id=user_id))
-            chapters = chapters.scalars().all()
-            return len(chapters)
+        try:
+            response = self.supabase.table('chapters').select('id').eq('project_id', project_id).eq('user_id', user_id).execute()
+            return len(response.data) if response.data else 0
+        except Exception as e:
+            self.logger.error(f"Error getting chapter count: {str(e)}")
+            raise
 
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
-        async with await self.get_session() as session:
-            try:
-                event = Event(
-                    id=str(uuid.uuid4()),
-                    title=title,
-                    description=description,
-                    date=date,
-                    character_id=character_id,
-                    project_id=project_id,
-                    user_id=user_id,
-                    location_id=location_id,
-                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
-                )
-                session.add(event)
-                await session.commit()
-                return event.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating event: {str(e)}")
-                raise
+        try:
+            event_data = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "description": description,
+                "date": date.isoformat(),
+                "character_id": character_id,
+                "project_id": project_id,
+                "user_id": user_id,
+                "location_id": location_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = self.supabase.table('events').insert(event_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create event")
+                
+        except Exception as e:
+            self.logger.error(f"Error creating event: {str(e)}")
+            raise
 
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                character = await session.get(CodexItem, character_id)
-                if character and character.user_id == user_id and character.project_id == project_id and character.type == 'character':
-                    if character.backstory:
-                        character.backstory += f"\n\n{content}"
-                    else:
-                        character.backstory = content
-                    # Convert to timezone-naive datetime before saving
-                    character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return character.to_dict()
-                raise
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error saving character backstory: {str(e)}")
-                raise
+        try:
+            # First get the character to verify it exists and check its current backstory
+            response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).eq('type', 'character').execute()
+            
+            if not response.data or len(response.data) == 0:
+                raise ValueError("Character not found or not of type character")
+                
+            character = response.data[0]
+            new_backstory = f"{character['backstory']}\n\n{content}" if character['backstory'] else content
+            
+            # Update the character with new backstory
+            update_data = {
+                "backstory": new_backstory,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                raise Exception("Failed to update character backstory")
+                
+        except Exception as e:
+            self.logger.error(f"Error saving character backstory: {str(e)}")
+            raise
 
     async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                backstories = await session.execute(select(CharacterBackstory).filter_by(character_id=character_id).order_by(CharacterBackstory.created_at))
-                backstories = backstories.scalars().all()
-                return [backstory.to_dict() for backstory in backstories]
-            except Exception as e:
-                self.logger.error(f"Error updating event: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('character_backstories').select('*').eq('character_id', character_id).order('created_at').execute()
+            return [
+                {
+                    'id': backstory['id'],
+                    'character_id': backstory['character_id'],
+                    'content': backstory['content'],
+                    'chapter_id': backstory['chapter_id'],
+                    'created_at': backstory['created_at']
+                } 
+                for backstory in response.data
+            ] if response.data else []
+        except Exception as e:
+            self.logger.error(f"Error getting character backstories: {str(e)}")
+            raise
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
-        async with await self.get_session() as session:
-            try:
-                # Get all unprocessed chapters instead of just the first one
-                chapters = await session.execute(
-                    select(Chapter).filter(
-                        Chapter.project_id == project_id,
-                        Chapter.user_id == user_id,
-                        ~Chapter.processed_types.cast(JSONB).contains([process_type])
-                    ).order_by(Chapter.chapter_number)  # Order by chapter number ascending
-                )
-                chapters = chapters.scalars().all()  # Get all results instead of .first()
+        try:
+            # Get all chapters for the project and user, ordered by chapter number
+            response = self.supabase.table('chapters').select('*').eq('project_id', project_id).eq('user_id', user_id).order('chapter_number').execute()
+            
+            if not response.data:
+                return []
                 
-                if chapters:
-                    return [{
-                        'id': chapter.id,
-                        'content': chapter.content
-                    } for chapter in chapters]
-                raise
-            except Exception as e:
-                self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
-                raise
+            # Filter chapters that don't have the process_type in their processed_types array
+            unprocessed_chapters = [
+                {
+                    'id': chapter['id'],
+                    'content': chapter['content']
+                }
+                for chapter in response.data
+                if process_type not in (chapter.get('processed_types', []))
+            ]
+            
+            return unprocessed_chapters
+                
+        except Exception as e:
+            self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
+            raise
 
     async def create_character_relationship(self, character_id: str, related_character_id: str, 
-                                            relationship_type: str, project_id: str, 
-                                            description: Optional[str] = None) -> str:
-        async with await self.get_session() as session:
-            try:
-                # Ensure character IDs are not None before querying
-                if character_id is None or related_character_id is None:
-                    raise ValueError("Character IDs cannot be None")
+                                      relationship_type: str, project_id: str, 
+                                      description: Optional[str] = None) -> str:
+        try:
+            # First verify both characters exist and are of type character
+            char1_response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('project_id', project_id).eq('type', 'character').execute()
+            char2_response = self.supabase.table('codex_items').select('*').eq('id', related_character_id).eq('project_id', project_id).eq('type', 'character').execute()
+            
+            if not char1_response.data or len(char1_response.data) == 0:
+                self.logger.error(f"Character with ID {character_id} not found in the codex")
+                raise ValueError("Character not found")
                 
-                # Check if both characters exist in the codex_items table
-                character = await session.execute(
-                    select(CodexItem).filter_by(id=character_id, project_id=project_id, type='character')
-                )
-                character = character.scalars().first()
-                related_character = await session.execute(
-                    select(CodexItem).filter_by(id=related_character_id, project_id=project_id, type='character')
-                )
-                related_character = related_character.scalars().first()
+            if not char2_response.data or len(char2_response.data) == 0:
+                self.logger.error(f"Character with ID {related_character_id} not found in the codex")
+                raise ValueError("Related character not found")
+            
+            relationship_data = {
+                "id": str(uuid.uuid4()),
+                "character_id": character_id,
+                "related_character_id": related_character_id,
+                "relationship_type": relationship_type,
+                "description": description,
+                "project_id": project_id
+            }
+            
+            response = self.supabase.table('character_relationships').insert(relationship_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create character relationship")
                 
-                if not character:
-                    self.logger.error(f"Character with ID {character_id} not found in the codex")
-                if not related_character:
-                    self.logger.error(f"Character with ID {related_character_id} not found in the codex")
-                
-                if not character or not related_character:
-                    raise ValueError("One or both characters do not exist in the codex")
-                
-                relationship = CharacterRelationship(
-                    id=str(uuid.uuid4()),
-                    character_id=character.id,
-                    related_character_id=related_character.id,
-                    relationship_type=relationship_type,
-                    description=description,  # Add this line
-                    project_id=project_id
-                )
-                session.add(relationship)
-                await session.commit()
-                return relationship.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating character relationship: {str(e)}")
-                raise
+        except Exception as e:
+            self.logger.error(f"Error creating character relationship: {str(e)}")
+            raise
 
-    async def update_event(self, event_id: str, title: str, description: str, date: datetime, character_id: Optional[str], location_id: Optional[str], project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                event = await session.get(Event, event_id)
-                if event and event.user_id == user_id and event.project_id == project_id:
-                    event.title = title
-                    event.description = description
-                    event.date = date
-                    event.character_id = character_id
-                    event.location_id = location_id
-                    event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return event.to_dict()
-                raise Exception("Event not found")  # Add a specific exception message
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating event: {str(e)}")
-                raise
+
+    async def update_event(self, event_id: str, title: str, description: str, date: datetime, 
+                      character_id: Optional[str], location_id: Optional[str], 
+                      project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            update_data = {
+                "title": title,
+                "description": description,
+                "date": date.isoformat(),
+                "character_id": character_id,
+                "location_id": location_id,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = self.supabase.table('events').update(update_data).eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            raise Exception("Event not found")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating event: {str(e)}")
+            raise
 
     async def get_event_by_title(self, title: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                event = await session.execute(select(Event).filter_by(title=title, user_id=user_id, project_id=project_id))
-                event = event.scalars().first()
-                return event.to_dict() if event else None
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error getting event by title: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('events').select('*').eq('title', title).eq('user_id', user_id).eq('project_id', project_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+                
+        except Exception as e:
+            self.logger.error(f"Error getting event by title: {str(e)}")
+            raise
 
     async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                location = await session.get(Location, location_id)
-                if location:
-                    for key, value in location_data.items():
-                        setattr(location, key, value)
-                    await session.commit()
-                    return location.to_dict()
-                raise Exception("Location not found")  # Add a specific exception message
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating location: {str(e)}")
-                raise
+        try:
+            # Add updated_at to the update data
+            location_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            
+            response = self.supabase.table('locations').update(location_data).eq('id', location_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            raise Exception("Location not found")
+        except Exception as e:
+            self.logger.error(f"Error updating location: {str(e)}")
+            raise
+
     
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            updates = {
+            update_data = {
                 "relationship_type": relationship_type,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
-            response = self.supabase.table('character_relationships').update(updates).eq('id', relationship_id).eq('project_id', project_id).execute()
+            response = self.supabase.table('character_relationships').update(update_data).eq('id', relationship_id).eq('project_id', project_id).execute()
             if response.data and len(response.data) > 0:
                 return response.data[0]
             raise Exception("Failed to update character relationship")
@@ -1606,23 +1630,17 @@ class Database:
             raise
 
 
+
     async def get_location_by_name(self, name: str, user_id: str, project_id: str):
-        async with await self.get_session() as session:
-            try:
-                location = await session.execute(
-                    select(Location).filter_by(
-                        name=name, 
-                        user_id=user_id, 
-                        project_id=project_id
-                    )
-                )
-                location = location.scalars().first()
-                if location:
-                    return location.to_dict()
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error getting location by ID: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('locations').select('*').eq('name', name).eq('user_id', user_id).eq('project_id', project_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting location by name: {str(e)}")
+            raise
+
 
     async def dispose(self):
         """Dispose of the engine and close all connections."""
@@ -1642,31 +1660,35 @@ class Database:
         project_id: str,
         user_id: str
     ) -> str:
-        async with await self.get_session() as session:
-            try:
-                connection = LocationConnection(
-                    id=str(uuid.uuid4()),
-                    location1_id=location1_id,
-                    location2_id=location2_id,
-                    location1_name=location1_name,
-                    location2_name=location2_name,
-                    connection_type=connection_type,
-                    description=description,
-                    travel_route=travel_route,
-                    cultural_exchange=cultural_exchange,
-                    project_id=project_id,
-                    user_id=user_id,
-                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
-                )
-                session.add(connection)
-                await session.commit()
-                return connection.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating location connection: {str(e)}")
-                raise
-
+        try:
+            current_time = datetime.now(timezone.utc).isoformat()
+            connection_data = {
+                "id": str(uuid.uuid4()),
+                "location1_id": location1_id,
+                "location2_id": location2_id,
+                "location1_name": location1_name,
+                "location2_name": location2_name,
+                "connection_type": connection_type,
+                "description": description,
+                "travel_route": travel_route,
+                "cultural_exchange": cultural_exchange,
+                "project_id": project_id,
+                "user_id": user_id,
+                "created_at": current_time,
+                "updated_at": current_time
+            }
+            
+            response = self.supabase.table('location_connections').insert(connection_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create location connection")
+                
+        except Exception as e:
+            self.logger.error(f"Error creating location connection: {str(e)}")
+            raise
+        
     async def create_event_connection(
         self,
         event1_id: str,
