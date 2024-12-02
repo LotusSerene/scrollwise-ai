@@ -77,10 +77,10 @@
 | `get_location_by_name`                         | [x]     | Converted to Supabase query                                             |
 | `create_location_connection`                   | [x]     | Converted to Supabase query                                             |
 | `create_event_connection`                      | [x]     | Converted to Supabase query                                             |
-| `get_location_connections`                     | []     |                                           |
-| `get_event_connections`                        | []     |                                  |
-| `update_location_connection`                   | []     |                                                                         |
-| `update_event_connection`                      | []     |                                                                         |
-| `delete_location_connection`                   | []     |                                                                         |
-| `delete_event_connection`                      | []     |                                                                         |
-| `approve_user`                                 | []     |                                                                         |
+| `get_location_connections`                     | [x]    | Converted to Supabase query                                             |
+| `get_event_connections`                        | [x]    | Converted to Supabase query                                             |
+| `update_location_connection`                   | [x]    | Converted to Supabase query                                             |
+| `update_event_connection`                      | [x]    | Converted to Supabase query                                             |
+| `delete_location_connection`                   | [x]    | Converted to Supabase query                                             |
+| `delete_event_connection`                      | [x]    | Converted to Supabase query                                             |
+| `approve_user`                                 | [x]    | Converted to Supabase query                                             |

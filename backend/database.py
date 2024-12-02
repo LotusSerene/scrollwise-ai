@@ -1699,33 +1699,52 @@ class Database:
         project_id: str,
         user_id: str
     ) -> str:
-        async with await self.get_session() as session:
-            try:
-                connection = EventConnection(
-                    id=str(uuid.uuid4()),
-                    event1_id=event1_id,
-                    event2_id=event2_id,
-                    connection_type=connection_type,
-                    description=description,
-                    impact=impact,
-                    project_id=project_id,
-                    user_id=user_id,
-                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
-                )
-                session.add(connection)
-                await session.commit()
-                return connection.id
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error creating event connection: {str(e)}")
-                raise
+        try:
+            data = {
+                "event1_id": event1_id,
+                "event2_id": event2_id,
+                "connection_type": connection_type,
+                "description": description,
+                "impact": impact,
+                "project_id": project_id,
+                "user_id": user_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('event_connections').insert(data).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            else:
+                raise Exception("Failed to create event connection")
+        except Exception as e:
+            self.logger.error(f"Error creating event connection: {str(e)}")
+            raise
 
     async def get_location_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        return await self.connection_service.get_connections(LocationConnection, project_id, user_id)
+        try:
+            response = self.supabase.table('location_connections').select('*').eq('project_id', project_id).eq('user_id', user_id).execute()
+            connections = response.data
+            result = []
+            for conn in connections:
+                connection_dict = conn.to_dict()
+                result.append(connection_dict)
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting location connections: {str(e)}")
+            raise
 
     async def get_event_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
-        return await self.connection_service.get_connections(EventConnection, project_id, user_id)
+        try:
+            response = self.supabase.table('event_connections').select('*').eq('project_id', project_id).eq('user_id', user_id).execute()
+            connections = response.data
+            result = []
+            for conn in connections:
+                connection_dict = conn.to_dict()
+                result.append(connection_dict)
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting event connections: {str(e)}")
+            raise
     
     async def update_location_connection(
         self,
@@ -1737,22 +1756,21 @@ class Database:
         user_id: str,
         project_id: str
     ) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                connection = await session.get(LocationConnection, connection_id)
-                if connection and connection.user_id == user_id and connection.project_id == project_id:
-                    connection.connection_type = connection_type
-                    connection.description = description
-                    connection.travel_route = travel_route
-                    connection.cultural_exchange = cultural_exchange
-                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return connection.to_dict()
-                return None
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating location connection: {str(e)}")
-                raise
+        try:
+            update_data = {
+                "connection_type": connection_type,
+                "description": description,
+                "travel_route": travel_route,
+                "cultural_exchange": cultural_exchange,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('location_connections').update(update_data).eq('id', connection_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error updating location connection: {str(e)}")
+            raise
 
     async def update_event_connection(
         self,
@@ -1763,58 +1781,44 @@ class Database:
         user_id: str,
         project_id: str
     ) -> Optional[Dict[str, Any]]:
-        async with await self.get_session() as session:
-            try:
-                connection = await session.get(EventConnection, connection_id)
-                if connection and connection.user_id == user_id and connection.project_id == project_id:
-                    connection.connection_type = connection_type
-                    connection.description = description
-                    connection.impact = impact
-                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return connection.to_dict()
-                return None
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error updating event connection: {str(e)}")
-                raise
+        try:
+            update_data = {
+                "connection_type": connection_type,
+                "description": description,
+                "impact": impact,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            response = self.supabase.table('event_connections').update(update_data).eq('id', connection_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"Error updating event connection: {str(e)}")
+            raise
 
     async def delete_location_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                # First verify the connection exists and belongs to the user/project
-                connection = await session.get(LocationConnection, connection_id)
-                if connection and connection.user_id == user_id and connection.project_id == project_id:
-                    await session.delete(connection)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting location connection: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('location_connections').delete().eq('id', connection_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting location connection: {str(e)}")
+            raise
 
     async def delete_event_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
-        async with await self.get_session() as session:
-            try:
-                connection = await session.get(EventConnection, connection_id)
-                if connection and connection.user_id == user_id and connection.project_id == project_id:
-                    await session.delete(connection)
-                    await session.commit()
-                    return True
-                return False
-            except Exception as e:
-                await session.rollback()
-                self.logger.error(f"Error deleting event connection: {str(e)}")
-                raise
+        try:
+            response = self.supabase.table('event_connections').delete().eq('id', connection_id).eq('user_id', user_id).eq('project_id', project_id).execute()
+            return bool(response.data)
+        except Exception as e:
+            self.logger.error(f"Error deleting event connection: {str(e)}")
+            raise
 
     async def approve_user(self, user_id: str) -> bool:
         try:
-            await self.supabase.table('user_approvals').update({'is_approved': True}).eq('id', user_id)
-            return True
+            response = self.supabase.table('user_approvals').update({'is_approved': True}).eq('id', user_id).execute()
+            return bool(response.data)
         except Exception as e:
-            self.logger.exception(f"Error approving user: {str(e)}") # Log the full traceback
-            return False # Return False to indicate failure
+            self.logger.error(f"Error approving user: {str(e)}")
+            return False
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
         try:
