@@ -3,9 +3,6 @@ import io
 import json
 import logging
 import os
-import uuid
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, AsyncGenerator
@@ -21,11 +18,10 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
+
 
 from agent_manager import AgentManager, PROCESS_TYPES
-from database import db_instance, Chapter, Project, CodexItem, KnowledgeBaseItem
+from database import db_instance
 from vector_store import VectorStore
 from models import CodexItemType, WorldbuildingSubtype
 
@@ -68,21 +64,12 @@ class AgentManagerStore:
 
 agent_manager_store = AgentManagerStore()
 
-@asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    session = await db_instance.get_session()
-    try:
-        yield session
-    finally:
-        await session.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
     try:
-        # Initialize database
-        await db_instance.initialize()
         yield
     finally:
         # Cleanup
@@ -92,7 +79,6 @@ async def lifespan(app: FastAPI):
             for manager in agent_manager_store._managers.values():
                 tasks.append(manager.close())
         await asyncio.gather(*tasks)
-        await db_instance.engine.dispose()
         logger.info("Cleanup complete")
 
 app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
@@ -347,71 +333,89 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
 
 async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a project including chapter count and word count."""
-    async with get_db_session() as session:
-        try:
-            # Count chapters
-            chapter_count = await session.scalar(
-                select(func.count(Chapter.id))
-                .where(Chapter.project_id == project_id)
-                .where(Chapter.user_id == user_id)
-            )
+    try:
+        # Count chapters
+        chapter_response = db_instance.supabase.table('chapters').select('id', 'content').eq('project_id', project_id).eq('user_id', user_id).execute()
+        chapters = chapter_response.data
 
-            # Get total word count from all chapters
-            word_count = await session.scalar(
-                select(func.sum(
-                    func.array_length(
-                        func.regexp_split_to_array(
-                            func.regexp_replace(Chapter.content, '\s+', ' ', 'g'),
-                            '\s'
-                        ),
-                        1
-                    )
-                ))
-                .where(Chapter.project_id == project_id)
-                .where(Chapter.user_id == user_id)
-            )
+        # Calculate stats
+        chapter_count = len(chapters)
+        word_count = 0
+        
+        # Calculate word count from all chapters
+        for chapter in chapters:
+            if chapter.get('content'):
+                # Split content by whitespace and count words
+                words = chapter['content'].strip().split()
+                word_count += len(words)
 
-            return {
-                "chapter_count": chapter_count or 0,
-                "word_count": word_count or 0
-            }
-        except Exception as e:
-            logger.error(f"Error getting project stats: {str(e)}")
-            raise
+        return {
+            "chapter_count": chapter_count,
+            "word_count": word_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting project stats: {str(e)}")
+        raise
 
 async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a universe including project count and total entries."""
-    async with get_db_session() as session:
-        try:
-            # Get project count
-            project_count = await session.scalar(
-                select(func.count(Project.id))
-                .where(Project.universe_id == universe_id)
-                .where(Project.user_id == user_id)
-            )
+    try:
+        # Get project count
+        project_response = db_instance.supabase.table('projects').select('id').eq('universe_id', universe_id).eq('user_id', user_id).execute()
+        project_count = len(project_response.data)
 
-            # Get total entries (codex items + knowledge base items)
-            codex_count = await session.scalar(
-                select(func.count(CodexItem.id))
-                .join(Project, CodexItem.project_id == Project.id)
-                .where(Project.universe_id == universe_id)
-                .where(CodexItem.user_id == user_id)
-            )
+        # Get all project IDs for this universe
+        project_ids = [project['id'] for project in project_response.data]
 
-            kb_count = await session.scalar(
-                select(func.count(KnowledgeBaseItem.id))
-                .join(Project, KnowledgeBaseItem.project_id == Project.id)
-                .where(Project.universe_id == universe_id)
-                .where(KnowledgeBaseItem.user_id == user_id)
-            )
+        # Get codex items count
+        codex_count = 0
+        if project_ids:
+            codex_response = db_instance.supabase.table('codex_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
+            codex_count = len(codex_response.data)
 
-            return {
-                "project_count": project_count or 0,
-                "entry_count": (codex_count or 0) + (kb_count or 0)
-            }
-        except Exception as e:
-            logger.error(f"Error getting universe stats: {str(e)}")
-            raise
+        # Get knowledge base items count
+        kb_count = 0
+        if project_ids:
+            kb_response = db_instance.supabase.table('knowledge_base_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
+            kb_count = len(kb_response.data)
+
+        return {
+            "project_count": project_count,
+            "entry_count": codex_count + kb_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting universe stats: {str(e)}")
+        raise
+
+async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
+    """Get statistics for a universe including project count and total entries."""
+    try:
+        # Get project count
+        project_response = db_instance.supabase.table('projects').select('id').eq('universe_id', universe_id).eq('user_id', user_id).execute()
+        project_count = len(project_response.data)
+
+        # Get all project IDs for this universe
+        project_ids = [project['id'] for project in project_response.data]
+
+        # Get codex items count
+        codex_count = 0
+        if project_ids:
+            codex_response = db_instance.supabase.table('codex_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
+            codex_count = len(codex_response.data)
+
+        # Get knowledge base items count
+        kb_count = 0
+        if project_ids:
+            kb_response = db_instance.supabase.table('knowledge_base_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
+            kb_count = len(kb_response.data)
+
+        return {
+            "project_count": project_count,
+            "entry_count": codex_count + kb_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting universe stats: {str(e)}")
+        raise
 
 
 # Create API routers

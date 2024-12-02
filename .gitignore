@@ -2,9 +2,9 @@
 .vscode/
 
 # Python specific
-_pycache_/
+__pycache__/
 .venv/
-backend/__pycache__/*
+backend/__pycache__/
 *.db
 backend/.langchain.db
 *.pyc
