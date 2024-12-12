@@ -737,11 +737,14 @@ class Database:
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('codex_items').select('*').eq('id', item_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Codex item not found")
+            async with self.Session() as session:
+                query = select(CodexItem).where(CodexItem.id == item_id, CodexItem.user_id == user_id, CodexItem.project_id == project_id)
+                result = await session.execute(query)
+                codex_item = result.scalars().first()
+                if codex_item:
+                    return codex_item.to_dict()
+                else:
+                    raise Exception("Codex item not found")
         except Exception as e:
             self.logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
