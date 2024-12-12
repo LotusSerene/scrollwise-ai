@@ -807,9 +807,16 @@ class Database:
 
     async def remove_api_key(self, user_id):
         try:
-            response = self.supabase.table('users').update({'api_key': None}).eq('id', user_id).execute()
-            if not response.data:
-                raise Exception("Failed to remove API key")
+            async with self.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user:
+                    user.api_key = None
+                    user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                else:
+                    raise Exception("User not found")
         except Exception as e:
             self.logger.error(f"Error removing API key: {str(e)}")
             raise
