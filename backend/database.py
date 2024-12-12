@@ -505,8 +505,11 @@ class Database:
 
     async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
         try:
-            response = self.supabase.table('universes').select('*').eq('user_id', user_id).execute()
-            return response.data
+            async with self.Session() as session:
+                query = select(Universe).where(Universe.user_id == user_id)
+                result = await session.execute(query)
+                universes = result.scalars().all()
+                return [universe.to_dict() for universe in universes]
         except Exception as e:
             self.logger.error(f"Error getting universes: {str(e)}")
             raise
