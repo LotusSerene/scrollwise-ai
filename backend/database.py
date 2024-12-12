@@ -1,6 +1,7 @@
 import logging
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text, JSON, UniqueConstraint, and_, func, QueuePool, select, delete, or_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, joinedload, sessionmaker, Session, selectinload
 from sqlalchemy.pool import StaticPool
