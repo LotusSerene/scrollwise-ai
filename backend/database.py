@@ -726,8 +726,11 @@ class Database:
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('codex_items').delete().eq('id', item_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            return response.data and len(response.data) > 0
+            async with self.Session() as session:
+                query = delete(CodexItem).where(CodexItem.id == item_id, CodexItem.user_id == user_id, CodexItem.project_id == project_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting codex item: {str(e)}")
             raise
