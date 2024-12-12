@@ -483,14 +483,6 @@ class Database:
             self.logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
         self.fernet = Fernet(encryption_key)
         
-        # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        if not supabase_url or not supabase_key:
-            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables must be set")
-            
-        self.supabase: Client = create_client(supabase_url, supabase_key)
-        
         # Initialize SQLAlchemy engine
         self.engine = create_engine("sqlite:///local.db", poolclass=StaticPool)
         
