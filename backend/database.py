@@ -749,37 +749,50 @@ class Database:
             self.logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
 
+
+        
     async def save_api_key(self, user_id: str, api_key: str):
         try:
-            # First, get the user's email from the auth user
-            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            # Get the user's email from the Supabase auth user (this part remains)
+            user_response = await self.supabase.auth.admin.get_user_by_id(user_id)
             if not user_response or not user_response.user:
                 raise Exception("User not found in auth system")
-            
+
             user_email = user_response.user.email
-            
+
             # Encrypt the API key before saving
             encrypted_key = self.fernet.encrypt(api_key.encode())
             encoded_key = b64encode(encrypted_key).decode()
-            
-            # Update or insert the API key in Supabase
-            update_data = {
-                "id": user_id,
-                "email": user_email,  # Include the email
-                "api_key": encoded_key,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            # Using upsert to handle both insert and update cases
-            response = self.supabase.table('users').upsert(update_data).execute()
-            
-            if not response.data:
-                raise Exception("Failed to save API key")
-                
-        except Exception as e:
-            self.logger.error(f"Error saving API key: {str(e)}")
-            raise
 
+            # Update or insert the API key using SQLAlchemy
+            session = self.Session()
+            try:
+                user = session.query(User).filter_by(id=user_id).first()
+                if user:
+                    # User exists, update the API key and updated_at
+                    user.api_key = encoded_key
+                    user.updated_at = datetime.now(timezone.utc)
+                else:
+                    # User does not exist, create a new record
+                    new_user = User(
+                        id=user_id,
+                        email=user_email,
+                        api_key=encoded_key,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    session.add(new_user)
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Error saving API key to local database: {str(e)}")
+                raise
+            finally:
+                session.close()
+
+        except Exception as e:
+            self.logger.error(f"Error saving API key (Supabase auth or general): {str(e)}")
+            raise
     async def get_api_key(self, user_id):
         try:
             response = self.supabase.table('users').select('api_key').eq('id', user_id).execute()
