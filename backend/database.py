@@ -6,6 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, joinedload, sessionmaker, Session, selectinload
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
+from sqlalchemy import create_engine
 from datetime import datetime, timezone, timedelta
 import json
 import os
