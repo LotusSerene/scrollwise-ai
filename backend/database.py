@@ -963,25 +963,19 @@ class Database:
     async def create_project(self, name: str, description: str, user_id: str, universe_id: Optional[str] = None) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
-            
-            # Create project data
-            project_data = {
-                "name": name,
-                "description": description,
-                "user_id": user_id,
-                "universe_id": universe_id,
-                "created_at": current_time.isoformat(),
-                "updated_at": current_time.isoformat()
-            }
-            
-            # Insert into Supabase
-            response = self.supabase.table('projects').insert(project_data).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create project")
-                
+            async with self.Session() as session:
+                project = Project(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    user_id=user_id,
+                    universe_id=universe_id,
+                    created_at=current_time,
+                    updated_at=current_time
+                )
+                session.add(project)
+                await session.commit()
+                return project.id
         except Exception as e:
             self.logger.error(f"Error creating project: {str(e)}")
             raise
