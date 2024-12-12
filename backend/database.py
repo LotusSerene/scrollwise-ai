@@ -695,8 +695,11 @@ class Database:
 
     async def get_all_codex_items(self, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('codex_items').select('*').eq('user_id', user_id).eq('project_id', project_id).execute()
-            return response.data
+            async with self.Session() as session:
+                query = select(CodexItem).where(CodexItem.user_id == user_id, CodexItem.project_id == project_id)
+                result = await session.execute(query)
+                codex_items = result.scalars().all()
+                return [item.to_dict() for item in codex_items]
         except Exception as e:
             self.logger.error(f"Error getting all codex items: {str(e)}")
             raise
