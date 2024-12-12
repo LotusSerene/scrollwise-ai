@@ -994,11 +994,11 @@ class Database:
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('projects').select('*').eq('id', project_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                return None
+            async with self.Session() as session:
+                query = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+                result = await session.execute(query)
+                project = result.scalars().first()
+                return project.to_dict() if project else None
         except Exception as e:
             self.logger.error(f"Error getting project: {str(e)}")
             raise
