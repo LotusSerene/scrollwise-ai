@@ -542,25 +542,26 @@ class Database:
                 "password": password
             })
             
-            # Create a corresponding record in the users table
-            user_data = {
-                "id": auth_response.user.id,  # Use the Supabase auth user ID
-                "email": email,
-                "password": password,  # Consider if you really need to store this
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            # Insert the user data into the users table
-            response = self.supabase.table('users').insert(user_data).execute()
-            
-            if not response.data:
-                raise Exception("Failed to create user record")
+            # Create a corresponding record in the users table using SQLAlchemy
+            session = self.Session()
+            try:
+                new_user = User(
+                    id=auth_response.user.id,
+                    email=email,
+                )
+                session.add(new_user)
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Error inserting user into local database: {str(e)}")
+                raise Exception("Failed to create user record locally")
+            finally:
+                session.close()
                 
             return auth_response.user.id
             
         except Exception as e:
-            self.logger.error(f"Error creating user: {str(e)}")
+            self.logger.error(f"Error creating user (Supabase auth): {str(e)}")
             raise
 
     async def get_user_by_email(self, email: str):
