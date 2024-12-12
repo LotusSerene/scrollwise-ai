@@ -1,16 +1,16 @@
 import logging
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text, JSON, UniqueConstraint, and_, func, QueuePool, select, delete, or_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, joinedload
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey, JSON, UniqueConstraint, DateTime, and_, func, QueuePool, select, delete, or_
+from sqlalchemy.orm import relationship, joinedload, sessionmaker, Session, selectinload
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
+from datetime import datetime, timezone, timedelta
 import json
 import os
 from dotenv import load_dotenv
 import uuid
 from typing import Optional, List, Dict, Any
-from sqlalchemy.orm import selectinload
 from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 from base64 import b64encode, b64decode
@@ -25,9 +25,10 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
     email = Column(String, unique=True, nullable=False)
-    password = Column(String, nullable=False)
     api_key = Column(String)
     model_settings = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     
     # Add the projects relationship
     projects = relationship("Project", back_populates="user")
@@ -472,6 +473,13 @@ class Database:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
+        # Initialize Fernet encryption
+        encryption_key = os.getenv('ENCRYPTION_KEY')
+        if not encryption_key:
+            encryption_key = Fernet.generate_key()
+            self.logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
+        self.fernet = Fernet(encryption_key)
+        
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
@@ -514,11 +522,28 @@ class Database:
     async def create_user(self, email: str, password: str):
         try:
             # Use Supabase auth to create user
-            response = await self.supabase.auth.sign_up({
+            auth_response = await self.supabase.auth.sign_up({
                 "email": email,
                 "password": password
             })
-            return response.user.id
+            
+            # Create a corresponding record in the users table
+            user_data = {
+                "id": auth_response.user.id,  # Use the Supabase auth user ID
+                "email": email,
+                "password": password,  # Consider if you really need to store this
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Insert the user data into the users table
+            response = self.supabase.table('users').insert(user_data).execute()
+            
+            if not response.data:
+                raise Exception("Failed to create user record")
+                
+            return auth_response.user.id
+            
         except Exception as e:
             self.logger.error(f"Error creating user: {str(e)}")
             raise
@@ -543,17 +568,25 @@ class Database:
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            
+            # Create base chapter data without optional fields
             chapter_data = {
                 "id": str(uuid.uuid4()),
                 "title": title,
                 "content": content,
-                "chapter_number": chapter_number,
                 "user_id": user_id,
                 "project_id": project_id,
-                "embedding_id": embedding_id,
-                "processed_types": [],
                 "created_at": current_time.isoformat()
             }
+            
+            # Add optional fields if they are provided
+            if chapter_number is not None:
+                chapter_data["chapter_number"] = chapter_number
+            if embedding_id is not None:
+                chapter_data["embedding_id"] = embedding_id
+                
+            # Remove processed_types from initial creation since it has a default value in DB
+
             response = self.supabase.table('chapters').insert(chapter_data).execute()
             if response.data and len(response.data) > 0:
                 return response.data[0]['id']
@@ -680,21 +713,27 @@ class Database:
 
     async def save_api_key(self, user_id: str, api_key: str):
         try:
+            # First, get the user's email from the auth user
+            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            if not user_response or not user_response.user:
+                raise Exception("User not found in auth system")
+            
+            user_email = user_response.user.email
+            
             # Encrypt the API key before saving
             encrypted_key = self.fernet.encrypt(api_key.encode())
             encoded_key = b64encode(encrypted_key).decode()
             
             # Update or insert the API key in Supabase
             update_data = {
+                "id": user_id,
+                "email": user_email,  # Include the email
                 "api_key": encoded_key,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             # Using upsert to handle both insert and update cases
-            response = self.supabase.table('users').upsert({
-                "id": user_id,
-                **update_data
-            }).execute()
+            response = self.supabase.table('users').upsert(update_data).execute()
             
             if not response.data:
                 raise Exception("Failed to save API key")
@@ -1528,9 +1567,8 @@ class Database:
             self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
             raise
 
-    async def create_character_relationship(self, character_id: str, related_character_id: str, 
-                                      relationship_type: str, project_id: str, 
-                                      description: Optional[str] = None) -> str:
+    async def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str, 
+description: Optional[str] = None) -> str:
         try:
             # First verify both characters exist and are of type character
             char1_response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('project_id', project_id).eq('type', 'character').execute()
