@@ -884,24 +884,22 @@ class Database:
 
     async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
         try:
-            # Fetch the chapter
-            response = self.supabase.table('chapters').select('processed_types').eq('id', chapter_id).eq('user_id', user_id).execute()
-            if not response.data or len(response.data) == 0:
-                raise Exception("Chapter not found")
+            async with self.Session() as session:
+                # Fetch the chapter
+                query = select(Chapter).where(Chapter.id == chapter_id, Chapter.user_id == user_id)
+                result = await session.execute(query)
+                chapter = result.scalars().first()
+                if not chapter:
+                    raise Exception("Chapter not found")
 
-            chapter = response.data[0]
-            processed_types = chapter.get('processed_types', [])
+                processed_types = chapter.processed_types
 
-            # Update processed_types if the process_type is not already present
-            if process_type not in processed_types:
-                processed_types.append(process_type)
-                update_data = {
-                    "processed_types": processed_types,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }
-                response = self.supabase.table('chapters').update(update_data).eq('id', chapter_id).eq('user_id', user_id).execute()
-                if not response.data:
-                    raise Exception("Failed to update chapter processed types")
+                # Update processed_types if the process_type is not already present
+                if process_type not in processed_types:
+                    processed_types.append(process_type)
+                    chapter.processed_types = processed_types
+                    chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
         except Exception as e:
             self.logger.error(f"Error marking chapter as processed: {str(e)}")
             raise
