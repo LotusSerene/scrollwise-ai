@@ -674,22 +674,21 @@ class Database:
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
-            item_data = {
-                "id": str(uuid.uuid4()),
-                "name": name,
-                "description": description,
-                "type": type,
-                "subtype": subtype,
-                "user_id": user_id,
-                "project_id": project_id,
-                "created_at": current_time.isoformat(),
-                "updated_at": current_time.isoformat()
-            }
-            response = self.supabase.table('codex_items').insert(item_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create codex item")
+            async with self.Session() as session:
+                codex_item = CodexItem(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    type=type,
+                    subtype=subtype,
+                    user_id=user_id,
+                    project_id=project_id,
+                    created_at=current_time,
+                    updated_at=current_time
+                )
+                session.add(codex_item)
+                await session.commit()
+                return codex_item.id
         except Exception as e:
             self.logger.error(f"Error creating codex item: {str(e)}")
             raise
