@@ -637,11 +637,14 @@ class Database:
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('chapters').select('*').eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Chapter not found")
+            async with self.Session() as session:
+                query = select(Chapter).where(Chapter.id == chapter_id, Chapter.user_id == user_id, Chapter.project_id == project_id)
+                result = await session.execute(query)
+                chapter = result.scalars().first()
+                if chapter:
+                    return chapter.to_dict()
+                else:
+                    raise Exception("Chapter not found")
         except Exception as e:
             self.logger.error(f"Error getting chapter: {str(e)}")
             raise
