@@ -922,10 +922,11 @@ class Database:
 
     async def get_event_by_id(self, event_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('events').select('*').eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(Event).where(Event.id == event_id, Event.user_id == user_id, Event.project_id == project_id)
+                result = await session.execute(query)
+                event = result.scalars().first()
+                return event.to_dict() if event else None
         except Exception as e:
             self.logger.error(f"Error getting event by ID: {str(e)}")
             raise
