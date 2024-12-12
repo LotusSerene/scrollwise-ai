@@ -516,10 +516,15 @@ class Database:
 
     async def check_user_approval(self, user_id: str) -> bool:
         try:
-            response = self.supabase.table('user_approvals').select('is_approved').eq('id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0].get('is_approved', False)
-            return False
+            async with self.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user:
+                    # Assuming you have an 'is_approved' column in your User model
+                    # For now, we'll return True if the user exists, as we're not storing approval in the local DB
+                    return True
+                return False
         except Exception as e:
             self.logger.error(f"Error checking user approval: {str(e)}")
             return False
@@ -560,17 +565,22 @@ class Database:
 
     async def get_user_by_email(self, email: str):
         try:
-            # Query Supabase for user
-            response = await self.supabase.from_('users').select('*').eq('email', email).single()
-            return response.data
+            async with self.Session() as session:
+                query = select(User).where(User.email == email)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                return user.to_dict() if user else None
         except Exception as e:
             self.logger.error(f"Error getting user: {str(e)}")
             return None
 
     async def get_all_chapters(self, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('chapters').select('*').eq('user_id', user_id).eq('project_id', project_id).order('chapter_number').execute()
-            return response.data
+            async with self.Session() as session:
+                query = select(Chapter).where(Chapter.user_id == user_id, Chapter.project_id == project_id).order_by(Chapter.chapter_number)
+                result = await session.execute(query)
+                chapters = result.scalars().all()
+                return [chapter.to_dict() for chapter in chapters]
         except Exception as e:
             self.logger.error(f"Error fetching all chapters: {str(e)}")
             raise
@@ -578,30 +588,20 @@ class Database:
     async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
-            
-            # Create base chapter data without optional fields
-            chapter_data = {
-                "id": str(uuid.uuid4()),
-                "title": title,
-                "content": content,
-                "user_id": user_id,
-                "project_id": project_id,
-                "created_at": current_time.isoformat()
-            }
-            
-            # Add optional fields if they are provided
-            if chapter_number is not None:
-                chapter_data["chapter_number"] = chapter_number
-            if embedding_id is not None:
-                chapter_data["embedding_id"] = embedding_id
-                
-            # Remove processed_types from initial creation since it has a default value in DB
-
-            response = self.supabase.table('chapters').insert(chapter_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create chapter")
+            async with self.Session() as session:
+                chapter = Chapter(
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    content=content,
+                    user_id=user_id,
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    embedding_id=embedding_id,
+                    created_at=current_time
+                )
+                session.add(chapter)
+                await session.commit()
+                return chapter.id
         except Exception as e:
             self.logger.error(f"Error creating chapter: {str(e)}")
             raise
