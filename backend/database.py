@@ -625,11 +625,11 @@ class Database:
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
         try:
-            response = self.supabase.table('chapters').delete().eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            else:
-                return False
+            async with self.Session() as session:
+                query = delete(Chapter).where(Chapter.id == chapter_id, Chapter.user_id == user_id, Chapter.project_id == project_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting chapter: {str(e)}")
             raise
