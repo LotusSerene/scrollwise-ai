@@ -823,13 +823,14 @@ class Database:
 
     async def save_model_settings(self, user_id, settings):
         try:
-            update_data = {
-                "model_settings": json.dumps(settings),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('users').update(update_data).eq('id', user_id).execute()
-            if not response.data:
-                raise Exception("Failed to save model settings")
+            async with self.Session() as session:
+                user = session.query(User).filter_by(id=user_id).first()
+                if user:
+                    user.model_settings = json.dumps(settings)
+                    user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                else:
+                    raise Exception("User not found")
         except Exception as e:
             self.logger.error(f"Error saving model settings: {str(e)}")
             raise
