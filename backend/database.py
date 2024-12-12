@@ -7,6 +7,7 @@ from sqlalchemy.orm import relationship, joinedload, sessionmaker, Session, sele
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone, timedelta
 import json
 import os
@@ -489,6 +490,15 @@ class Database:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables must be set")
             
         self.supabase: Client = create_client(supabase_url, supabase_key)
+        
+        # Initialize SQLAlchemy engine
+        self.engine = create_engine("sqlite:///local.db", poolclass=StaticPool)
+        
+        # Create a session factory
+        self.Session = sessionmaker(bind=self.engine)
+        
+        # Create all tables
+        Base.metadata.create_all(self.engine)
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
         try:
