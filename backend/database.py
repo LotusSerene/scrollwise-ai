@@ -857,19 +857,27 @@ class Database:
 
     async def delete_location(self, location_id: str, project_id: str, user_id: str) -> bool:
         try:
-            # First delete associated connections
-            response = self.supabase.table('location_connections').delete().or_(
-                f"location1_id=eq.{location_id}",
-                f"location2_id=eq.{location_id}"
-            ).execute()
-            if not response.data:
-                raise Exception("Failed to delete location connections")
-
-            # Then delete the location
-            response = self.supabase.table('locations').delete().eq('id', location_id).eq('project_id', project_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            return False
+            async with self.Session() as session:
+                # First delete associated connections
+                delete_connections_query = delete(LocationConnection).where(
+                    or_(
+                        LocationConnection.location1_id == location_id,
+                        LocationConnection.location2_id == location_id
+                    )
+                )
+                await session.execute(delete_connections_query)
+                
+                # Then delete the location
+                delete_location_query = delete(Location).where(
+                    and_(
+                        Location.id == location_id,
+                        Location.project_id == project_id,
+                        Location.user_id == user_id
+                    )
+                )
+                result = await session.execute(delete_location_query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting location: {str(e)}")
             raise
