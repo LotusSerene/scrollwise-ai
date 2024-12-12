@@ -749,7 +749,6 @@ class Database:
             self.logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
 
-
         
     async def save_api_key(self, user_id: str, api_key: str):
         try:
@@ -757,13 +756,10 @@ class Database:
             user_response = await self.supabase.auth.admin.get_user_by_id(user_id)
             if not user_response or not user_response.user:
                 raise Exception("User not found in auth system")
-
             user_email = user_response.user.email
-
             # Encrypt the API key before saving
             encrypted_key = self.fernet.encrypt(api_key.encode())
             encoded_key = b64encode(encrypted_key).decode()
-
             # Update or insert the API key using SQLAlchemy
             session = self.Session()
             try:
@@ -789,10 +785,10 @@ class Database:
                 raise
             finally:
                 session.close()
-
         except Exception as e:
             self.logger.error(f"Error saving API key (Supabase auth or general): {str(e)}")
             raise
+
     async def get_api_key(self, user_id):
         try:
             async with self.Session() as session:
