@@ -662,11 +662,11 @@ class Database:
 
     async def delete_validity_check(self, check_id, user_id, project_id):
         try:
-            response = self.supabase.table('validity_checks').delete().eq('id', check_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            else:
-                return False
+            async with self.Session() as session:
+                query = delete(ValidityCheck).where(ValidityCheck.id == check_id, ValidityCheck.user_id == user_id, ValidityCheck.project_id == project_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting validity check: {str(e)}")
             raise
