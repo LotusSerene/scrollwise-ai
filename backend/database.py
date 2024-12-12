@@ -494,8 +494,11 @@ class Database:
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
         try:
-            response = self.supabase.table('projects').select('*').eq('user_id', user_id).execute()
-            return response.data
+            async with self.Session() as session:
+                query = select(Project).where(Project.user_id == user_id)
+                result = await session.execute(query)
+                projects = result.scalars().all()
+                return [project.to_dict() for project in projects]
         except Exception as e:
             self.logger.error(f"Error getting projects: {str(e)}")
             raise
