@@ -608,12 +608,17 @@ class Database:
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
         try:
-            updates = {"title": title, "content": content}
-            response = self.supabase.table('chapters').update(updates).eq('id', chapter_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Failed to update chapter")
+            async with self.Session() as session:
+                query = select(Chapter).where(Chapter.id == chapter_id, Chapter.user_id == user_id, Chapter.project_id == project_id)
+                result = await session.execute(query)
+                chapter = result.scalars().first()
+                if chapter:
+                    chapter.title = title
+                    chapter.content = content
+                    await session.commit()
+                    return chapter.to_dict()
+                else:
+                    raise Exception("Chapter not found")
         except Exception as e:
             self.logger.error(f"Error updating chapter: {str(e)}")
             raise
