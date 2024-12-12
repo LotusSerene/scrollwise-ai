@@ -651,8 +651,11 @@ class Database:
 
     async def get_all_validity_checks(self, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('validity_checks').select('*').eq('user_id', user_id).eq('project_id', project_id).execute()
-            return response.data
+            async with self.Session() as session:
+                query = select(ValidityCheck).where(ValidityCheck.user_id == user_id, ValidityCheck.project_id == project_id)
+                result = await session.execute(query)
+                validity_checks = result.scalars().all()
+                return [check.to_dict() for check in validity_checks]
         except Exception as e:
             self.logger.error(f"Error getting all validity checks: {str(e)}")
             raise
