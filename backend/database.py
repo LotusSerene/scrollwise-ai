@@ -837,21 +837,20 @@ class Database:
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
         try:
-            location_data = {
-                "id": str(uuid.uuid4()),
-                "name": name,
-                "description": description,
-                "coordinates": coordinates,
-                "user_id": user_id,
-                "project_id": project_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('locations').insert(location_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create location")
+            async with self.Session() as session:
+                location = Location(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    description=description,
+                    coordinates=coordinates,
+                    user_id=user_id,
+                    project_id=project_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(location)
+                await session.commit()
+                return location.id
         except Exception as e:
             self.logger.error(f"Error creating location: {str(e)}")
             raise
