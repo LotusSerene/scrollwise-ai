@@ -933,10 +933,11 @@ class Database:
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('locations').select('*').eq('id', location_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(Location).where(Location.id == location_id, Location.user_id == user_id, Location.project_id == project_id)
+                result = await session.execute(query)
+                location = result.scalars().first()
+                return location.to_dict() if location else None
         except Exception as e:
             self.logger.error(f"Error getting location by ID: {str(e)}")
             raise
