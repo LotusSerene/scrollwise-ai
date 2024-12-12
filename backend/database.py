@@ -942,14 +942,19 @@ class Database:
             self.logger.error(f"Error getting location by ID: {str(e)}")
             raise
 
-    async def update_codex_item_embedding_id(self, item_id, embedding_id):
+    async def update_codex_item_embedding_id(self, item_id: str, embedding_id: str) -> bool:
         try:
-            updates = {"embedding_id": embedding_id, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
-            response = self.supabase.table('codex_items').update(updates).eq('id', item_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            else:
-                raise Exception("Failed to update codex item embedding_id")
+            async with self.Session() as session:
+                query = select(CodexItem).where(CodexItem.id == item_id)
+                result = await session.execute(query)
+                codex_item = result.scalars().first()
+                if codex_item:
+                    codex_item.embedding_id = embedding_id
+                    codex_item.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return True
+                else:
+                    raise Exception("Codex item not found")
         except Exception as e:
             self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
             raise
