@@ -1490,22 +1490,21 @@ class Database:
     async def save_relationship_analysis(self, character1_id: str, character2_id: str, relationship_type: str, 
                              description: str, user_id: str, project_id: str) -> str:
         try:
-            analysis_data = {
-                "id": str(uuid.uuid4()),
-                "character1_id": character1_id,
-                "character2_id": character2_id,
-                "relationship_type": relationship_type,
-                "description": description,
-                "user_id": user_id,
-                "project_id": project_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('character_relationship_analyses').insert(analysis_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to save relationship analysis")
+            async with self.Session() as session:
+                analysis = CharacterRelationshipAnalysis(
+                    id=str(uuid.uuid4()),
+                    character1_id=character1_id,
+                    character2_id=character2_id,
+                    relationship_type=relationship_type,
+                    description=description,
+                    user_id=user_id,
+                    project_id=project_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(analysis)
+                await session.commit()
+                return analysis.id
         except Exception as e:
             self.logger.error(f"Error saving relationship analysis: {str(e)}")
             raise
