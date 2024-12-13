@@ -1562,18 +1562,18 @@ class Database:
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
         try:
-            # Update the character's backstory to None and update the updated_at timestamp
-            update_data = {
-                "backstory": None,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            # Update the character in Supabase
-            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            
-            if not response.data:
-                raise ValueError("Character not found")
-                
+            async with self.Session() as session:
+                # Fetch the character
+                query = select(CodexItem).where(CodexItem.id == character_id, CodexItem.user_id == user_id, CodexItem.project_id == project_id, CodexItem.type == CodexItemType.CHARACTER.value)
+                result = await session.execute(query)
+                character = result.scalars().first()
+                if not character:
+                    raise ValueError(f"Character with ID {character_id} not found")
+
+                # Update backstory and updated_at
+                character.backstory = None
+                character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                await session.commit()
         except Exception as e:
             self.logger.error(f"Error deleting character backstory: {str(e)}")
             raise
