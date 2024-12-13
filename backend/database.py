@@ -1272,18 +1272,20 @@ class Database:
 
     async def get_model_settings(self, user_id):
         try:
-            response = self.supabase.table('users').select('model_settings').eq('id', user_id).execute()
-            user = response.data[0] if response.data else None
-            if user and user['model_settings']:
-                return json.loads(user['model_settings'])
-            return {
-                'mainLLM': 'gemini-1.5-pro-002',
-                'checkLLM': 'gemini-1.5-pro-002',
-                'embeddingsModel': 'models/text-embedding-004',
-                'titleGenerationLLM': 'gemini-1.5-pro-002',
-                'extractionLLM': 'gemini-1.5-pro-002',
-                'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
-            }
+            async with self.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user and user.model_settings:
+                    return json.loads(user.model_settings)
+                return {
+                    'mainLLM': 'gemini-1.5-pro-002',
+                    'checkLLM': 'gemini-1.5-pro-002',
+                    'embeddingsModel': 'models/text-embedding-004',
+                    'titleGenerationLLM': 'gemini-1.5-pro-002',
+                    'extractionLLM': 'gemini-1.5-pro-002',
+                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
+                }
         except Exception as e:
             self.logger.error(f"Error getting model settings: {str(e)}")
             raise
