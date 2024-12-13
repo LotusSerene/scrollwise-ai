@@ -1046,8 +1046,11 @@ class Database:
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
         try:
-            response = self.supabase.table('projects').delete().eq('id', project_id).eq('user_id', user_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(Project).where(Project.id == project_id, Project.user_id == user_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting project: {str(e)}")
             raise
