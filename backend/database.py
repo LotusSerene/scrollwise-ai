@@ -1746,14 +1746,18 @@ description: Optional[str] = None) -> str:
 
     async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         try:
-            # Add updated_at to the update data
-            location_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-            
-            response = self.supabase.table('locations').update(location_data).eq('id', location_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            raise Exception("Location not found")
+            async with self.Session() as session:
+                query = select(Location).where(Location.id == location_id)
+                result = await session.execute(query)
+                location = result.scalars().first()
+                if location:
+                    for key, value in location_data.items():
+                        setattr(location, key, value)
+                    location.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return location.to_dict()
+                else:
+                    raise Exception("Location not found")
         except Exception as e:
             self.logger.error(f"Error updating location: {str(e)}")
             raise
