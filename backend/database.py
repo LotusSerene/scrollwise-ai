@@ -1258,12 +1258,14 @@ class Database:
 
     async def is_chapter_processed(self, chapter_id: str, process_type: str) -> bool:
         try:
-            response = self.supabase.table('chapters').select('processed_types').eq('id', chapter_id).execute()
-            if response.data and len(response.data) > 0:
-                chapter = response.data[0]
-                processed_types = chapter.get('processed_types', [])
-                return process_type in processed_types
-            return False
+            async with self.Session() as session:
+                query = select(Chapter).where(Chapter.id == chapter_id).options(selectinload(Chapter.processed_types))
+                result = await session.execute(query)
+                chapter = result.scalars().first()
+                if chapter:
+                    processed_types = chapter.processed_types
+                    return process_type in processed_types
+                return False
         except Exception as e:
             self.logger.error(f"Error checking chapter processed status: {str(e)}")
             raise
