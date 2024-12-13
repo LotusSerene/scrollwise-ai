@@ -1765,14 +1765,21 @@ description: Optional[str] = None) -> str:
     
     async def update_character_relationship(self, relationship_id: str, relationship_type: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            update_data = {
-                "relationship_type": relationship_type,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('character_relationships').update(update_data).eq('id', relationship_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            raise Exception("Failed to update character relationship")
+            async with self.Session() as session:
+                query = select(CharacterRelationship).where(
+                    CharacterRelationship.id == relationship_id,
+                    CharacterRelationship.user_id == user_id,
+                    CharacterRelationship.project_id == project_id
+                )
+                result = await session.execute(query)
+                relationship = result.scalars().first()
+                if relationship:
+                    relationship.relationship_type = relationship_type
+                    relationship.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return relationship.to_dict()
+                else:
+                    raise Exception("Character relationship not found")
         except Exception as e:
             self.logger.error(f"Error updating character relationship: {str(e)}")
             raise
