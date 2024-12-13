@@ -1292,27 +1292,26 @@ class Database:
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         try:
-            validity_check_data = {
-                "id": str(uuid.uuid4()),
-                "chapter_id": chapter_id,
-                "chapter_title": chapter_title,
-                "is_valid": is_valid,
-                "overall_score": overall_score,
-                "general_feedback": general_feedback,
-                "style_guide_adherence_score": style_guide_adherence_score,
-                "style_guide_adherence_explanation": style_guide_adherence_explanation,
-                "continuity_score": continuity_score,
-                "continuity_explanation": continuity_explanation,
-                "areas_for_improvement": areas_for_improvement,
-                "user_id": user_id,
-                "project_id": project_id,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('validity_checks').insert(validity_check_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to save validity check")
+            async with self.Session() as session:
+                validity_check = ValidityCheck(
+                    id=str(uuid.uuid4()),
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    is_valid=is_valid,
+                    overall_score=overall_score,
+                    general_feedback=general_feedback,
+                    style_guide_adherence_score=style_guide_adherence_score,
+                    style_guide_adherence_explanation=style_guide_adherence_explanation,
+                    continuity_score=continuity_score,
+                    continuity_explanation=continuity_explanation,
+                    areas_for_improvement=json.dumps(areas_for_improvement),
+                    user_id=user_id,
+                    project_id=project_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(validity_check)
+                await session.commit()
+                return validity_check.id
         except Exception as e:
             self.logger.error(f"Error saving validity check: {str(e)}")
             raise
