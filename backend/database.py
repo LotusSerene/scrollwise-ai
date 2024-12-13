@@ -1222,11 +1222,13 @@ class Database:
 
     async def get_locations(self, user_id: str, project_id: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
         try:
-            query = self.supabase.table('locations').select('*').eq('user_id', user_id).eq('project_id', project_id)
+            query = select(Location).where(Location.user_id == user_id, Location.project_id == project_id)
             if k is not None:
                 query = query.limit(k)
-            response = query.execute()
-            return response.data
+            async with self.Session() as session:
+                result = await session.execute(query)
+                locations = result.scalars().all()
+                return [location.to_dict() for location in locations]
         except Exception as e:
             self.logger.error(f"Error getting locations: {str(e)}")
             raise
