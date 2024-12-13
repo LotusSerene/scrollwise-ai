@@ -1714,21 +1714,21 @@ description: Optional[str] = None) -> str:
                       character_id: Optional[str], location_id: Optional[str], 
                       project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            update_data = {
-                "title": title,
-                "description": description,
-                "date": date.isoformat(),
-                "character_id": character_id,
-                "location_id": location_id,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            response = self.supabase.table('events').update(update_data).eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            raise Exception("Event not found")
-                
+            async with self.Session() as session:
+                query = select(Event).where(Event.id == event_id, Event.user_id == user_id, Event.project_id == project_id)
+                result = await session.execute(query)
+                event = result.scalars().first()
+                if event:
+                    event.title = title
+                    event.description = description
+                    event.date = date
+                    event.character_id = character_id
+                    event.location_id = location_id
+                    event.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return event.to_dict()
+                else:
+                    raise Exception("Event not found")
         except Exception as e:
             self.logger.error(f"Error updating event: {str(e)}")
             raise
