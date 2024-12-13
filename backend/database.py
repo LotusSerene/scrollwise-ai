@@ -1107,8 +1107,11 @@ class Database:
 
     async def delete_universe(self, universe_id: str, user_id: str) -> bool:
         try:
-            response = self.supabase.table('universes').delete().eq('id', universe_id).eq('user_id', user_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(Universe).where(Universe.id == universe_id, Universe.user_id == user_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting universe: {str(e)}")
             raise
