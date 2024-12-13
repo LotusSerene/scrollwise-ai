@@ -1962,8 +1962,15 @@ description: Optional[str] = None) -> str:
 
     async def delete_location_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
         try:
-            response = self.supabase.table('location_connections').delete().eq('id', connection_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(LocationConnection).where(
+                    LocationConnection.id == connection_id,
+                    LocationConnection.user_id == user_id,
+                    LocationConnection.project_id == project_id
+                )
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting location connection: {str(e)}")
             raise
