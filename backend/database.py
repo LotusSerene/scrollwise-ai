@@ -1911,17 +1911,20 @@ description: Optional[str] = None) -> str:
         project_id: str
     ) -> Optional[Dict[str, Any]]:
         try:
-            update_data = {
-                "connection_type": connection_type,
-                "description": description,
-                "travel_route": travel_route,
-                "cultural_exchange": cultural_exchange,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('location_connections').update(update_data).eq('id', connection_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(LocationConnection).where(LocationConnection.id == connection_id, LocationConnection.user_id == user_id, LocationConnection.project_id == project_id)
+                result = await session.execute(query)
+                connection = result.scalars().first()
+                if connection:
+                    connection.connection_type = connection_type
+                    connection.description = description
+                    connection.travel_route = travel_route
+                    connection.cultural_exchange = cultural_exchange
+                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return connection.to_dict()
+                else:
+                    raise Exception("Location connection not found")
         except Exception as e:
             self.logger.error(f"Error updating location connection: {str(e)}")
             raise
