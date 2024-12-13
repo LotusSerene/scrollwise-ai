@@ -1635,17 +1635,11 @@ class Database:
 
     async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
         try:
-            response = self.supabase.table('character_backstories').select('*').eq('character_id', character_id).order('created_at').execute()
-            return [
-                {
-                    'id': backstory['id'],
-                    'character_id': backstory['character_id'],
-                    'content': backstory['content'],
-                    'chapter_id': backstory['chapter_id'],
-                    'created_at': backstory['created_at']
-                } 
-                for backstory in response.data
-            ] if response.data else []
+            async with self.Session() as session:
+                query = select(CharacterBackstory).where(CharacterBackstory.character_id == character_id).order_by(CharacterBackstory.created_at)
+                result = await session.execute(query)
+                backstories = result.scalars().all()
+                return [backstory.to_dict() for backstory in backstories]
         except Exception as e:
             self.logger.error(f"Error getting character backstories: {str(e)}")
             raise
