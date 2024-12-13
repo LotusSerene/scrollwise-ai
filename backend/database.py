@@ -1363,10 +1363,13 @@ class Database:
 
     async def get_chat_history(self, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('chat_history').select('messages').eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return json.loads(response.data[0]['messages'])
-            return []
+            async with self.Session() as session:
+                query = select(ChatHistory.messages).where(ChatHistory.user_id == user_id, ChatHistory.project_id == project_id)
+                result = await session.execute(query)
+                chat_history = result.scalars().first()
+                if chat_history:
+                    return json.loads(chat_history)
+                return []
         except Exception as e:
             self.logger.error(f"Error getting chat history: {str(e)}")
             raise
