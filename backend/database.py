@@ -1977,8 +1977,15 @@ description: Optional[str] = None) -> str:
 
     async def delete_event_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
         try:
-            response = self.supabase.table('event_connections').delete().eq('id', connection_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(EventConnection).where(
+                    EventConnection.id == connection_id,
+                    EventConnection.user_id == user_id,
+                    EventConnection.project_id == project_id
+                )
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting event connection: {str(e)}")
             raise
