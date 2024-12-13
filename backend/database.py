@@ -1428,10 +1428,13 @@ class Database:
             raise
 
 
-    async def delete_preset(self, preset_name: str, user_id: str, project_id: str):
+    async def delete_preset(self, preset_name: str, user_id: str, project_id: str) -> bool:
         try:
-            response = self.supabase.table('presets').delete().eq('name', preset_name).eq('user_id', user_id).eq('project_id', project_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(Preset).where(Preset.name == preset_name, Preset.user_id == user_id, Preset.project_id == project_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting preset: {str(e)}")
             raise
