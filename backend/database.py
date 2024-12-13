@@ -1511,29 +1511,32 @@ class Database:
 
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         try:
-            # Get relationships and join with codex_items to get character names
-            response = self.supabase.table('character_relationships').select(
-                'character_relationships.id',
-                'character_relationships.character_id',
-                'character_relationships.related_character_id',
-                'character_relationships.relationship_type',
-                'character_relationships.description',
-                'c1:codex_items(name).name as character1_name',
-                'c2:codex_items(name).name as character2_name'
-            ).eq('project_id', project_id).execute()
-
-            result = []
-            for rel in response.data:
-                result.append({
-                    'id': rel['id'],
-                    'character1_id': rel['character_id'],
-                    'character2_id': rel['related_character_id'],
-                    'character1_name': rel['c1']['name'],
-                    'character2_name': rel['c2']['name'],
-                    'relationship_type': rel['relationship_type'],
-                    'description': rel['description'] or ''
-                })
-            return result
+            async with self.Session() as session:
+                query = (
+                    select(CharacterRelationship)
+                    .join(CodexItem, CharacterRelationship.character_id == CodexItem.id, isouter=True)
+                    .join(CodexItem, CharacterRelationship.related_character_id == CodexItem.id, isouter=True, aliased=True)
+                    .where(CharacterRelationship.project_id == project_id)
+                    .options(
+                        joinedload(CharacterRelationship.character),
+                        joinedload(CharacterRelationship.related_character)
+                    )
+                )
+                result = await session.execute(query)
+                relationships = result.scalars().all()
+                
+                result = []
+                for rel in relationships:
+                    result.append({
+                        'id': rel.id,
+                        'character1_id': rel.character_id,
+                        'character2_id': rel.related_character_id,
+                        'character1_name': rel.character.name if rel.character else None,
+                        'character2_name': rel.related_character.name if rel.related_character else None,
+                        'relationship_type': rel.relationship_type,
+                        'description': rel.description or ''
+                    })
+                return result
         except Exception as e:
             self.logger.error(f"Error getting character relationships: {str(e)}")
             raise
