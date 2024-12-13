@@ -1029,12 +1029,17 @@ class Database:
 
     async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            updates = {"universe_id": universe_id, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
-            response = self.supabase.table('projects').update(updates).eq('id', project_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Project not found")
+            async with self.Session() as session:
+                query = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+                result = await session.execute(query)
+                project = result.scalars().first()
+                if project:
+                    project.universe_id = universe_id
+                    project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return project.to_dict()
+                else:
+                    raise Exception("Project not found")
         except Exception as e:
             self.logger.error(f"Error updating project universe: {str(e)}")
             raise
