@@ -1375,11 +1375,13 @@ class Database:
             raise
 
 
-    async def delete_chat_history(self, user_id: str, project_id: str):
+    async def delete_chat_history(self, user_id: str, project_id: str) -> bool:
         try:
-            response = self.supabase.table('chat_history').delete().eq('user_id', user_id).eq('project_id', project_id).execute()
-            if not response.data:
-                raise Exception("Failed to delete chat history")
+            async with self.Session() as session:
+                query = delete(ChatHistory).where(ChatHistory.user_id == user_id, ChatHistory.project_id == project_id)
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting chat history: {str(e)}")
             raise
