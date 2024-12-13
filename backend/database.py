@@ -1118,14 +1118,15 @@ class Database:
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
         try:
-            response = self.supabase.table('codex_items').select('*').join('projects', on='codex_items.project_id=projects.id').filter(
-                f"projects.universe_id=eq.{universe_id}",
-                f"codex_items.user_id=eq.{user_id}"
-            ).execute()
-            if response.data:
-                return [item for item in response.data]
-            else:
-                return []
+            async with self.Session() as session:
+                query = (
+                    select(CodexItem)
+                    .join(Project, CodexItem.project_id == Project.id)
+                    .where(Project.universe_id == universe_id, CodexItem.user_id == user_id)
+                )
+                result = await session.execute(query)
+                codex_items = result.scalars().all()
+                return [item.to_dict() for item in codex_items]
         except Exception as e:
             self.logger.error(f"Error getting universe codex: {str(e)}")
             raise
