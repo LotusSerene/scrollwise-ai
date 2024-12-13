@@ -1318,23 +1318,13 @@ class Database:
 
     async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('validity_checks').select('*').eq('chapter_id', chapter_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                validity_check = response.data[0]
-                return {
-                    'id': validity_check['id'],
-                    'chapter_title': validity_check['chapter_title'],
-                    'is_valid': validity_check['is_valid'],
-                    'overall_score': validity_check['overall_score'],
-                    'general_feedback': validity_check['general_feedback'],
-                    'style_guide_adherence_score': validity_check['style_guide_adherence_score'],
-                    'style_guide_adherence_explanation': validity_check['style_guide_adherence_explanation'],
-                    'continuity_score': validity_check['continuity_score'],
-                    'continuity_explanation': validity_check['continuity_explanation'],
-                    'areas_for_improvement': validity_check['areas_for_improvement'],
-                    'created_at': validity_check['created_at']
-                }
-            raise Exception("Validity check not found")
+            async with self.Session() as session:
+                query = select(ValidityCheck).where(ValidityCheck.chapter_id == chapter_id, ValidityCheck.user_id == user_id)
+                result = await session.execute(query)
+                validity_check = result.scalars().first()
+                if validity_check:
+                    return validity_check.to_dict()
+                raise Exception("Validity check not found")
         except Exception as e:
             self.logger.error(f"Error getting validity check: {str(e)}")
             raise
