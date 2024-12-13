@@ -1733,14 +1733,13 @@ description: Optional[str] = None) -> str:
             self.logger.error(f"Error updating event: {str(e)}")
             raise
 
-    async def get_event_by_title(self, title: str, user_id: str, project_id: str):
+    async def get_event_by_title(self, title: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('events').select('*').eq('title', title).eq('user_id', user_id).eq('project_id', project_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
-                
+            async with self.Session() as session:
+                query = select(Event).where(Event.title == title, Event.user_id == user_id, Event.project_id == project_id)
+                result = await session.execute(query)
+                event = result.scalars().first()
+                return event.to_dict() if event else None
         except Exception as e:
             self.logger.error(f"Error getting event by title: {str(e)}")
             raise
