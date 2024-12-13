@@ -1473,14 +1473,15 @@ class Database:
 
     async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
         try:
-            # First verify the relationship exists and belongs to the project
-            response = self.supabase.table('character_relationships').select('*').eq('id', relationship_id).eq('project_id', project_id).execute()
-            if not response.data or len(response.data) == 0:
-                raise Exception("Relationship not found")
-                
-            # Delete the relationship
-            response = self.supabase.table('character_relationships').delete().eq('id', relationship_id).eq('project_id', project_id).execute()
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(CharacterRelationship).where(
+                    CharacterRelationship.id == relationship_id,
+                    CharacterRelationship.user_id == user_id,
+                    CharacterRelationship.project_id == project_id
+                )
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting character relationship: {str(e)}")
             raise
