@@ -1673,33 +1673,37 @@ class Database:
     async def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str, 
 description: Optional[str] = None) -> str:
         try:
-            # First verify both characters exist and are of type character
-            char1_response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('project_id', project_id).eq('type', 'character').execute()
-            char2_response = self.supabase.table('codex_items').select('*').eq('id', related_character_id).eq('project_id', project_id).eq('type', 'character').execute()
-            
-            if not char1_response.data or len(char1_response.data) == 0:
-                self.logger.error(f"Character with ID {character_id} not found in the codex")
-                raise ValueError("Character not found")
+            async with self.Session() as session:
+                # First verify both characters exist and are of type character
+                char1_query = select(CodexItem).where(CodexItem.id == character_id, CodexItem.project_id == project_id, CodexItem.type == CodexItemType.CHARACTER.value)
+                char2_query = select(CodexItem).where(CodexItem.id == related_character_id, CodexItem.project_id == project_id, CodexItem.type == CodexItemType.CHARACTER.value)
                 
-            if not char2_response.data or len(char2_response.data) == 0:
-                self.logger.error(f"Character with ID {related_character_id} not found in the codex")
-                raise ValueError("Related character not found")
-            
-            relationship_data = {
-                "id": str(uuid.uuid4()),
-                "character_id": character_id,
-                "related_character_id": related_character_id,
-                "relationship_type": relationship_type,
-                "description": description,
-                "project_id": project_id
-            }
-            
-            response = self.supabase.table('character_relationships').insert(relationship_data).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create character relationship")
+                char1_result = await session.execute(char1_query)
+                char2_result = await session.execute(char2_query)
+                
+                char1 = char1_result.scalars().first()
+                char2 = char2_result.scalars().first()
+                
+                if not char1:
+                    self.logger.error(f"Character with ID {character_id} not found in the codex")
+                    raise ValueError("Character not found")
+                    
+                if not char2:
+                    self.logger.error(f"Character with ID {related_character_id} not found in the codex")
+                    raise ValueError("Related character not found")
+                
+                relationship = CharacterRelationship(
+                    id=str(uuid.uuid4()),
+                    character_id=character_id,
+                    related_character_id=related_character_id,
+                    relationship_type=relationship_type,
+                    description=description,
+                    project_id=project_id
+                )
+                
+                session.add(relationship)
+                await session.commit()
+                return relationship.id
                 
         except Exception as e:
             self.logger.error(f"Error creating character relationship: {str(e)}")
