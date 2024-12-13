@@ -1388,26 +1388,27 @@ class Database:
 
 
 
-    async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]):
+    async def create_preset(self, user_id: str, project_id: str, name: str, data: Dict[str, Any]) -> str:
         try:
-            # Check if a preset with the same name exists
-            response = self.supabase.table('presets').select('id').eq('user_id', user_id).eq('project_id', project_id).eq('name', name).execute()
-            if response.data and len(response.data) > 0:
-                raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
-            
-            # Create new preset
-            preset_data = {
-                "id": str(uuid.uuid4()),
-                "user_id": user_id,
-                "project_id": project_id,
-                "name": name,
-                "data": data
-            }
-            response = self.supabase.table('presets').insert(preset_data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create preset")
+            async with self.Session() as session:
+                # Check if a preset with the same name exists
+                query = select(Preset).where(Preset.user_id == user_id, Preset.project_id == project_id, Preset.name == name)
+                result = await session.execute(query)
+                preset = result.scalars().first()
+                if preset:
+                    raise ValueError(f"A preset with name '{name}' already exists for this user and project.")
+                
+                # Create new preset
+                new_preset = Preset(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    project_id=project_id,
+                    name=name,
+                    data=data
+                )
+                session.add(new_preset)
+                await session.commit()
+                return new_preset.id
         except ValueError as ve:
             self.logger.error(f"Error creating preset: {str(ve)}")
             raise
