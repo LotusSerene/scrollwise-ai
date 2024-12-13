@@ -1646,23 +1646,25 @@ class Database:
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
         try:
-            # Get all chapters for the project and user, ordered by chapter number
-            response = self.supabase.table('chapters').select('*').eq('project_id', project_id).eq('user_id', user_id).order('chapter_number').execute()
-            
-            if not response.data:
-                return []
+            async with self.Session() as session:
+                query = (
+                    select(Chapter)
+                    .where(Chapter.project_id == project_id, Chapter.user_id == user_id)
+                    .order_by(Chapter.chapter_number)
+                )
+                result = await session.execute(query)
+                chapters = result.scalars().all()
                 
-            # Filter chapters that don't have the process_type in their processed_types array
-            unprocessed_chapters = [
-                {
-                    'id': chapter['id'],
-                    'content': chapter['content']
-                }
-                for chapter in response.data
-                if process_type not in (chapter.get('processed_types', []))
-            ]
-            
-            return unprocessed_chapters
+                unprocessed_chapters = [
+                    {
+                        'id': chapter.id,
+                        'content': chapter.content
+                    }
+                    for chapter in chapters
+                    if process_type not in chapter.processed_types
+                ]
+                
+                return unprocessed_chapters
                 
         except Exception as e:
             self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
