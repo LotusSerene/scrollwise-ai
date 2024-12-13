@@ -1786,12 +1786,13 @@ description: Optional[str] = None) -> str:
 
 
 
-    async def get_location_by_name(self, name: str, user_id: str, project_id: str):
+    async def get_location_by_name(self, name: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('locations').select('*').eq('name', name).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(Location).where(Location.name == name, Location.user_id == user_id, Location.project_id == project_id)
+                result = await session.execute(query)
+                location = result.scalars().first()
+                return location.to_dict() if location else None
         except Exception as e:
             self.logger.error(f"Error getting location by name: {str(e)}")
             raise
