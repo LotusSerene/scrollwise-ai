@@ -1590,26 +1590,22 @@ class Database:
 
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
         try:
-            event_data = {
-                "id": str(uuid.uuid4()),
-                "title": title,
-                "description": description,
-                "date": date.isoformat(),
-                "character_id": character_id,
-                "project_id": project_id,
-                "user_id": user_id,
-                "location_id": location_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            response = self.supabase.table('events').insert(event_data).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create event")
-                
+            async with self.Session() as session:
+                event = Event(
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    description=description,
+                    date=date,
+                    character_id=character_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    location_id=location_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(event)
+                await session.commit()
+                return event.id
         except Exception as e:
             self.logger.error(f"Error creating event: {str(e)}")
             raise
