@@ -2000,11 +2000,15 @@ description: Optional[str] = None) -> str:
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
         try:
-            # Delete event where id, user_id, and project_id match
-            response = self.supabase.table('events').delete().eq('id', event_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            
-            # Return True if something was deleted, False otherwise
-            return bool(response.data)
+            async with self.Session() as session:
+                query = delete(Event).where(
+                    Event.id == event_id,
+                    Event.user_id == user_id,
+                    Event.project_id == project_id
+                )
+                result = await session.execute(query)
+                await session.commit()
+                return result.rowcount > 0
         except Exception as e:
             self.logger.error(f"Error deleting event: {str(e)}")
             raise
