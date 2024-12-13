@@ -1331,26 +1331,32 @@ class Database:
 
     async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
         try:
-            # First check if a chat history exists for this user and project
-            response = self.supabase.table('chat_history').select('id').eq('user_id', user_id).eq('project_id', project_id).execute()
-            
-            chat_data = {
-                "messages": json.dumps(messages),
-                "user_id": user_id,
-                "project_id": project_id
-            }
-            
-            if response.data and len(response.data) > 0:
-                # Update existing chat history
-                response = self.supabase.table('chat_history').update(chat_data).eq('user_id', user_id).eq('project_id', project_id).execute()
-            else:
-                # Create new chat history
-                chat_data["id"] = str(uuid.uuid4())
-                response = self.supabase.table('chat_history').insert(chat_data).execute()
+            async with self.Session() as session:
+                # First check if a chat history exists for this user and project
+                query = select(ChatHistory).where(ChatHistory.user_id == user_id, ChatHistory.project_id == project_id)
+                result = await session.execute(query)
+                chat_history = result.scalars().first()
                 
-            if not response.data:
-                raise Exception("Failed to save chat history")
+                chat_data = {
+                    "messages": json.dumps(messages),
+                    "user_id": user_id,
+                    "project_id": project_id
+                }
                 
+                if chat_history:
+                    # Update existing chat history
+                    chat_history.messages = chat_data["messages"]
+                    chat_history.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                else:
+                    # Create new chat history
+                    new_chat_history = ChatHistory(
+                        id=str(uuid.uuid4()),
+                        **chat_data,
+                        created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    session.add(new_chat_history)
+                
+                await session.commit()
         except Exception as e:
             self.logger.error(f"Error saving chat history: {str(e)}")
             raise
