@@ -1939,16 +1939,23 @@ description: Optional[str] = None) -> str:
         project_id: str
     ) -> Optional[Dict[str, Any]]:
         try:
-            update_data = {
-                "connection_type": connection_type,
-                "description": description,
-                "impact": impact,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('event_connections').update(update_data).eq('id', connection_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(EventConnection).where(
+                    EventConnection.id == connection_id,
+                    EventConnection.user_id == user_id,
+                    EventConnection.project_id == project_id
+                )
+                result = await session.execute(query)
+                connection = result.scalars().first()
+                if connection:
+                    connection.connection_type = connection_type
+                    connection.description = description
+                    connection.impact = impact
+                    connection.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return connection.to_dict()
+                else:
+                    raise Exception("Event connection not found")
         except Exception as e:
             self.logger.error(f"Error updating event connection: {str(e)}")
             raise
