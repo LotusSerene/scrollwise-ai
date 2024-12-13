@@ -1077,10 +1077,11 @@ class Database:
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('universes').select('*').eq('id', universe_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            return None
+            async with self.Session() as session:
+                query = select(Universe).where(Universe.id == universe_id, Universe.user_id == user_id)
+                result = await session.execute(query)
+                universe = result.scalars().first()
+                return universe.to_dict() if universe else None
         except Exception as e:
             self.logger.error(f"Error getting universe: {str(e)}")
             raise
