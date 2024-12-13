@@ -1817,29 +1817,25 @@ description: Optional[str] = None) -> str:
         user_id: str
     ) -> str:
         try:
-            current_time = datetime.now(timezone.utc).isoformat()
-            connection_data = {
-                "id": str(uuid.uuid4()),
-                "location1_id": location1_id,
-                "location2_id": location2_id,
-                "location1_name": location1_name,
-                "location2_name": location2_name,
-                "connection_type": connection_type,
-                "description": description,
-                "travel_route": travel_route,
-                "cultural_exchange": cultural_exchange,
-                "project_id": project_id,
-                "user_id": user_id,
-                "created_at": current_time,
-                "updated_at": current_time
-            }
-            
-            response = self.supabase.table('location_connections').insert(connection_data).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create location connection")
+            async with self.Session() as session:
+                connection = LocationConnection(
+                    id=str(uuid.uuid4()),
+                    location1_id=location1_id,
+                    location2_id=location2_id,
+                    location1_name=location1_name,
+                    location2_name=location2_name,
+                    connection_type=connection_type,
+                    description=description,
+                    travel_route=travel_route,
+                    cultural_exchange=cultural_exchange,
+                    project_id=project_id,
+                    user_id=user_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(connection)
+                await session.commit()
+                return connection.id
                 
         except Exception as e:
             self.logger.error(f"Error creating location connection: {str(e)}")
