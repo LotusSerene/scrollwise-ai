@@ -1440,13 +1440,15 @@ class Database:
             raise
 
 
-    async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str):
+    async def get_preset_by_name(self, preset_name: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.supabase.table('presets').select('*').eq('name', preset_name).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if response.data and len(response.data) > 0:
-                preset = response.data[0]
-                return {"id": preset['id'], "name": preset['name'], "data": preset['data']}
-            raise Exception("Preset not found")
+            async with self.Session() as session:
+                query = select(Preset).where(Preset.name == preset_name, Preset.user_id == user_id, Preset.project_id == project_id)
+                result = await session.execute(query)
+                preset = result.scalars().first()
+                if preset:
+                    return {"id": preset.id, "name": preset.name, "data": preset.data}
+                raise Exception("Preset not found")
         except Exception as e:
             self.logger.error(f"Error getting preset by name: {str(e)}")
             raise
