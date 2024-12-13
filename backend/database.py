@@ -1852,22 +1852,22 @@ description: Optional[str] = None) -> str:
         user_id: str
     ) -> str:
         try:
-            data = {
-                "event1_id": event1_id,
-                "event2_id": event2_id,
-                "connection_type": connection_type,
-                "description": description,
-                "impact": impact,
-                "project_id": project_id,
-                "user_id": user_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            response = self.supabase.table('event_connections').insert(data).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]['id']
-            else:
-                raise Exception("Failed to create event connection")
+            async with self.Session() as session:
+                connection = EventConnection(
+                    id=str(uuid.uuid4()),
+                    event1_id=event1_id,
+                    event2_id=event2_id,
+                    connection_type=connection_type,
+                    description=description,
+                    impact=impact,
+                    project_id=project_id,
+                    user_id=user_id,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(connection)
+                await session.commit()
+                return connection.id
         except Exception as e:
             self.logger.error(f"Error creating event connection: {str(e)}")
             raise
