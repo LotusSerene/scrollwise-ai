@@ -1418,8 +1418,11 @@ class Database:
 
     async def get_presets(self, user_id: str, project_id: str):
         try:
-            response = self.supabase.table('presets').select('*').eq('user_id', user_id).eq('project_id', project_id).execute()
-            return [{"id": preset['id'], "name": preset['name'], "data": preset['data']} for preset in response.data]
+            async with self.Session() as session:
+                query = select(Preset).where(Preset.user_id == user_id, Preset.project_id == project_id)
+                result = await session.execute(query)
+                presets = result.scalars().all()
+                return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
         except Exception as e:
             self.logger.error(f"Error getting presets: {str(e)}")
             raise
