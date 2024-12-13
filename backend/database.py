@@ -1612,27 +1612,22 @@ class Database:
 
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
         try:
-            # First get the character to verify it exists and check its current backstory
-            response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).eq('type', 'character').execute()
-            
-            if not response.data or len(response.data) == 0:
-                raise ValueError("Character not found or not of type character")
+            async with self.Session() as session:
+                # Fetch the character to verify it exists and check its current backstory
+                query = select(CodexItem).where(CodexItem.id == character_id, CodexItem.user_id == user_id, CodexItem.project_id == project_id, CodexItem.type == CodexItemType.CHARACTER.value)
+                result = await session.execute(query)
+                character = result.scalars().first()
                 
-            character = response.data[0]
-            new_backstory = f"{character['backstory']}\n\n{content}" if character['backstory'] else content
-            
-            # Update the character with new backstory
-            update_data = {
-                "backstory": new_backstory,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Failed to update character backstory")
+                if not character:
+                    raise ValueError("Character not found or not of type character")
+                
+                # Update backstory and updated_at
+                new_backstory = f"{character.backstory}\n\n{content}" if character.backstory else content
+                character.backstory = new_backstory
+                character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                
+                await session.commit()
+                return character.to_dict()
                 
         except Exception as e:
             self.logger.error(f"Error saving character backstory: {str(e)}")
