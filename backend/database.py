@@ -1428,10 +1428,10 @@ class Database:
             raise
 
 
-    async def delete_preset(self, preset_name: str, user_id: str, project_id: str) -> bool:
+    async def delete_preset(self, preset_id: str, user_id: str, project_id: str) -> bool:
         try:
             async with self.Session() as session:
-                query = delete(Preset).where(Preset.name == preset_name, Preset.user_id == user_id, Preset.project_id == project_id)
+                query = delete(Preset).where(Preset.id == preset_id, Preset.user_id == user_id, Preset.project_id == project_id)
                 result = await session.execute(query)
                 await session.commit()
                 return result.rowcount > 0
