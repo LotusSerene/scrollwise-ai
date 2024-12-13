@@ -1451,7 +1451,7 @@ class Database:
                 return None
         except Exception as e:
             self.logger.error(f"Error getting preset by name: {str(e)}")
-            raise
+            return None
 
 
     async def update_chapter_embedding_id(self, chapter_id: str, embedding_id: str) -> bool:
