@@ -1209,12 +1209,13 @@ class Database:
 
     async def get_events(self, project_id: str, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         try:
-            query = self.supabase.table('events').select('*').eq('user_id', user_id).eq('project_id', project_id)
+            query = select(Event).where(Event.user_id == user_id, Event.project_id == project_id)
             if limit is not None:
                 query = query.limit(limit)
-            response = query.execute()
-            events = response.data
-            return [event for event in events]
+            async with self.Session() as session:
+                result = await session.execute(query)
+                events = result.scalars().all()
+                return [event.to_dict() for event in events]
         except Exception as e:
             self.logger.error(f"Error getting events: {str(e)}")
             raise
