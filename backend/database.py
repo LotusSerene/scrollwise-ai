@@ -1580,8 +1580,10 @@ class Database:
 
     async def get_chapter_count(self, project_id: str, user_id: str) -> int:
         try:
-            response = self.supabase.table('chapters').select('id').eq('project_id', project_id).eq('user_id', user_id).execute()
-            return len(response.data) if response.data else 0
+            async with self.Session() as session:
+                query = select(func.count()).where(Chapter.project_id == project_id, Chapter.user_id == user_id)
+                result = await session.execute(query)
+                return result.scalar_one()
         except Exception as e:
             self.logger.error(f"Error getting chapter count: {str(e)}")
             raise
