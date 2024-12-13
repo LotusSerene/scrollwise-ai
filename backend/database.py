@@ -1448,7 +1448,7 @@ class Database:
                 preset = result.scalars().first()
                 if preset:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
-                raise Exception("Preset not found")
+                return None
         except Exception as e:
             self.logger.error(f"Error getting preset by name: {str(e)}")
             raise
