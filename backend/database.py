@@ -1134,38 +1134,44 @@ class Database:
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
         try:
             # Fetch all projects for the given universe
-            projects_response = self.supabase.table('projects').select('*').eq('universe_id', universe_id).eq('user_id', user_id).execute()
-            projects = projects_response.data
-            project_ids = [project['id'] for project in projects]
+            async with self.Session() as session:
+                query = select(Project).where(Project.universe_id == universe_id, Project.user_id == user_id)
+                result = await session.execute(query)
+                projects = result.scalars().all()
+                project_ids = [project.id for project in projects]
 
             # Initialize the result dictionary
-            knowledge_base = {project['id']: [] for project in projects}
+            knowledge_base = {project.id: [] for project in projects}
 
             # Fetch chapters and codex items with pagination
             for project_id in project_ids:
-                chapters_response = self.supabase.table('chapters').select('*').eq('project_id', project_id).limit(limit).offset(offset).execute()
-                codex_items_response = self.supabase.table('codex_items').select('*').eq('project_id', project_id).limit(limit).offset(offset).execute()
+                async with self.Session() as session:
+                    chapters_query = select(Chapter).where(Chapter.project_id == project_id).limit(limit).offset(offset)
+                    codex_items_query = select(CodexItem).where(CodexItem.project_id == project_id).limit(limit).offset(offset)
 
-                chapters = chapters_response.data
-                codex_items = codex_items_response.data
+                    chapters_result = await session.execute(chapters_query)
+                    codex_items_result = await session.execute(codex_items_query)
 
-                for chapter in chapters:
-                    knowledge_base[project_id].append({
-                        'id': chapter['id'],
-                        'type': 'chapter',
-                        'title': chapter['title'],
-                        'content': chapter['content'],
-                        'embedding_id': chapter['embedding_id']
-                    })
+                    chapters = chapters_result.scalars().all()
+                    codex_items = codex_items_result.scalars().all()
 
-                for item in codex_items:
-                    knowledge_base[project_id].append({
-                        'id': item['id'],
-                        'type': 'codex_item',
-                        'name': item['name'],
-                        'description': item['description'],
-                        'embedding_id': item['embedding_id']
-                    })
+                    for chapter in chapters:
+                        knowledge_base[project_id].append({
+                            'id': chapter.id,
+                            'type': 'chapter',
+                            'title': chapter.title,
+                            'content': chapter.content,
+                            'embedding_id': chapter.embedding_id
+                        })
+
+                    for item in codex_items:
+                        knowledge_base[project_id].append({
+                            'id': item.id,
+                            'type': 'codex_item',
+                            'name': item.name,
+                            'description': item.description,
+                            'embedding_id': item.embedding_id
+                        })
 
             # Remove any empty projects
             knowledge_base = {k: v for k, v in knowledge_base.items() if v}
