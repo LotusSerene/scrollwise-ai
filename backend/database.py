@@ -1454,16 +1454,19 @@ class Database:
             raise
 
 
-    async def update_chapter_embedding_id(self, chapter_id, embedding_id):
+    async def update_chapter_embedding_id(self, chapter_id: str, embedding_id: str) -> bool:
         try:
-            updates = {
-                "embedding_id": embedding_id,
-                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            }
-            response = self.supabase.table('chapters').update(updates).eq('id', chapter_id).execute()
-            if response.data and len(response.data) > 0:
-                return True
-            return False
+            async with self.Session() as session:
+                query = select(Chapter).where(Chapter.id == chapter_id)
+                result = await session.execute(query)
+                chapter = result.scalars().first()
+                if chapter:
+                    chapter.embedding_id = embedding_id
+                    chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return True
+                else:
+                    raise Exception("Chapter not found")
         except Exception as e:
             self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
             raise
