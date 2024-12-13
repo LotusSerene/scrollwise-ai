@@ -1874,13 +1874,14 @@ description: Optional[str] = None) -> str:
 
     async def get_location_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         try:
-            response = self.supabase.table('location_connections').select('*').eq('project_id', project_id).eq('user_id', user_id).execute()
-            connections = response.data
-            result = []
-            for conn in connections:
-                connection_dict = conn.to_dict()
-                result.append(connection_dict)
-            return result
+            async with self.Session() as session:
+                query = (
+                    select(LocationConnection)
+                    .where(LocationConnection.project_id == project_id, LocationConnection.user_id == user_id)
+                )
+                result = await session.execute(query)
+                connections = result.scalars().all()
+                return [conn.to_dict() for conn in connections]
         except Exception as e:
             self.logger.error(f"Error getting location connections: {str(e)}")
             raise
