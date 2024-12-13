@@ -1089,12 +1089,17 @@ class Database:
 
     async def update_universe(self, universe_id: str, name: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            updates = {"name": name, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
-            response = self.supabase.table('universes').update(updates).eq('id', universe_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Universe not found")
+            async with self.Session() as session:
+                query = select(Universe).where(Universe.id == universe_id, Universe.user_id == user_id)
+                result = await session.execute(query)
+                universe = result.scalars().first()
+                if universe:
+                    universe.name = name
+                    universe.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return universe.to_dict()
+                else:
+                    raise Exception("Universe not found")
         except Exception as e:
             self.logger.error(f"Error updating universe: {str(e)}")
             raise
