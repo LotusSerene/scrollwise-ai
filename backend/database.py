@@ -1005,22 +1005,24 @@ class Database:
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         try:
-            updates = {}
-            if name is not None:
-                updates["name"] = name
-            if description is not None:
-                updates["description"] = description
-            if universe_id is not None:
-                updates["universe_id"] = universe_id
-            if target_word_count is not None:
-                updates["target_word_count"] = target_word_count
-            updates["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-
-            response = self.supabase.table('projects').update(updates).eq('id', project_id).eq('user_id', user_id).execute()
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-            else:
-                raise Exception("Project not found")
+            async with self.Session() as session:
+                query = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+                result = await session.execute(query)
+                project = result.scalars().first()
+                if project:
+                    if name is not None:
+                        project.name = name
+                    if description is not None:
+                        project.description = description
+                    if universe_id is not None:
+                        project.universe_id = universe_id
+                    if target_word_count is not None:
+                        project.target_word_count = target_word_count
+                    project.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await session.commit()
+                    return project.to_dict()
+                else:
+                    raise Exception("Project not found")
         except Exception as e:
             self.logger.error(f"Error updating project: {str(e)}")
             raise
