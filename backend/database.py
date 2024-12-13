@@ -1416,7 +1416,7 @@ class Database:
             self.logger.error(f"Error creating preset: {str(e)}")
             raise
 
-    async def get_presets(self, user_id: str, project_id: str):
+    async def get_presets(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Preset).where(Preset.user_id == user_id, Preset.project_id == project_id)
