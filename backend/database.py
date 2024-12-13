@@ -1544,23 +1544,18 @@ class Database:
 
     async def update_character_backstory(self, character_id: str, backstory: str, user_id: str, project_id: str):
         try:
-            # Fetch the character
-            response = self.supabase.table('codex_items').select('*').eq('id', character_id).eq('user_id', user_id).eq('project_id', project_id).execute()
-            if not response.data or len(response.data) == 0:
-                raise ValueError(f"Character with ID {character_id} not found")
+            async with self.Session() as session:
+                # Fetch the character
+                query = select(CodexItem).where(CodexItem.id == character_id, CodexItem.user_id == user_id, CodexItem.project_id == project_id, CodexItem.type == CodexItemType.CHARACTER.value)
+                result = await session.execute(query)
+                character = result.scalars().first()
+                if not character:
+                    raise ValueError(f"Character with ID {character_id} not found")
 
-            character = response.data[0]
-            if character['type'] != CodexItemType.CHARACTER.value:
-                raise ValueError(f"Character {character_id} is not of type CHARACTER")
-
-            # Update backstory and updated_at
-            update_data = {
-                "backstory": backstory,
-                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            }
-            response = self.supabase.table('codex_items').update(update_data).eq('id', character_id).execute()
-            if not response.data:
-                raise Exception("Failed to update character backstory")
+                # Update backstory and updated_at
+                character.backstory = backstory
+                character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                await session.commit()
         except Exception as e:
             self.logger.error(f"Error updating character backstory: {str(e)}")
             raise
