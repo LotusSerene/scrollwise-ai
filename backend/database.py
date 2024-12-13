@@ -476,6 +476,13 @@ class Database:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        if not supabase_url or not supabase_key:
+            raise ValueError("Missing Supabase credentials in environment variables")
+        self.supabase: Client = create_client(supabase_url, supabase_key)
+        
         # Initialize Fernet encryption
         encryption_key = os.getenv('ENCRYPTION_KEY')
         if not encryption_key:
@@ -534,34 +541,54 @@ class Database:
         # No need for explicit initialization with Supabase
         pass
 
-    async def create_user(self, email: str, password: str):
+    async def sign_up(self, email: str, password: str):
         try:
-            # Use Supabase auth to create user
             auth_response = await self.supabase.auth.sign_up({
                 "email": email,
                 "password": password
             })
             
-            # Create a corresponding record in the users table using SQLAlchemy
-            session = self.Session()
-            try:
+            # Create local user record
+            user_id = auth_response.user.id
+            async with self.Session() as session:
                 new_user = User(
-                    id=auth_response.user.id,
+                    id=user_id,
                     email=email,
                 )
                 session.add(new_user)
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                self.logger.error(f"Error inserting user into local database: {str(e)}")
-                raise Exception("Failed to create user record locally")
-            finally:
-                session.close()
-                
-            return auth_response.user.id
+                await session.commit()
+            
+            return user_id
             
         except Exception as e:
-            self.logger.error(f"Error creating user (Supabase auth): {str(e)}")
+            self.logger.error(f"Error in sign up: {str(e)}")
+            raise
+
+    async def sign_in(self, email: str, password: str):
+        try:
+            auth_response = await self.supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+            return auth_response.user.id
+        except Exception as e:
+            self.logger.error(f"Error in sign in: {str(e)}")
+            raise
+
+    async def sign_out(self, session_token: str):
+        try:
+            await self.supabase.auth.sign_out()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error in sign out: {str(e)}")
+            raise
+
+    async def get_user(self, session_token: str):
+        try:
+            user = await self.supabase.auth.get_user(session_token)
+            return user
+        except Exception as e:
+            self.logger.error(f"Error getting user: {str(e)}")
             raise
 
     async def get_user_by_email(self, email: str):
@@ -1375,6 +1402,7 @@ class Database:
             raise
 
 
+
     async def delete_chat_history(self, user_id: str, project_id: str) -> bool:
         try:
             async with self.Session() as session:
@@ -1992,11 +2020,17 @@ description: Optional[str] = None) -> str:
 
     async def approve_user(self, user_id: str) -> bool:
         try:
-            response = self.supabase.table('user_approvals').update({'is_approved': True}).eq('id', user_id).execute()
-            return bool(response.data)
+            # Update user approval status in Supabase
+            data = await self.supabase.table('user_approvals').upsert({
+                'user_id': user_id,
+                'is_approved': True,
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }).execute()
+            return True
         except Exception as e:
-            self.logger.error(f"Error approving user: {str(e)}")
+            self.logger.error(f"Error approving user in Supabase: {str(e)}")
             return False
+
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
         try:
