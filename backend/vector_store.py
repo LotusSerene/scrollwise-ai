@@ -40,10 +40,9 @@ class VectorStore:
             raise
 
         try:
-            chroma_client = chromadb.HttpClient(
-                host=self.host,
-                port=self.chroma_port,
-                settings=Settings(anonymized_telemetry=False)
+            # Use local persistence instead of HTTP
+            chroma_client = chromadb.PersistentClient(
+                path="./chroma_db"  # Local path to store embeddings
             )
             
             collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
