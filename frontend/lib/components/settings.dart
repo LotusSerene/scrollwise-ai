@@ -26,6 +26,7 @@ class _SettingsState extends State<Settings> {
     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002',
   };
   final List<String> _modelOptions = [
+    'gemini-2.0-flash-exp',
     'gemini-1.5-pro-002',
     'gemini-1.5-flash-002',
     'gemini-1.5-flash-8b',
