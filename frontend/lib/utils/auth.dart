@@ -139,19 +139,13 @@ Future<bool> validateSession() async {
       return false;
     }
 
-    // Check if token is expired or close to expiring (within 5 minutes)
+    // Changed from 5 minutes to 6 hours to match server
     if (JwtDecoder.isExpired(token) ||
-        JwtDecoder.getExpirationDate(token)
-                .difference(DateTime.now())
-                .inMinutes <
-            5) {
-      // Attempt to refresh session
-      final refreshed = await refreshSession();
-      if (!refreshed) return false;
+        JwtDecoder.getExpirationDate(token).difference(DateTime.now()).inHours <
+            6) {
+      // Attempt to extend session
+      await _extendSession();
     }
-
-    // Extend local session if active
-    await _extendSession();
     return true;
   } catch (e) {
     print('Error validating session: $e');
@@ -167,6 +161,7 @@ Future<void> _extendSession() async {
     );
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
+      // We only need to handle session ID
       if (data['session_id'] != null) {
         await setSessionId(data['session_id']);
       }

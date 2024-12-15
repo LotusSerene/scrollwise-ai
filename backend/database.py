@@ -523,15 +523,13 @@ class Database:
 
     async def check_user_approval(self, user_id: str) -> bool:
         try:
-            async with self.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user:
-                    # Assuming you have an 'is_approved' column in your User model
-                    # For now, we'll return True if the user exists, as we're not storing approval in the local DB
-                    return True
-                return False
+            # Query Supabase directly for user approval status
+            response = await self.supabase.table('user_approvals').select('*').eq('user_id', user_id).execute()
+            
+            if response.data:
+                # Return the actual approval status from Supabase
+                return response.data[0].get('is_approved', False)
+            return False
         except Exception as e:
             self.logger.error(f"Error checking user approval: {str(e)}")
             return False
@@ -2017,19 +2015,6 @@ description: Optional[str] = None) -> str:
         except Exception as e:
             self.logger.error(f"Error deleting event connection: {str(e)}")
             raise
-
-    async def approve_user(self, user_id: str) -> bool:
-        try:
-            # Update user approval status in Supabase
-            data = await self.supabase.table('user_approvals').upsert({
-                'user_id': user_id,
-                'is_approved': True,
-                'updated_at': datetime.now(timezone.utc).isoformat()
-            }).execute()
-            return True
-        except Exception as e:
-            self.logger.error(f"Error approving user in Supabase: {str(e)}")
-            return False
 
 
     async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:

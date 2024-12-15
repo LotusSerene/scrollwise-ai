@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
             current_time = datetime.utcnow()
             expired_sessions = [
                 sid for sid, session in session_manager.sessions.items()
-                if (current_time - session['last_activity']).total_seconds() > 3600  # 1 hour timeout
+                if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
             ]
             for sid in expired_sessions:
                 await session_manager.remove_session(sid)
@@ -132,37 +132,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Update JWT Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    # Generate a secure random key if not provided
-    import secrets
-    SECRET_KEY = secrets.token_urlsafe(32)
-    logger.warning("No JWT_SECRET_KEY found in environment, generated new key")
-
-SECRET_KEY = str(SECRET_KEY)
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.utcnow(),  # Add issued at time
-        "type": "access"  # Add token type
-    })
-    try:
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
-    except JWTError as e:
-        logger.error(f"Error encoding JWT: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
 
 
 
@@ -181,17 +150,10 @@ async def cleanup_sessions():
         await asyncio.sleep(300)  # Check every 5 minutes
 
 # Pydantic models
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class TokenData(BaseModel):
-    username: Optional[str] = None
-    user_id: Optional[str] = None  # Add user_id to TokenData
 
 
-    class Config:
-        protected_namespaces = ()
+class Config:
+    protected_namespaces = ()
 
 class ChapterCreate(BaseModel):
     title: str
@@ -433,19 +395,7 @@ async def authenticate_user(username: str, password: str):
         return False
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=150)
-    to_encode.update({"exp": expire})
-    try:
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
-    except JWTError as e:
-        logging.error(f"Error encoding JWT: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+
     
 
 
@@ -456,27 +406,19 @@ async def get_current_user(
     session_id: str = Header(None, alias="X-Session-ID")
 ):
     try:
-        # Verify token
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        user_id: str = payload.get("user_id")
-        if username is None or user_id is None:
+        # Get user from Supabase token
+        user_response = db_instance.supabase.auth.get_user(token)
+        if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
             
         # Validate session if session_id exists
         if session_id:
             session_user_id = await session_manager.validate_session(session_id)
-            if not session_user_id or session_user_id != user_id:
+            if not session_user_id or session_user_id != user_response.user.id:
                 raise HTTPException(status_code=401, detail="Invalid session")
         
-        # Get user from Supabase
-        user_response = db_instance.supabase.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-            
         return user_response.user
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+
     except Exception as e:
         logger.error(f"Error validating token: {str(e)}")
         raise HTTPException(status_code=401, detail="Authentication failed")
@@ -706,7 +648,7 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
 
 
 # Auth routes
-@auth_router.post("/token", response_model=Token)
+@auth_router.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         # Authenticate with Supabase
@@ -716,25 +658,17 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         })
         
         if not auth_response.user:
-            raise HTTPException(
-                status_code=401,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         
         # Create local session
         session_id = await session_manager.create_session(auth_response.user.id)
         
-        # Create access token with both Supabase token and session ID
-        access_token = create_access_token(
-            data={
-                "sub": auth_response.user.email,
-                "user_id": auth_response.user.id,
-                "session_id": session_id
-            }
-        )
-        
-        return {"access_token": access_token, "token_type": "bearer"}
+        # No need to create our own JWT, just use Supabase's token
+        return {
+            "access_token": auth_response.session.access_token,
+            "token_type": "bearer",
+            "session_id": session_id
+        }
     except Exception as e:
         logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=401, detail="Login failed")
@@ -768,22 +702,26 @@ async def register(user: User):
 
 
 @app.post("/auth/extend-session")
-async def extend_session(request: Request):
-    session_id = request.headers.get("X-Session-ID")
-    if not session_id:
-        raise HTTPException(status_code=401, detail="No session ID provided")
-        
-    session = session_manager.sessions.get(session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
-        
-    # Only extend if within MAX_INACTIVITY period
-    if (datetime.now(timezone.utc) - session['last_activity']).total_seconds() <= MAX_INACTIVITY:
-        session['last_activity'] = datetime.now(timezone.utc)
-        return {"session_id": session_id}
-    else:
-        await session_manager.remove_session(session_id)
-        raise HTTPException(status_code=401, detail="Session expired")
+async def extend_session(
+    current_user: User = Depends(get_current_active_user),
+    session_id: str = Header(None, alias="X-Session-ID")
+):
+    try:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No session ID provided")
+
+        # Get current session
+        session = session_manager.sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=401, detail="Invalid session")
+
+        # Update last activity
+        session['last_activity'] = datetime.utcnow()
+        return {"message": "Session extended", "session_id": session_id}
+
+    except Exception as e:
+        logger.error(f"Error extending session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error extending session")
 
 @auth_router.post("/signin")
 async def sign_in(
