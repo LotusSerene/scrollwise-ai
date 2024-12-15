@@ -7,16 +7,28 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
+from cryptography.fernet import Fernet
+from sqlalchemy import select
 
+
+from sqlalchemy.dialects.postgresql import TEXT, JSONB
+from datetime import datetime, timedelta
+import json
+import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, File, UploadFile, Form, Body
-from fastapi.encoders import jsonable_encoder
+import uuid
+from typing import Optional, List, Dict, Any
+from cryptography.fernet import Fernet
+from contextlib import asynccontextmanager
+from models import CodexItemType, WorldbuildingSubtype
+from database import User
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -29,13 +41,25 @@ from PyPDF2 import PdfReader
 from docx import Document
 import pdfplumber
 import io
-from supabase import create_client, Client
+
 
 # Load environment variables
 load_dotenv()
 
+
+#OAuth2
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('server.log'),
+        logging.StreamHandler()
+    ]
+)
+
 logger = logging.getLogger(__name__)
 
 class AgentManagerStore:
@@ -69,11 +93,27 @@ agent_manager_store = AgentManagerStore()
 async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
+    
+    # Start session cleanup task
+    async def cleanup_sessions():
+        while True:
+            current_time = datetime.utcnow()
+            expired_sessions = [
+                sid for sid, session in session_manager.sessions.items()
+                if (current_time - session['last_activity']).total_seconds() > 3600  # 1 hour timeout
+            ]
+            for sid in expired_sessions:
+                await session_manager.remove_session(sid)
+            await asyncio.sleep(300)  # Run every 5 minutes
+    
+    cleanup_task = asyncio.create_task(cleanup_sessions())
+    
     try:
         yield
     finally:
         # Cleanup
         logger.info("Shutting down server...")
+        cleanup_task.cancel()
         tasks = []
         async with agent_manager_store._lock:
             for manager in agent_manager_store._managers.values():
@@ -86,26 +126,41 @@ app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your frontend URL/ Ignore this config for now we'll change it later
+    allow_origins=["http://localhost:3000"],  # Only allow local frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# JWT Configuration
+# Update JWT Configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
-    raise ValueError("JWT_SECRET_KEY environment variable is not set")
+    # Generate a secure random key if not provided
+    import secrets
+    SECRET_KEY = secrets.token_urlsafe(32)
+    logger.warning("No JWT_SECRET_KEY found in environment, generated new key")
 
 SECRET_KEY = str(SECRET_KEY)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({
+        "exp": expire,
+        "iat": datetime.utcnow(),  # Add issued at time
+        "type": "access"  # Add token type
+    })
+    try:
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        return encoded_jwt
+    except JWTError as e:
+        logger.error(f"Error encoding JWT: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Pydantic models
 class Token(BaseModel):
@@ -116,22 +171,6 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     user_id: Optional[str] = None  # Add user_id to TokenData
 
-class User(BaseModel):
-    username: str
-    password: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    disabled: Optional[bool] = None
-
-class UserInDB(BaseModel):
-    id: str
-    username: str
-    hashed_password: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    disabled: Optional[bool] = None
-    api_key: Optional[str] = None
-    model_settings: Optional[dict] = None
 
     class Config:
         protected_namespaces = ()
@@ -225,19 +264,124 @@ class BackstoryExtractionRequest(BaseModel):
     chapter_id: str
     
 
-# Helper functions
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+#Session Manager
+class SessionManager:
+    def __init__(self):
+        self.sessions = {}
+        
+    async def create_session(self, user_id: str) -> str:
+        session_id = str(uuid.uuid4())
+        self.sessions[session_id] = {
+            'user_id': user_id,
+            'created_at': datetime.utcnow(),
+            'last_activity': datetime.utcnow()
+        }
+        return session_id
+        
+    async def validate_session(self, session_id: str) -> Optional[str]:
+        session = self.sessions.get(session_id)
+        if session:
+            # Update last activity
+            session['last_activity'] = datetime.utcnow()
+            return session['user_id']
+        return None
+        
+    async def remove_session(self, session_id: str):
+        self.sessions.pop(session_id, None)
+
+# Initialize session manager
+session_manager = SessionManager()
 
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+class SecurityManager:
+    def __init__(self):
+        # Initialize encryption key
+        encryption_key = os.getenv('ENCRYPTION_KEY')
+        if not encryption_key:
+            encryption_key = Fernet.generate_key()
+            logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
+        self.fernet = Fernet(encryption_key)
+
+    def encrypt_data(self, data: str) -> str:
+        """Encrypt sensitive data"""
+        try:
+            return self.fernet.encrypt(data.encode()).decode()
+        except Exception as e:
+            logger.error(f"Error encrypting data: {e}")
+            raise
+
+    def decrypt_data(self, encrypted_data: str) -> str:
+        """Decrypt sensitive data"""
+        try:
+            return self.fernet.decrypt(encrypted_data.encode()).decode()
+        except Exception as e:
+            logger.error(f"Error decrypting data: {e}")
+            raise
+
+# Initialize security manager
+security_manager = SecurityManager()
+
+
+class ApiKeyManager:
+    def __init__(self, security_manager: SecurityManager):
+        self.security_manager = security_manager
+
+    async def save_api_key(self, user_id: str, api_key: str) -> None:
+        """Securely save API key"""
+        try:
+            encrypted_key = self.security_manager.encrypt_data(api_key)
+            async with db_instance.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user:
+                    user.api_key = encrypted_key
+                    user.updated_at = datetime.utcnow()
+                    await session.commit()
+                else:
+                    raise HTTPException(status_code=404, detail="User not found")
+        except Exception as e:
+            logger.error(f"Error saving API key: {e}")
+            raise HTTPException(status_code=500, detail="Error saving API key")
+
+    async def get_api_key(self, user_id: str) -> Optional[str]:
+        """Securely retrieve API key"""
+        try:
+            async with db_instance.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user and user.api_key:
+                    return self.security_manager.decrypt_data(user.api_key)
+                return None
+        except Exception as e:
+            logger.error(f"Error retrieving API key: {e}")
+            raise HTTPException(status_code=500, detail="Error retrieving API key")
+
+# Initialize API key manager
+api_key_manager = ApiKeyManager(security_manager)
+
+
 
 
 async def get_user(username: str):
     try:
-        user = await db_instance.supabase.table('users').select('*').eq('email', username).single()
-        return user.data if user else None
+        # First check local DB
+        user = await db_instance.get_user_by_email(username)
+        if user:
+            return user
+            
+        # If not in local DB, check Supabase
+        supabase_user = await db_instance.supabase.table('users').select('*').eq('email', username).single()
+        if supabase_user.data:
+            # Create user in local DB
+            await db_instance.create_user(
+                username=username,
+                email=supabase_user.data.get('email'),
+                user_id=supabase_user.data.get('id')
+            )
+            return supabase_user.data
+        return None
     except Exception as e:
         logger.error(f"Error getting user: {str(e)}")
         return None
@@ -289,35 +433,35 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    session_id: str = Header(None, alias="X-Session-ID")
+):
     try:
-        # Get user data synchronously since get_user doesn't need to be awaited
+        # Verify token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        user_id: str = payload.get("user_id")
+        if username is None or user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+            
+        # Validate session if session_id exists
+        if session_id:
+            session_user_id = await session_manager.validate_session(session_id)
+            if not session_user_id or session_user_id != user_id:
+                raise HTTPException(status_code=401, detail="Invalid session")
+        
+        # Get user from Supabase
         user_response = db_instance.supabase.auth.get_user(token)
-        
         if not user_response or not user_response.user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # Check if user is approved
-        approval = await db_instance.check_user_approval(user_response.user.id)
-        if not approval:
-            raise HTTPException(
-                status_code=403,
-                detail="Account pending approval"
-            )
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
             
         return user_response.user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
     except Exception as e:
         logger.error(f"Error validating token: {str(e)}")
-        logger.error(f"Token received: {token}")  # Add this for debugging
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 
 async def get_current_active_user(current_user = Depends(get_current_user)):
@@ -542,39 +686,119 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
         logger.error(f"Error fetching universes: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    
-
-
 
 # Auth routes
 @auth_router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        # Authenticate with Supabase
+        auth_response = await db_instance.supabase.auth.sign_in_with_password({
+            "email": form_data.username,
+            "password": form_data.password
+        })
+        
+        if not auth_response.user:
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Create local session
+        session_id = await session_manager.create_session(auth_response.user.id)
+        
+        # Create access token with both Supabase token and session ID
+        access_token = create_access_token(
+            data={
+                "sub": auth_response.user.email,
+                "user_id": auth_response.user.id,
+                "session_id": session_id
+            }
         )
-    
-    access_token = create_access_token(
-        data={"sub": user.email, "user_id": user.id}
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Login failed")
 
 @auth_router.post("/register", status_code=201)
 async def register(user: User):
     try:
-        existing_user = await get_user(user.username)
+        # Check if user already exists in local DB
+        existing_user = await db_instance.get_user_by_email(user.username)
         if existing_user:
             raise HTTPException(status_code=400, detail="Username already registered")
-        hashed_password = get_password_hash(user.password)
-        user_id = await db_instance.create_user(user.username, hashed_password)
-        return {"message": "User registered successfully", "user_id": user_id}
-    except Exception as e:
-            logger.error(f"Error in register: {str(e)}")
-            raise HTTPException(status_code=500, detail="Internal server error")
 
+        # Register using database method
+        user_id = await db_instance.sign_up(
+            email=user.username,
+            password=user.password
+        )
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Registration failed")
+            
+        return {
+            "message": "User registered successfully", 
+            "user_id": user_id,
+            "needs_verification": True  # This would come from the database response
+        }
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@auth_router.post("/signin")
+async def sign_in(
+    credentials: Dict[str, str] = Body(..., example={"email": "user@example.com", "password": "password"})
+):
+    try:
+        # Sign in using database method
+        user_id = await db_instance.sign_in(
+            email=credentials["email"],
+            password=credentials["password"]
+        )
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+            
+        # Create local session
+        session_id = await session_manager.create_session(user_id)
+        
+        # Get user from local DB
+        local_user = await db_instance.get_user_by_email(credentials["email"])
+        
+        return {
+            "access_token": await db_instance.get_access_token(user_id),
+            "session_id": session_id,
+            "user": {
+                "id": user_id,
+                "email": credentials["email"]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Sign in error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Sign in failed")
+
+@auth_router.post("/signout")
+async def sign_out(
+    current_user: User = Depends(get_current_active_user),
+    session_id: str = Header(None, alias="X-Session-ID")
+):
+    try:
+        # Sign out using database method
+        success = await db_instance.sign_out(session_id)
+        
+        # Remove local session if exists
+        if session_id:
+            await session_manager.remove_session(session_id)
+            
+        if not success:
+            raise HTTPException(status_code=500, detail="Sign out failed")
+            
+        return {"message": "Successfully signed out"}
+    except Exception as e:
+        logger.error(f"Sign out error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Sign out failed")
 
 # Chapter routes
 
@@ -1245,7 +1469,7 @@ async def reset_chat_history(project_id: str, current_user: User = Depends(get_c
 @settings_router.post("/api-key")
 async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)):
     try:
-        await db_instance.save_api_key(current_user.id, api_key_update.apiKey)
+        await api_key_manager.save_api_key(current_user.id, api_key_update.apiKey)
         return {"message": "API key saved successfully"}
     except Exception as e:
         logger.error(f"Error saving API key: {str(e)}")
@@ -1254,8 +1478,9 @@ async def save_api_key(api_key_update: ApiKeyUpdate, current_user: User = Depend
 @settings_router.get("/api-key")
 async def check_api_key(current_user: User = Depends(get_current_active_user)):
     try:
-        api_key = await db_instance.get_api_key(current_user.id)
+        api_key = await api_key_manager.get_api_key(current_user.id)
         is_set = bool(api_key)
+        # Mask the API key for security
         masked_key = '*' * (len(api_key) - 4) + api_key[-4:] if is_set else None
         return {"isSet": is_set, "apiKey": masked_key}
     except Exception as e:
@@ -1478,10 +1703,31 @@ async def save_chat_history(chat_history: ChatHistoryRequest, project_id: str, c
 
 @app.get("/knowledge-base/chat-history")
 async def get_knowledge_base_chat_history(project_id: str, current_user: User = Depends(get_current_active_user)):
-    async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-        chat_history = await agent_manager.get_chat_history()
-        return {"chatHistory": chat_history}
+    try:
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            chat_history = await agent_manager.get_chat_history()
+            
+            # Validate chat history format
+            if not isinstance(chat_history, list):
+                return {"chatHistory": []}
+                
+            return {"chatHistory": chat_history}
+    except ValidationError as ve:
+        logger.error(f"Validation error in get_knowledge_base_chat_history: {str(ve)}")
+        return {"chatHistory": []}
+    except Exception as e:
+        logger.error(f"Error in get_knowledge_base_chat_history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving chat history")
 
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -1530,7 +1776,6 @@ async def delete_validity_check(check_id: str, project_id: str, current_user: Us
     except Exception as e:
         logger.error(f"Error deleting validity check: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
     
 
 @relationship_router.post("/")
@@ -2346,4 +2591,10 @@ app.include_router(project_router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(
+        app,
+        host="localhost",
+        port=8080,
+        log_level="info",
+        reload=True  # Enable auto-reload for development
+    )

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../utils/auth.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import '../widgets/privacy_policy_dialog.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../utils/constants.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -26,38 +28,42 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await Supabase.instance.client.auth.signInWithPassword(
-          email: _emailController.text,
-          password: _passwordController.text,
+        final response = await http.post(
+          Uri.parse('$apiUrl/auth/signin'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'email': _emailController.text,
+            'password': _passwordController.text,
+          }),
         );
 
-        if (response.session != null) {
-          final approvalStatus = await Supabase.instance.client
-              .from('user_approvals')
-              .select('is_approved')
-              .eq('id', response.user!.id)
-              .single();
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final accessToken = data['access_token'];
+          final sessionId = data['session_id'];
 
-          if (approvalStatus['is_approved'] == true) {
-            widget.onLogin(response.session!.accessToken);
-            await setAuthToken(response.session!.accessToken);
+          await setSessionId(sessionId);
+
+          widget.onLogin(accessToken);
+          if (mounted) {
             Navigator.pushReplacementNamed(context, '/projects');
-          } else {
-            await Supabase.instance.client.auth.signOut();
-            Fluttertoast.showToast(
-              msg:
-                  'Your account is pending approval. Please wait for admin confirmation.',
-              toastLength: Toast.LENGTH_LONG,
-            );
           }
+        } else {
+          final error = json.decode(response.body);
+          Fluttertoast.showToast(
+            msg: error['detail'] ?? 'Error logging in',
+            toastLength: Toast.LENGTH_LONG,
+          );
         }
       } catch (error) {
         print('Login error: $error');
         Fluttertoast.showToast(msg: 'Error logging in');
       } finally {
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }
@@ -69,30 +75,47 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await Supabase.instance.client.auth.signUp(
-          email: _emailController.text,
-          password: _passwordController.text,
+        final response = await http.post(
+          Uri.parse('$apiUrl/auth/register'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'username': _emailController.text,
+            'password': _passwordController.text,
+          }),
         );
 
-        if (response.user != null) {
-          Fluttertoast.showToast(
+        if (response.statusCode == 201) {
+          final data = json.decode(response.body);
+          if (data['needs_verification'] == true) {
+            Fluttertoast.showToast(
               msg:
-                  'Registration successful! Please check your email to verify your account.');
+                  'Registration successful! Please check your email to verify your account.',
+              toastLength: Toast.LENGTH_LONG,
+            );
+          } else {
+            Fluttertoast.showToast(
+              msg: 'Registration successful! Please wait for admin approval.',
+              toastLength: Toast.LENGTH_LONG,
+            );
+          }
           _emailController.clear();
           _passwordController.clear();
         } else {
-          Fluttertoast.showToast(msg: 'Registration failed. Please try again.');
+          final error = json.decode(response.body);
+          Fluttertoast.showToast(
+            msg: error['detail'] ?? 'Registration failed',
+            toastLength: Toast.LENGTH_LONG,
+          );
         }
-      } on AuthException catch (error) {
-        print('Registration error: $error');
-        Fluttertoast.showToast(msg: error.message);
       } catch (error) {
         print('Registration error: $error');
-        Fluttertoast.showToast(msg: 'Error during registration.');
+        Fluttertoast.showToast(msg: 'Error during registration');
       } finally {
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }

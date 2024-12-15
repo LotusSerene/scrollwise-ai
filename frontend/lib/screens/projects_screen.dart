@@ -723,12 +723,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Logout'),
-            onTap: () async {
-              await removeAuthToken();
-              if (mounted) {
-                Navigator.pushReplacementNamed(context, '/login');
-              }
-            },
+            onTap: _handleSignOut,
           ),
         ],
       ),
@@ -995,5 +990,32 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         return _buildProjectCard(_displayedProjects[index]);
       },
     );
+  }
+
+  // Add this method to handle sign out
+  Future<void> _handleSignOut() async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('$apiUrl/auth/signout'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        await removeSessionId();
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      } else {
+        throw Exception('Failed to sign out');
+      }
+    } catch (error) {
+      print('Sign out error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error signing out')),
+        );
+      }
+    }
   }
 }
