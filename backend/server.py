@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from dotenv import load_dotenv
@@ -161,6 +161,24 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     except JWTError as e:
         logger.error(f"Error encoding JWT: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+
+
+
+MAX_INACTIVITY = 7 * 24 * 3600  # 1 week in seconds
+ACTIVE_SESSION_EXTEND = 3600    # 1 hour extension when active
+
+async def cleanup_sessions():
+    while True:
+        current_time = datetime.utcnow()
+        expired_sessions = [
+            sid for sid, session in session_manager.sessions.items()
+            if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
+        ]
+        for sid in expired_sessions:
+            await session_manager.remove_session(sid)
+        await asyncio.sleep(300)  # Check every 5 minutes
 
 # Pydantic models
 class Token(BaseModel):
@@ -746,6 +764,26 @@ async def register(user: User):
     except Exception as e:
         logger.error(f"Registration error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@app.post("/auth/extend-session")
+async def extend_session(request: Request):
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        raise HTTPException(status_code=401, detail="No session ID provided")
+        
+    session = session_manager.sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+        
+    # Only extend if within MAX_INACTIVITY period
+    if (datetime.now(timezone.utc) - session['last_activity']).total_seconds() <= MAX_INACTIVITY:
+        session['last_activity'] = datetime.now(timezone.utc)
+        return {"session_id": session_id}
+    else:
+        await session_manager.remove_session(session_id)
+        raise HTTPException(status_code=401, detail="Session expired")
 
 @auth_router.post("/signin")
 async def sign_in(

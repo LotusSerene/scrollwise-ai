@@ -3,6 +3,9 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'constants.dart';
 
 const String utf8Charset = 'UTF-8';
 
@@ -136,16 +139,40 @@ Future<bool> validateSession() async {
       return false;
     }
 
-    // Check if token is expired
-    if (JwtDecoder.isExpired(token)) {
+    // Check if token is expired or close to expiring (within 5 minutes)
+    if (JwtDecoder.isExpired(token) ||
+        JwtDecoder.getExpirationDate(token)
+                .difference(DateTime.now())
+                .inMinutes <
+            5) {
       // Attempt to refresh session
-      return await refreshSession();
+      final refreshed = await refreshSession();
+      if (!refreshed) return false;
     }
 
+    // Extend local session if active
+    await _extendSession();
     return true;
   } catch (e) {
     print('Error validating session: $e');
     return false;
+  }
+}
+
+Future<void> _extendSession() async {
+  try {
+    final response = await http.post(
+      Uri.parse('$apiUrl/auth/extend-session'),
+      headers: await getAuthHeaders(),
+    );
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['session_id'] != null) {
+        await setSessionId(data['session_id']);
+      }
+    }
+  } catch (e) {
+    print('Error extending session: $e');
   }
 }
 
