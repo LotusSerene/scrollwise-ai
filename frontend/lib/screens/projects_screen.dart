@@ -128,10 +128,25 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
   Future<void> _fetchData() async {
     if (!_mounted) return;
+
     setState(() {
       _isLoading = true;
     });
+
     try {
+      // Verify authentication before making requests
+      final token = await getAuthToken();
+      final sessionId = await getSessionId();
+
+      print('Fetching project data');
+
+      if (token == null || sessionId == null) {
+        print('Missing authentication credentials');
+        Navigator.of(context).pushReplacementNamed('/login');
+        return;
+      }
+
+      // Proceed with fetching data
       await Future.wait([
         _fetchProjects(),
         _fetchUniverses(),
@@ -139,6 +154,15 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     } catch (error) {
       print('Error fetching data: $error');
       if (!_mounted) return;
+
+      if (error.toString().contains('401') ||
+          error.toString().contains('authentication') ||
+          error.toString().contains('No authentication token available')) {
+        print('Authentication error detected, redirecting to login');
+        Navigator.of(context).pushReplacementNamed('/login');
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error fetching data: ${error.toString()}')),
       );
@@ -156,9 +180,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
     try {
       final headers = await getAuthHeaders();
+      print('Fetching projects');
+
       final response = await http
           .get(
-            Uri.parse('$apiUrl/projects'),
+            Uri.parse('$apiUrl/projects/'), // Note the trailing slash
             headers: headers,
           )
           .timeout(const Duration(seconds: 10));
@@ -173,9 +199,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           _displayedProjects = projects.take(_itemsPerPage).toList();
         });
       } else {
+        print('Error fetching projects: ${response.statusCode}');
         throw Exception('Failed to load projects');
       }
     } catch (error) {
+      print('Error in _fetchProjects: $error');
       if (!_mounted) return;
       rethrow;
     }
@@ -184,18 +212,24 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   Future<List<dynamic>> _fetchUniverses() async {
     if (!_mounted) return [];
     try {
+      final headers = await getAuthHeaders();
+      print('Fetching universes');
+
       final response = await http.get(
-        Uri.parse('$apiUrl/universes'),
-        headers: await getAuthHeaders(),
+        Uri.parse('$apiUrl/universes/'),
+        headers: headers,
       );
+
       if (!_mounted) return [];
+
       if (response.statusCode == 200) {
         return json.decode(utf8.decode(response.bodyBytes));
       } else {
+        print('Error fetching universes: ${response.statusCode}');
         throw Exception('Failed to load universes: ${response.statusCode}');
       }
     } catch (error) {
-      print('Error fetching universes: $error');
+      print('Error in _fetchUniverses: $error');
       rethrow;
     }
   }
@@ -1002,9 +1036,16 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       );
 
       if (response.statusCode == 200) {
+        // Clear all local storage and session data
         await removeSessionId();
+        localStorage.clear();
+
         if (mounted) {
-          Navigator.pushReplacementNamed(context, '/login');
+          // Navigate to login and clear navigation stack
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            '/login',
+            (Route<dynamic> route) => false, // This removes all previous routes
+          );
         }
       } else {
         throw Exception('Failed to sign out');

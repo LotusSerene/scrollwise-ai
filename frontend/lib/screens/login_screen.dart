@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:jwt_decoder/jwt_decoder.dart';
 import '../utils/auth.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import '../widgets/privacy_policy_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -30,7 +32,10 @@ class _LoginScreenState extends State<LoginScreen> {
       try {
         final response = await http.post(
           Uri.parse('$apiUrl/auth/signin'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
           body: json.encode({
             'email': _emailController.text,
             'password': _passwordController.text,
@@ -42,22 +47,42 @@ class _LoginScreenState extends State<LoginScreen> {
           final accessToken = data['access_token'];
           final sessionId = data['session_id'];
 
-          await setSessionId(sessionId);
+          if (accessToken == null) {
+            throw Exception('No access token received');
+          }
 
+          print('Login response received successfully');
+
+          // Initialize session
+          await initializeSession(accessToken, sessionId);
+
+          // Verify authentication state
+          final isAuthenticated = await verifyAuthState();
+          if (!isAuthenticated) {
+            print('Authentication verification failed');
+            throw Exception('Authentication state verification failed');
+          }
+
+          print('Authentication successful, proceeding to projects screen');
           widget.onLogin(accessToken);
+
           if (mounted) {
             Navigator.pushReplacementNamed(context, '/projects');
           }
         } else {
           final error = json.decode(response.body);
-          Fluttertoast.showToast(
-            msg: error['detail'] ?? 'Error logging in',
-            toastLength: Toast.LENGTH_LONG,
-          );
+          throw Exception(error['detail'] ?? 'Error logging in');
         }
       } catch (error) {
         print('Login error: $error');
-        Fluttertoast.showToast(msg: 'Error logging in');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${error.toString()}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       } finally {
         if (mounted) {
           setState(() {
@@ -79,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Uri.parse('$apiUrl/auth/register'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode({
-            'username': _emailController.text,
+            'email': _emailController.text,
             'password': _passwordController.text,
           }),
         );
@@ -109,7 +134,10 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (error) {
         print('Registration error: $error');
-        Fluttertoast.showToast(msg: 'Error during registration');
+        Fluttertoast.showToast(
+          msg: error.toString(),
+          toastLength: Toast.LENGTH_LONG,
+        );
       } finally {
         if (mounted) {
           setState(() {
@@ -117,6 +145,131 @@ class _LoginScreenState extends State<LoginScreen> {
           });
         }
       }
+    }
+  }
+
+  Future<bool> verifyAuthState() async {
+    try {
+      final token = await getAuthToken();
+      final sessionId = await getSessionId();
+
+      print('Verifying authentication state');
+
+      if (token == null || sessionId == null) {
+        print('Missing token or sessionId');
+        return false;
+      }
+
+      // Verify token is not expired
+      try {
+        if (JwtDecoder.isExpired(token)) {
+          print('Token is expired');
+          return false;
+        }
+
+        print('Auth state verified successfully');
+        return true;
+      } catch (e) {
+        print('Error decoding/verifying token: $e');
+        return false;
+      }
+    } catch (e) {
+      print('Error verifying auth state: $e');
+      return false;
+    }
+  }
+
+  Future<void> initializeSession(String accessToken, String sessionId) async {
+    try {
+      print('Initializing session with token and sessionId');
+
+      // Store session ID first
+      await setSessionId(sessionId);
+
+      // Don't try to initialize Supabase session directly
+      // Just store the access token locally
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('access_token', accessToken);
+
+      // Verify storage
+      final storedToken = await getAuthToken();
+      final storedSessionId = await getSessionId();
+
+      print('Session initialized successfully');
+
+      if (storedToken == null || storedSessionId == null) {
+        throw Exception('Failed to store session credentials');
+      }
+    } catch (e) {
+      print('Error initializing session: $e');
+      // Clean up any partial session data
+      await removeSessionId();
+      throw Exception('Failed to initialize session: $e');
+    }
+  }
+
+  Future<bool> checkBackendSession() async {
+    try {
+      final token = await getAuthToken();
+      final sessionId = await getSessionId();
+
+      if (token == null || sessionId == null) {
+        return false;
+      }
+
+      final response = await http.get(
+        Uri.parse('$apiUrl/auth/session'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'X-Session-ID': sessionId,
+        },
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error checking backend session: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getAuthToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('access_token');
+    } catch (e) {
+      print('Error getting auth token: $e');
+      return null;
+    }
+  }
+
+  Future<void> removeAuthToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('access_token');
+    } catch (e) {
+      print('Error removing auth token: $e');
+    }
+  }
+
+  Future<void> signOut() async {
+    try {
+      // Clear local token
+      await removeAuthToken();
+
+      // Clear local session
+      await removeSessionId();
+
+      // Clear any other stored data
+      localStorage.clear();
+
+      // go to login screen
+      Navigator.pushReplacementNamed(context, '/login');
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (e) {
+      print('Error during sign out: $e');
+      throw Exception('Failed to sign out');
     }
   }
 

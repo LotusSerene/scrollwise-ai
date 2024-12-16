@@ -16,6 +16,7 @@ tenacity==8.2.3
 cryptography==42.0.2
 PyPDF2==3.0.1
 python-docx==1.1.0
+aiosqlite==0.20.0
 pdfplumber==0.10.3
 bcrypt==4.1.2
 aiofiles==23.2.1
@@ -24,4 +25,4 @@ asyncio==3.4.3
 backoff==2.2.2
 prometheus-client==0.18.0
 supabase==2.10.0
-
+email-validator==2.1.0.post1

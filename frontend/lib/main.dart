@@ -21,6 +21,8 @@ import 'providers/relationship_provider.dart';
 import 'screens/timeline_screen.dart';
 import 'screens/landing_screen.dart';
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load();
@@ -60,13 +62,16 @@ class MyApp extends StatelessWidget {
       themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
       initialRoute: '/',
+      navigatorKey: navigatorKey,
       routes: {
         '/': (context) => const AuthWrapper(),
         '/landing': (context) => const LandingScreen(),
         '/projects': (context) => const ProjectsScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => LoginScreen(onLogin: (token) {
-              Provider.of<AppState>(context, listen: false).setLoggedIn(true);
+              final appState = Provider.of<AppState>(context, listen: false);
+              appState.setLoggedIn(true);
+              appState.setToken(token);
               Navigator.pushReplacementNamed(context, '/projects');
             }),
         '/editor': (context) => const EditorScreen(),

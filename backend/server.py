@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
 from cryptography.fernet import Fernet
@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 
 from sqlalchemy.dialects.postgresql import TEXT, JSONB
-from datetime import datetime, timedelta, timezone
+
 import json
 import os
 from dotenv import load_dotenv
@@ -28,8 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, EmailStr
 
 
 from agent_manager import AgentManager, PROCESS_TYPES
@@ -126,10 +125,12 @@ app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Only allow local frontend
+    allow_origins=["*"], # Add any other frontend origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
 
 
@@ -152,8 +153,16 @@ async def cleanup_sessions():
 # Pydantic models
 
 
-class Config:
-    protected_namespaces = ()
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+
+    class Config:
+        from_attributes = True
 
 class ChapterCreate(BaseModel):
     title: str
@@ -366,48 +375,24 @@ async def get_user(username: str):
         logger.error(f"Error getting user: {str(e)}")
         return None
 
-
-async def authenticate_user(username: str, password: str):
-    try:
-        logger.info(f"Attempting to authenticate user: {username}")
-        response = await db_instance.supabase.auth.sign_in_with_password({
-            "email": username,
-            "password": password
-        })
-        logger.info(f"Supabase auth response: {response}")
-        
-        if response.user:
-            # Check if user is approved
-            approval = await db_instance.check_user_approval(response.user.id)
-            logger.info(f"User approval status: {approval}")
-            
-            if not approval:
-                logger.warning(f"User {username} not approved")
-                raise HTTPException(
-                    status_code=403,
-                    detail="Account pending approval"
-                )
-            return response.user
-        logger.warning(f"Authentication failed for user: {username}")
-        return False
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        return False
-
-
-
-    
-
-
-
-
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     session_id: str = Header(None, alias="X-Session-ID")
 ):
     try:
         # Get user from Supabase token
-        user_response = db_instance.supabase.auth.get_user(token)
+        try:
+            user_response = db_instance.supabase.auth.get_user(token)
+        except Exception as e:
+            # Try to refresh the token if possible
+            try:
+                refresh_response = await db_instance.supabase.auth.refresh_session()
+                if refresh_response and refresh_response.user:
+                    return refresh_response.user
+            except:
+                pass
+            raise HTTPException(status_code=401, detail="Session expired. Please login again.")
+
         if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
             
@@ -423,17 +408,31 @@ async def get_current_user(
         logger.error(f"Error validating token: {str(e)}")
         raise HTTPException(status_code=401, detail="Authentication failed")
 
-
 async def get_current_active_user(current_user = Depends(get_current_user)):
     try:
-        # For Supabase users, we'll consider them active if they're approved
-        approval = await db_instance.check_user_approval(current_user.id)
-        if not approval:
-            raise HTTPException(status_code=400, detail="Inactive user")
+        # Check if user exists
+        if not current_user:
+            raise HTTPException(
+                status_code=401,
+                detail="Could not validate credentials"
+            )
+        
+        # Check if user is active
+        if not current_user.email_confirmed_at:
+            raise HTTPException(
+                status_code=403,
+                detail="Email not verified"
+            )
+
         return current_user
+        
     except Exception as e:
-        logger.error(f"Error getting active user: {str(e)}")
-        raise HTTPException(status_code=400, detail="Error validating user status")
+        logger.error(f"Error validating active user: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication failed"
+        )
+
 
 async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a project including chapter count and word count."""
@@ -673,17 +672,17 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=401, detail="Login failed")
 
-@auth_router.post("/register", status_code=201)
-async def register(user: User):
+@auth_router.post("/register", status_code=201, response_model=dict)
+async def register(user: UserCreate):
     try:
         # Check if user already exists in local DB
-        existing_user = await db_instance.get_user_by_email(user.username)
+        existing_user = await db_instance.get_user_by_email(user.email)
         if existing_user:
-            raise HTTPException(status_code=400, detail="Username already registered")
+            raise HTTPException(status_code=400, detail="Email already registered")
 
         # Register using database method
         user_id = await db_instance.sign_up(
-            email=user.username,
+            email=user.email,
             password=user.password
         )
         
@@ -693,12 +692,11 @@ async def register(user: User):
         return {
             "message": "User registered successfully", 
             "user_id": user_id,
-            "needs_verification": True  # This would come from the database response
+            "needs_verification": True
         }
     except Exception as e:
         logger.error(f"Registration error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        raise HTTPException(status_code=500, detail=str(e))    
 
 
 @app.post("/auth/extend-session")
@@ -728,32 +726,62 @@ async def sign_in(
     credentials: Dict[str, str] = Body(..., example={"email": "user@example.com", "password": "password"})
 ):
     try:
-        # Sign in using database method
-        user_id = await db_instance.sign_in(
-            email=credentials["email"],
-            password=credentials["password"]
-        )
+        if not credentials.get('email') or not credentials.get('password'):
+            raise HTTPException(
+                status_code=400, 
+                detail="Email and password are required"
+            )
         
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+        try:
+            # Use db_instance.sign_in instead of direct Supabase auth
+            auth_result = await db_instance.sign_in(
+                email=credentials["email"],
+                password=credentials["password"]
+            )
             
-        # Create local session
-        session_id = await session_manager.create_session(user_id)
-        
-        # Get user from local DB
-        local_user = await db_instance.get_user_by_email(credentials["email"])
-        
-        return {
-            "access_token": await db_instance.get_access_token(user_id),
-            "session_id": session_id,
-            "user": {
-                "id": user_id,
-                "email": credentials["email"]
+            if not auth_result or not auth_result.get('user'):
+                raise HTTPException(
+                    status_code=401, 
+                    detail="Invalid credentials"
+                )
+            
+            # Check approval status before creating session
+            is_approved = await db_instance.check_user_approval(auth_result['user'].id)
+            if not is_approved:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your account is pending approval for beta testing. Please wait for admin approval."
+                )
+            
+            # Create session only if user is approved
+            session_id = await session_manager.create_session(auth_result['user'].id)
+            
+            return {
+                "access_token": auth_result['session'].access_token,
+                "session_id": session_id,
+                "user": {
+                    "id": auth_result['user'].id,
+                    "email": auth_result['user'].email
+                }
             }
-        }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Authentication error: {str(e)}")
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication failed"
+            )
+            
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Sign in error: {str(e)}")
-        raise HTTPException(status_code=401, detail="Sign in failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
 
 @auth_router.post("/signout")
 async def sign_out(
@@ -761,20 +789,27 @@ async def sign_out(
     session_id: str = Header(None, alias="X-Session-ID")
 ):
     try:
-        # Sign out using database method
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No session ID provided")
+            
+        # First remove the session
+        await session_manager.remove_session(session_id)
+        
+        # Then sign out from Supabase
         success = await db_instance.sign_out(session_id)
         
-        # Remove local session if exists
-        if session_id:
-            await session_manager.remove_session(session_id)
-            
         if not success:
             raise HTTPException(status_code=500, detail="Sign out failed")
             
         return {"message": "Successfully signed out"}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Sign out error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Sign out failed")
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred during sign out"
+        )
 
 # Chapter routes
 
@@ -1153,7 +1188,6 @@ async def extract_character_backstory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 @codex_item_router.put("/characters/{character_id}/backstory")
 async def update_backstory(
     character_id: str, 
@@ -1181,7 +1215,6 @@ async def update_backstory(
         logger.error(f"Error updating backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @codex_item_router.delete("/characters/{character_id}/backstory")
 async def delete_backstory(
     character_id: str,
@@ -1202,7 +1235,6 @@ async def delete_backstory(
     except Exception as e:
         logger.error(f"Error deleting backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @codex_item_router.post("/")
 async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):

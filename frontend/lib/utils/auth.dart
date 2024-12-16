@@ -5,13 +5,36 @@ import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../main.dart';
 import 'constants.dart';
+import 'package:provider/provider.dart';
+import '../providers/app_state.dart';
 
 const String utf8Charset = 'UTF-8';
 
 Future<String?> getAuthToken() async {
-  final session = supabase.Supabase.instance.client.auth.currentSession;
-  return session?.accessToken;
+  try {
+    // First try to get from AppState
+    final appState =
+        Provider.of<AppState>(navigatorKey.currentContext!, listen: false);
+    if (appState.token != null) {
+      return appState.token;
+    }
+
+    // If not in AppState, try SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token');
+
+    if (token != null) {
+      // If found in SharedPreferences, update AppState
+      appState.setToken(token);
+    }
+
+    return token;
+  } catch (e) {
+    print('Error getting auth token: $e');
+    return null;
+  }
 }
 
 Future<String?> getUserId() async {
@@ -22,10 +45,16 @@ Future<String?> getUserId() async {
 Future<Map<String, String>> getAuthHeaders() async {
   final token = await getAuthToken();
   final sessionId = await getSessionId();
+
+  if (token == null) {
+    throw Exception('No authentication token available');
+  }
+
   return {
     'Authorization': 'Bearer $token',
     if (sessionId != null) 'X-Session-ID': sessionId,
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
   };
 }
 

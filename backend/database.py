@@ -33,8 +33,10 @@ class User(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     
-    # Add the projects relationship
+
     projects = relationship("Project", back_populates="user")
+
+
 
 class Project(Base):
     __tablename__ = 'projects'
@@ -490,14 +492,18 @@ class Database:
             self.logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
         self.fernet = Fernet(encryption_key)
         
-        # Initialize SQLAlchemy engine
-        self.engine = create_engine("sqlite:///local.db", poolclass=StaticPool)
+        # Initialize async SQLAlchemy engine
+        self.engine = create_async_engine(
+            "sqlite+aiosqlite:///local.db",
+            echo=True
+        )
         
-        # Create a session factory
-        self.Session = sessionmaker(bind=self.engine)
-        
-        # Create all tables
-        Base.metadata.create_all(self.engine)
+        # Create async session maker
+        self.Session = async_sessionmaker(
+            self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
         try:
@@ -521,31 +527,35 @@ class Database:
             self.logger.error(f"Error getting universes: {str(e)}")
             raise
 
+
     async def check_user_approval(self, user_id: str) -> bool:
         try:
-            # Query Supabase directly for user approval status
-            response = await self.supabase.table('user_approvals').select('*').eq('user_id', user_id).execute()
+            # Query Supabase for the approved_users table
+            response = self.supabase.table('approved_users').select("*").eq('user_id', user_id).execute()
             
-            if response.data:
-                # Return the actual approval status from Supabase
-                return response.data[0].get('is_approved', False)
-            return False
+            # If the user is found in the approved_users table, they're approved
+            return len(response.data) > 0
+            
         except Exception as e:
-            self.logger.error(f"Error checking user approval: {str(e)}")
+            self.logger.error(f"Error checking user approval status: {str(e)}")
             return False
 
     async def initialize(self):
         """Initialize the database connection."""
-        # No need for explicit initialization with Supabase
-        pass
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     async def sign_up(self, email: str, password: str):
         try:
-            auth_response = await self.supabase.auth.sign_up({
+            # Supabase sign up returns synchronously, so no await needed here
+            auth_response = self.supabase.auth.sign_up({
                 "email": email,
                 "password": password
             })
             
+            if not auth_response.user:
+                raise Exception("No user data in signup response")
+
             # Create local user record
             user_id = auth_response.user.id
             async with self.Session() as session:
@@ -556,21 +566,33 @@ class Database:
                 session.add(new_user)
                 await session.commit()
             
-            return user_id
+            return {
+                "user_id": user_id,
+                "email": email,
+                "needs_verification": True if auth_response.session is None else False
+            }
             
         except Exception as e:
             self.logger.error(f"Error in sign up: {str(e)}")
             raise
 
-    async def sign_in(self, email: str, password: str):
+    async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         try:
-            auth_response = await self.supabase.auth.sign_in_with_password({
+            auth_response = self.supabase.auth.sign_in_with_password({
                 "email": email,
                 "password": password
             })
-            return auth_response.user.id
+            
+            if not auth_response.user:
+                return None
+                
+            return {
+                'user': auth_response.user,
+                'session': auth_response.session
+            }
+            
         except Exception as e:
-            self.logger.error(f"Error in sign in: {str(e)}")
+            self.logger.error(f"Database sign in error: {str(e)}")
             raise
 
     async def sign_out(self, session_token: str):
@@ -581,12 +603,19 @@ class Database:
             self.logger.error(f"Error in sign out: {str(e)}")
             raise
 
-    async def get_user(self, session_token: str):
+    async def sign_out(self, session_token: str):
         try:
-            user = await self.supabase.auth.get_user(session_token)
-            return user
+            # Supabase auth sign_out is synchronous, so don't await it
+            self.supabase.auth.sign_out()
+            
+            # Clear any local session data
+            async with self.Session() as session:
+                # You might want to update user's session status or clear tokens
+                await session.commit()
+                
+            return True
         except Exception as e:
-            self.logger.error(f"Error getting user: {str(e)}")
+            self.logger.error(f"Error in sign out: {str(e)}")
             raise
 
     async def get_user_by_email(self, email: str):
@@ -2031,6 +2060,8 @@ description: Optional[str] = None) -> str:
         except Exception as e:
             self.logger.error(f"Error deleting event: {str(e)}")
             raise
+
+
 
 
 db_instance = Database()
