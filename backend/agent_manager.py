@@ -416,6 +416,12 @@ class AgentManager:
                     chapter_content += chunk["content"]
                 yield chunk
 
+            # Add validation here
+            if not chapter_content:
+                raise ValueError("No chapter content was generated")
+
+            # Continue with the rest of processing only if we have content
+
             if not chapter_content:
                 raise ValueError("No chapter content was generated")
 
