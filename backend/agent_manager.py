@@ -588,6 +588,8 @@ class AgentManager:
         return summary
 
     def estimate_token_count(self, text: str) -> int:
+        if not text or not text.strip():
+            return 0
         return self.llm.get_num_tokens(text)
 
     def get_embedding(self, text: str) -> List[float]:
