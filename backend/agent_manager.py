@@ -522,14 +522,17 @@ class AgentManager:
             Dict[str, Any]: Chunks of generated content or error information.
         """
         try:
+            self.logger.debug(f"Starting chapter generation with variables: {variables}")
             stream_kwargs = {}
             if config:
                 stream_kwargs['config'] = config
 
             async for chunk in chain.astream(variables, **stream_kwargs):
                 if isinstance(chunk, str):
+                    self.logger.debug(f"Received chunk: {chunk[:100]}...")  # Log first 100 chars
                     yield {"type": "chunk", "content": chunk}
                 else:
+                    self.logger.debug(f"Received non-string chunk: {chunk}")
                     yield chunk
         except Exception as e:
             self.logger.error(f"Error in _stream_chapter_generation: {str(e)}")
