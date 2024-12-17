@@ -16,6 +16,8 @@ from datetime import datetime
 import logging
 from cachetools import TTLCache
 
+from api_key_manager import ApiKeyManager
+
 import uuid
 from database import db_instance
 from pydantic import BaseModel, Field, ValidationError
@@ -243,12 +245,12 @@ agent_managers: Dict[Tuple[str, str], 'AgentManager'] = {}
 class AgentManager:
     _llm_cache = TTLCache(maxsize=100, ttl=3600)  # Class-level cache for LLM instances
 
-    def __init__(self, user_id: str, project_id: str):
+    def __init__(self, user_id: str, project_id: str, api_key_manager: ApiKeyManager):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         self.user_id = user_id
         self.project_id = project_id
-        self.api_key = None
+        self.api_key_manager = api_key_manager
         self.model_settings = None
         self.MAX_INPUT_TOKENS = None
         self.MAX_OUTPUT_TOKENS = None
@@ -260,8 +262,8 @@ class AgentManager:
         self.complex_tasks = {}
         self._lock = asyncio.Lock()
     @classmethod
-    async def create(cls, user_id: str, project_id: str):
-        instance = cls(user_id, project_id)
+    async def create(cls, user_id: str, project_id: str, api_key_manager: ApiKeyManager) -> 'AgentManager':
+        instance = cls(user_id, project_id, api_key_manager)
         await instance.initialize()
         return instance
 
@@ -336,8 +338,8 @@ class AgentManager:
             full_response += chunk.content
         return full_response
 
-    def _get_api_key(self) -> str:
-        api_key = db_instance.get_api_key(self.user_id)
+    async def _get_api_key(self) -> str:
+        api_key = await self.api_key_manager.get_api_key(self.user_id)
         if not api_key:
             raise ValueError("API key not set. Please set your API key in the settings.")
         return api_key
@@ -612,7 +614,7 @@ class AgentManager:
 
                 Previous Chapters:
                 {truncated_previous_chapters}
-                                                                
+                
                 Chapter words: {chapter_word_count}
 
                 Evaluate the chapter based on the following criteria:
