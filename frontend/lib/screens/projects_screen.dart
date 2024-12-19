@@ -223,7 +223,16 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       if (!_mounted) return [];
 
       if (response.statusCode == 200) {
-        return json.decode(utf8.decode(response.bodyBytes));
+        final universes = json.decode(utf8.decode(response.bodyBytes));
+        // Update the state variables
+        _safeSetState(() {
+          _universes.clear(); // Clear existing universes
+          _universes.addAll(universes); // Add new universes
+          _displayedUniverses.clear(); // Clear displayed universes
+          _displayedUniverses
+              .addAll(_universes.take(_itemsPerPage)); // Add initial batch
+        });
+        return universes;
       } else {
         print('Error fetching universes: ${response.statusCode}');
         throw Exception('Failed to load universes: ${response.statusCode}');
@@ -296,10 +305,9 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         Uri.parse('$apiUrl/universes'),
         headers: {
           ...await getAuthHeaders(),
-          'Content-Type': 'application/json', // Add content type header
+          'Content-Type': 'application/json',
         },
-        body: utf8
-            .encode(json.encode({'name': name})), // Properly encode the body
+        body: utf8.encode(json.encode({'name': name})),
       );
 
       if (response.statusCode == 200) {
@@ -309,7 +317,9 @@ class _ProjectsScreenState extends State<ProjectsScreen>
             behavior: SnackBarBehavior.fixed,
           ),
         );
-        _fetchData();
+        // Add a small delay before refreshing
+        await Future.delayed(const Duration(milliseconds: 500));
+        await _fetchData(); // This will refresh both projects and universes
       } else {
         throw Exception('Failed to create universe');
       }
@@ -663,48 +673,34 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       return const SizedBox(); // Skip rendering for invalid projects
     }
 
-    return FutureBuilder<List<dynamic>>(
-      future: _fetchUniverses(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          );
-        }
+    String currentUniverseId =
+        project['universe_id']?.toString() ?? 'no_universe';
 
-        final universes = snapshot.data ?? [];
-        String currentUniverseId =
-            project['universe_id']?.toString() ?? 'no_universe';
-
-        return PopupMenuButton<String>(
-          icon: Icon(
-            Icons.public,
-            color: currentUniverseId != 'no_universe'
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-          ),
-          onSelected: (String newValue) {
-            _updateProjectUniverse(
-              projectId,
-              newValue == 'no_universe' ? null : newValue,
-            );
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem<String>(
-              value: 'no_universe',
-              child: Text('No Universe'),
-            ),
-            ...universes.map((universe) {
-              return PopupMenuItem<String>(
-                value: universe['id'].toString(),
-                child: Text(universe['name']),
-              );
-            }).toList(),
-          ],
+    return PopupMenuButton<String>(
+      icon: Icon(
+        Icons.public,
+        color: currentUniverseId != 'no_universe'
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+      ),
+      onSelected: (String newValue) {
+        _updateProjectUniverse(
+          projectId,
+          newValue == 'no_universe' ? null : newValue,
         );
       },
+      itemBuilder: (context) => [
+        const PopupMenuItem<String>(
+          value: 'no_universe',
+          child: Text('No Universe'),
+        ),
+        ..._universes.map((universe) {
+          return PopupMenuItem<String>(
+            value: universe['id'].toString(),
+            child: Text(universe['name']),
+          );
+        }).toList(),
+      ],
     );
   }
 

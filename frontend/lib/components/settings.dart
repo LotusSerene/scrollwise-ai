@@ -17,13 +17,14 @@ class _SettingsState extends State<Settings> {
   String _apiKey = '';
   bool _isKeySet = false;
   bool _isEditingApiKey = false;
-  Map<String, String> _modelSettings = {
+  Map<String, dynamic> _modelSettings = {
     'mainLLM': 'gemini-1.5-pro-002',
     'checkLLM': 'gemini-1.5-pro-002',
     'embeddingsModel': 'models/text-embedding-004',
     'titleGenerationLLM': 'gemini-1.5-pro-002',
     'extractionLLM': 'gemini-1.5-pro-002',
     'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002',
+    'temperature': 0.7,
   };
   final List<String> _modelOptions = [
     'gemini-2.0-flash-exp',
@@ -75,10 +76,16 @@ class _SettingsState extends State<Settings> {
       );
       if (response.statusCode == 200) {
         if (mounted) {
-          // Check if the widget is still mounted
           setState(() {
-            _modelSettings = Map<String, String>.from(
+            final fetchedSettings = Map<String, dynamic>.from(
                 json.decode(utf8.decode(response.bodyBytes)));
+            if (fetchedSettings['temperature'] != null) {
+              fetchedSettings['temperature'] =
+                  double.parse(fetchedSettings['temperature'].toString());
+            } else {
+              fetchedSettings['temperature'] = 0.7;
+            }
+            _modelSettings = fetchedSettings;
           });
         }
       } else {
@@ -141,11 +148,14 @@ class _SettingsState extends State<Settings> {
 
   Future<void> _handleSaveModelSettings() async {
     try {
+      final settingsToSave = Map<String, dynamic>.from(_modelSettings);
+
       final response = await http.post(
         Uri.parse('$apiUrl/settings/model'),
         headers: await getAuthHeaders(),
-        body: utf8.encode(json.encode(_modelSettings)),
+        body: utf8.encode(json.encode(settingsToSave)),
       );
+
       if (response.statusCode == 200) {
         Fluttertoast.showToast(msg: 'Model settings saved successfully');
       } else {
@@ -300,7 +310,11 @@ class _SettingsState extends State<Settings> {
               ],
             ),
             const SizedBox(height: 24),
-            ..._modelSettings.entries.map((entry) {
+            _buildTemperatureSlider(),
+            const SizedBox(height: 24),
+            ..._modelSettings.entries
+                .where((entry) => entry.key != 'temperature')
+                .map((entry) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -374,6 +388,46 @@ class _SettingsState extends State<Settings> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTemperatureSlider() {
+    final temperature = (_modelSettings['temperature'] as num).toDouble();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Temperature',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: temperature,
+                min: 0.0,
+                max: 2.0,
+                divisions: 20,
+                label: temperature.toStringAsFixed(2),
+                onChanged: (value) {
+                  setState(() {
+                    _modelSettings['temperature'] = value;
+                  });
+                },
+              ),
+            ),
+            SizedBox(
+              width: 60,
+              child: Text(
+                temperature.toStringAsFixed(2),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 

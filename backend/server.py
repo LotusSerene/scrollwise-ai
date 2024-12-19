@@ -4,14 +4,12 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
 from cryptography.fernet import Fernet
-from sqlalchemy import select
+from sqlalchemy import select, and_
 
-
-from sqlalchemy.dialects.postgresql import TEXT, JSONB
 
 import json
 import os
@@ -21,7 +19,7 @@ from typing import Optional, List, Dict, Any
 from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 from models import CodexItemType, WorldbuildingSubtype
-from database import User
+from database import User, Chapter, Project, CodexItem
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +30,7 @@ from pydantic import BaseModel, Field, ValidationError, EmailStr
 
 
 from agent_manager import AgentManager, PROCESS_TYPES
+from api_key_manager import ApiKeyManager, SecurityManager
 from database import db_instance
 from vector_store import VectorStore
 from models import CodexItemType, WorldbuildingSubtype
@@ -61,42 +60,21 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-class AgentManagerStore:
-    def __init__(self):
-        self._managers = {}
-        self._lock = Lock()
-
-    @asynccontextmanager
-    async def get_or_create_manager(self, user_id: str, project_id: str) -> AsyncGenerator[AgentManager, None]:
-        key = f"{user_id}_{project_id}"
-        manager = None
-        try:
-            async with self._lock:
-                # Try to get existing manager
-                manager = self._managers.get(key)
-                if not manager:
-                    # Create new manager if none exists
-                    manager = await AgentManager.create(user_id, project_id)
-                    self._managers[key] = manager
-            yield manager
-        finally:
-            if manager:
-                await manager.close()
-                async with self._lock:
-                    self._managers.pop(key, None)
-
-agent_manager_store = AgentManagerStore()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
     
+    
+    # Initialize database
+    logger.info("Initializing database...")
+    await db_instance.initialize()
+    
     # Start session cleanup task
     async def cleanup_sessions():
         while True:
-            current_time = datetime.utcnow()
+            current_time = datetime.now(timezone.utc)
             expired_sessions = [
                 sid for sid, session in session_manager.sessions.items()
                 if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
@@ -116,8 +94,12 @@ async def lifespan(app: FastAPI):
         tasks = []
         async with agent_manager_store._lock:
             for manager in agent_manager_store._managers.values():
+                if hasattr(manager, 'vector_store'):
+                    manager.vector_store.close()
                 tasks.append(manager.close())
         await asyncio.gather(*tasks)
+        await db_instance.dispose()
+        #Shutdown all sub processes
         logger.info("Cleanup complete")
 
 app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
@@ -141,7 +123,7 @@ ACTIVE_SESSION_EXTEND = 3600    # 1 hour extension when active
 
 async def cleanup_sessions():
     while True:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         expired_sessions = [
             sid for sid, session in session_manager.sessions.items()
             if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
@@ -191,6 +173,7 @@ class ModelSettings(BaseModel):
     titleGenerationLLM: str
     extractionLLM: str
     knowledgeBaseQueryLLM: str
+    temperature: float 
 
 class ApiKeyUpdate(BaseModel):
     apiKey: str
@@ -262,8 +245,8 @@ class SessionManager:
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {
             'user_id': user_id,
-            'created_at': datetime.utcnow(),
-            'last_activity': datetime.utcnow()
+            'created_at': datetime.now(timezone.utc),
+            'last_activity': datetime.now(timezone.utc)
         }
         return session_id
         
@@ -271,7 +254,7 @@ class SessionManager:
         session = self.sessions.get(session_id)
         if session:
             # Update last activity
-            session['last_activity'] = datetime.utcnow()
+            session['last_activity'] = datetime.now(timezone.utc)
             return session['user_id']
         return None
         
@@ -282,98 +265,38 @@ class SessionManager:
 session_manager = SessionManager()
 
 
-class SecurityManager:
-    def __init__(self):
-        # Initialize encryption key
-        encryption_key = os.getenv('ENCRYPTION_KEY')
-        if not encryption_key:
-            encryption_key = Fernet.generate_key()
-            logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
-        self.fernet = Fernet(encryption_key)
 
-    def encrypt_data(self, data: str) -> str:
-        """Encrypt sensitive data"""
+
+class AgentManagerStore:
+    def __init__(self, api_key_manager: ApiKeyManager):
+        self._managers = {}
+        self._lock = Lock()
+        self.api_key_manager = api_key_manager
+
+    @asynccontextmanager
+    async def get_or_create_manager(self, user_id: str, project_id: str) -> AsyncGenerator[AgentManager, None]:
+        key = f"{user_id}_{project_id}"
+        manager = None
         try:
-            return self.fernet.encrypt(data.encode()).decode()
-        except Exception as e:
-            logger.error(f"Error encrypting data: {e}")
-            raise
+            async with self._lock:
+                manager = self._managers.get(key)
+                if not manager:
+                    # Pass api_key_manager when creating new manager
+                    manager = await AgentManager.create(user_id, project_id, self.api_key_manager)
+                    self._managers[key] = manager
+            yield manager
+        finally:
+            if manager:
+                await manager.close()
+                async with self._lock:
+                    self._managers.pop(key, None)
 
-    def decrypt_data(self, encrypted_data: str) -> str:
-        """Decrypt sensitive data"""
-        try:
-            return self.fernet.decrypt(encrypted_data.encode()).decode()
-        except Exception as e:
-            logger.error(f"Error decrypting data: {e}")
-            raise
-
-# Initialize security manager
+# Initialize managers
 security_manager = SecurityManager()
-
-
-class ApiKeyManager:
-    def __init__(self, security_manager: SecurityManager):
-        self.security_manager = security_manager
-
-    async def save_api_key(self, user_id: str, api_key: str) -> None:
-        """Securely save API key"""
-        try:
-            encrypted_key = self.security_manager.encrypt_data(api_key)
-            async with db_instance.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user:
-                    user.api_key = encrypted_key
-                    user.updated_at = datetime.utcnow()
-                    await session.commit()
-                else:
-                    raise HTTPException(status_code=404, detail="User not found")
-        except Exception as e:
-            logger.error(f"Error saving API key: {e}")
-            raise HTTPException(status_code=500, detail="Error saving API key")
-
-    async def get_api_key(self, user_id: str) -> Optional[str]:
-        """Securely retrieve API key"""
-        try:
-            async with db_instance.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user and user.api_key:
-                    return self.security_manager.decrypt_data(user.api_key)
-                return None
-        except Exception as e:
-            logger.error(f"Error retrieving API key: {e}")
-            raise HTTPException(status_code=500, detail="Error retrieving API key")
-
-# Initialize API key manager
 api_key_manager = ApiKeyManager(security_manager)
+agent_manager_store = AgentManagerStore(api_key_manager)
 
 
-
-
-async def get_user(username: str):
-    try:
-        # First check local DB
-        user = await db_instance.get_user_by_email(username)
-        if user:
-            return user
-            
-        # If not in local DB, check Supabase
-        supabase_user = await db_instance.supabase.table('users').select('*').eq('email', username).single()
-        if supabase_user.data:
-            # Create user in local DB
-            await db_instance.create_user(
-                username=username,
-                email=supabase_user.data.get('email'),
-                user_id=supabase_user.data.get('id')
-            )
-            return supabase_user.data
-        return None
-    except Exception as e:
-        logger.error(f"Error getting user: {str(e)}")
-        return None
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -395,6 +318,16 @@ async def get_current_user(
 
         if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+            
+        # Check if user exists in local database
+        local_user = await db_instance.get_user_by_email(user_response.user.email)
+        if not local_user:
+            # Create local user if they don't exist
+            local_user = {
+                "id": user_response.user.id,
+                "email": user_response.user.email,
+            }
+            await db_instance._create_local_user(local_user)
             
         # Validate session if session_id exists
         if session_id:
@@ -437,25 +370,32 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
 async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a project including chapter count and word count."""
     try:
-        # Count chapters
-        chapter_response = db_instance.supabase.table('chapters').select('id', 'content').eq('project_id', project_id).eq('user_id', user_id).execute()
-        chapters = chapter_response.data
+        async with db_instance.Session() as session:
+            # Get chapters using SQLAlchemy
+            query = select(Chapter).where(
+                and_(
+                    Chapter.project_id == project_id,
+                    Chapter.user_id == user_id
+                )
+            )
+            result = await session.execute(query)
+            chapters = result.scalars().all()
 
-        # Calculate stats
-        chapter_count = len(chapters)
-        word_count = 0
-        
-        # Calculate word count from all chapters
-        for chapter in chapters:
-            if chapter.get('content'):
-                # Split content by whitespace and count words
-                words = chapter['content'].strip().split()
-                word_count += len(words)
+            # Calculate stats
+            chapter_count = len(chapters)
+            word_count = 0
+            
+            # Calculate word count from all chapters
+            for chapter in chapters:
+                if chapter.content:
+                    # Split content by whitespace and count words
+                    words = chapter.content.strip().split()
+                    word_count += len(words)
 
-        return {
-            "chapter_count": chapter_count,
-            "word_count": word_count
-        }
+            return {
+                "chapter_count": chapter_count,
+                "word_count": word_count
+            }
     except Exception as e:
         logger.error(f"Error getting project stats: {str(e)}")
         raise
@@ -463,59 +403,38 @@ async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
 async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
     """Get statistics for a universe including project count and total entries."""
     try:
-        # Get project count
-        project_response = db_instance.supabase.table('projects').select('id').eq('universe_id', universe_id).eq('user_id', user_id).execute()
-        project_count = len(project_response.data)
+        async with db_instance.Session() as session:
+            # Get project count
+            project_query = select(Project).where(
+                and_(
+                    Project.universe_id == universe_id,
+                    Project.user_id == user_id
+                )
+            )
+            result = await session.execute(project_query)
+            projects = result.scalars().all()
+            project_count = len(projects)
 
-        # Get all project IDs for this universe
-        project_ids = [project['id'] for project in project_response.data]
+            # Get project IDs
+            project_ids = [project.id for project in projects]
 
-        # Get codex items count
-        codex_count = 0
-        if project_ids:
-            codex_response = db_instance.supabase.table('codex_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
-            codex_count = len(codex_response.data)
+            # Get codex items count
+            codex_count = 0
+            if project_ids:
+                codex_query = select(CodexItem).where(
+                    and_(
+                        CodexItem.project_id.in_(project_ids),
+                        CodexItem.user_id == user_id
+                    )
+                )
+                result = await session.execute(codex_query)
+                codex_items = result.scalars().all()
+                codex_count = len(codex_items)
 
-        # Get knowledge base items count
-        kb_count = 0
-        if project_ids:
-            kb_response = db_instance.supabase.table('knowledge_base_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
-            kb_count = len(kb_response.data)
-
-        return {
-            "project_count": project_count,
-            "entry_count": codex_count + kb_count
-        }
-    except Exception as e:
-        logger.error(f"Error getting universe stats: {str(e)}")
-        raise
-
-async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
-    """Get statistics for a universe including project count and total entries."""
-    try:
-        # Get project count
-        project_response = db_instance.supabase.table('projects').select('id').eq('universe_id', universe_id).eq('user_id', user_id).execute()
-        project_count = len(project_response.data)
-
-        # Get all project IDs for this universe
-        project_ids = [project['id'] for project in project_response.data]
-
-        # Get codex items count
-        codex_count = 0
-        if project_ids:
-            codex_response = db_instance.supabase.table('codex_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
-            codex_count = len(codex_response.data)
-
-        # Get knowledge base items count
-        kb_count = 0
-        if project_ids:
-            kb_response = db_instance.supabase.table('knowledge_base_items').select('id').in_('project_id', project_ids).eq('user_id', user_id).execute()
-            kb_count = len(kb_response.data)
-
-        return {
-            "project_count": project_count,
-            "entry_count": codex_count + kb_count
-        }
+            return {
+                "project_count": project_count,
+                "entry_count": codex_count
+            }
     except Exception as e:
         logger.error(f"Error getting universe stats: {str(e)}")
         raise
@@ -714,7 +633,7 @@ async def extend_session(
             raise HTTPException(status_code=401, detail="Invalid session")
 
         # Update last activity
-        session['last_activity'] = datetime.utcnow()
+        session['last_activity'] = datetime.now(timezone.utc)
         return {"message": "Session extended", "session_id": session_id}
 
     except Exception as e:
@@ -829,7 +748,7 @@ async def cancel_chapter_generation(project_id: str, current_user: User = Depend
         logger.error(f"Error cancelling generation: {str(e)}")
         raise HTTPException(status_code=500, detail="Error cancelling generation")
 
-# Update the generate_chapters endpoint to store the AgentManager instance
+
 @chapter_router.post("/generate")
 async def generate_chapters(
     request: Request,
@@ -855,7 +774,7 @@ async def generate_chapters(
         chapter_count = await db_instance.get_chapter_count(project_id, current_user.id)
 
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-            generated_chapter_ids = []
+            generated_chapters = []
             for i in range(body['numChapters']):
                 chapter_number = chapter_count + i + 1
                 
@@ -871,14 +790,13 @@ async def generate_chapters(
 
                     if isinstance(chunk, dict) and 'type' in chunk and chunk['type'] == 'complete':
                         # Create the chapter
-                        chapter_id = await db_instance.create_chapter(
+                        new_chapter = await db_instance.create_chapter(
                             title=chunk.get('chapter_title', f"Chapter {chapter_number}"),
                             content=chapter_content,
-                            user_id=current_user.id,
                             project_id=project_id,
-                            chapter_number=chapter_number
+                            user_id=current_user.id
                         )
-                        generated_chapter_ids.append(chapter_id)
+                        generated_chapters.append(new_chapter)
 
                         # Add the chapter to the knowledge base
                         embedding_id = await agent_manager.add_to_knowledge_base(
@@ -886,21 +804,21 @@ async def generate_chapters(
                             chapter_content,
                             {
                                 "title": chunk.get('chapter_title', f"Chapter {chapter_number}"),
-                                "id": chapter_id,
+                                "id": new_chapter['id'],
                                 "type": "chapter",
                                 "chapter_number": chapter_number
                             }
                         )
 
                         # Update the chapter with the embedding_id
-                        await db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
+                        await db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
                         # Save the validity check
                         if 'validity_check' in chunk:
                             await agent_manager.save_validity_feedback(
                                 result=chunk['validity_check'],
                                 chapter_number=chapter_number,
-                                chapter_id=chapter_id
+                                chapter_id=new_chapter['id']
                             )
 
                         # Process new codex items if present
@@ -919,7 +837,7 @@ async def generate_chapters(
 
                                     # Add to knowledge base with the specific type
                                     embedding_id = await agent_manager.add_to_knowledge_base(
-                                        item['type'],  # Use the specific type instead of "codex_item"
+                                        item['type'],
                                         item['description'],
                                         {
                                             "name": item['name'],
@@ -935,7 +853,7 @@ async def generate_chapters(
                                     logger.error(f"Error processing codex item: {str(e)}")
                                     continue
 
-            return {"generated_chapter_ids": generated_chapter_ids}
+            return {"generated_chapters": generated_chapters}
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -978,12 +896,13 @@ async def get_chapters(project_id: str, current_user: User = Depends(get_current
 @chapter_router.post("/")
 async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
-        chapter_id = await db_instance.create_chapter(
-                chapter.title,
-                chapter.content,
-                current_user.id,
-                project_id
-            )
+        # Create chapter and get full chapter data
+        new_chapter = await db_instance.create_chapter(
+            chapter.title,
+            chapter.content,
+            project_id,  # Note: Changed order to match database method
+            current_user.id
+        )
 
         # Add to knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
@@ -992,21 +911,20 @@ async def create_chapter(chapter: ChapterCreate, project_id: str, current_user: 
                 chapter.content,
                 {
                     "title": chapter.title,
-                    "item_id": chapter_id,
-                    "item_type": "chapter"
+                    "id": new_chapter['id'],  # Use id from new_chapter
+                    "type": "chapter"
                 }
             )
 
         # Update the chapter with the embedding_id
-        await db_instance.update_chapter_embedding_id(chapter_id, embedding_id)
-
-        # Fetch the created chapter to return its details
-        new_chapter = await db_instance.get_chapter(chapter_id, current_user.id, project_id)
+        await db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+        new_chapter['embedding_id'] = embedding_id  # Update the chapter dict directly
 
         return {"message": "Chapter created successfully", "chapter": new_chapter, "embedding_id": embedding_id}
     except Exception as e:
         logger.error(f"Error creating chapter: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error creating chapter: {str(e)}")
+
 
 
 @chapter_router.put("/{chapter_id}")
@@ -1498,7 +1416,7 @@ async def check_api_key(current_user: User = Depends(get_current_active_user)):
 @settings_router.delete("/api-key")
 async def remove_api_key(current_user: User = Depends(get_current_active_user)):
     try:
-        await db_instance.remove_api_key(current_user.id)
+        await api_key_manager.save_api_key(current_user.id, None)
         return {"message": "API key removed successfully"}
     except Exception as e:
         logger.error(f"Error removing API key: {str(e)}")
@@ -2579,7 +2497,6 @@ async def get_location_connections(
     except Exception as e:
         logger.error(f"Error fetching location connections: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 
 # Add the router to the app

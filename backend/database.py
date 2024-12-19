@@ -1,23 +1,15 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text, JSON, UniqueConstraint, and_, func, QueuePool, select, delete, or_
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, JSON, UniqueConstraint, and_, func, select, delete, or_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, joinedload, sessionmaker, Session, selectinload
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.dialects.postgresql import TEXT, JSONB
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timezone, timedelta
+from sqlalchemy.orm import relationship, joinedload, selectinload, aliased
+from datetime import datetime, timezone
 import json
 import os
 from dotenv import load_dotenv
 import uuid
 from typing import Optional, List, Dict, Any
-from cryptography.fernet import Fernet
-from contextlib import asynccontextmanager
-from base64 import b64encode, b64decode
-from models import CodexItemType, WorldbuildingSubtype
+from models import CodexItemType
 from supabase import create_client, Client
 
 load_dotenv()
@@ -92,7 +84,7 @@ class Chapter(Base):
     last_processed_position = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     project = relationship("Project", back_populates="chapters")
-    processed_types = Column(JSON, default=list, nullable=False)  # Changed from lambda to list
+    processed_types = Column(JSON, default=list, nullable=False)  # Initialize as empty list
     validity_checks = relationship("ValidityCheck", back_populates="chapter", cascade="all, delete-orphan")
 
     def to_dict(self):
@@ -186,6 +178,9 @@ class ChatHistory(Base):
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
     messages = Column(Text, nullable=False)
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
+                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     project = relationship("Project", back_populates="chat_histories")
 
 class Preset(Base):
@@ -484,18 +479,12 @@ class Database:
         if not supabase_url or not supabase_key:
             raise ValueError("Missing Supabase credentials in environment variables")
         self.supabase: Client = create_client(supabase_url, supabase_key)
-        
-        # Initialize Fernet encryption
-        encryption_key = os.getenv('ENCRYPTION_KEY')
-        if not encryption_key:
-            encryption_key = Fernet.generate_key()
-            self.logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
-        self.fernet = Fernet(encryption_key)
+    
         
         # Initialize async SQLAlchemy engine
         self.engine = create_async_engine(
-            "sqlite+aiosqlite:///local.db",
-            echo=True
+            os.getenv('DATABASE_URL', "sqlite+aiosqlite:///local.db"),
+            echo=False
         )
         
         # Create async session maker
@@ -504,6 +493,21 @@ class Database:
             class_=AsyncSession,
             expire_on_commit=False
         )
+
+    async def initialize(self):
+        """Initialize the database connection and create all tables."""
+        try:
+            async with self.engine.begin() as conn:
+                # Drop all tables if they exist (optional, remove in production)
+                #await conn.run_sync(Base.metadata.drop_all)
+                
+                # Create all tables
+                await conn.run_sync(Base.metadata.create_all)
+                
+            self.logger.info("Database initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Error initializing database: {str(e)}")
+            raise
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
         try:
@@ -540,41 +544,34 @@ class Database:
             self.logger.error(f"Error checking user approval status: {str(e)}")
             return False
 
-    async def initialize(self):
-        """Initialize the database connection."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    async def sign_up(self, email: str, password: str):
+    async def sign_up(self, email: str, password: str) -> Dict[str, Any]:
         try:
-            # Supabase sign up returns synchronously, so no await needed here
             auth_response = self.supabase.auth.sign_up({
                 "email": email,
                 "password": password
             })
-            
             if not auth_response.user:
                 raise Exception("No user data in signup response")
 
-            # Create local user record
-            user_id = auth_response.user.id
-            async with self.Session() as session:
-                new_user = User(
-                    id=user_id,
-                    email=email,
-                )
-                session.add(new_user)
-                await session.commit()
-            
-            return {
-                "user_id": user_id,
+            # Create local user record with correct field names matching User model
+            local_user = {
+                "id": str(uuid.uuid4()),
                 "email": email,
-                "needs_verification": True if auth_response.session is None else False
             }
+            await self._create_local_user(local_user) 
             
+            return local_user
+
         except Exception as e:
             self.logger.error(f"Error in sign up: {str(e)}")
             raise
+
+    async def _create_local_user(self, local_user: Dict[str, Any]):
+        async with self.Session() as session:
+            session.add(User(**local_user))
+            await session.commit()
+            return local_user['id']
+        
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         try:
@@ -594,14 +591,7 @@ class Database:
         except Exception as e:
             self.logger.error(f"Database sign in error: {str(e)}")
             raise
-
-    async def sign_out(self, session_token: str):
-        try:
-            await self.supabase.auth.sign_out()
-            return True
-        except Exception as e:
-            self.logger.error(f"Error in sign out: {str(e)}")
-            raise
+        
 
     async def sign_out(self, session_token: str):
         try:
@@ -624,7 +614,16 @@ class Database:
                 query = select(User).where(User.email == email)
                 result = await session.execute(query)
                 user = result.scalars().first()
-                return user.to_dict() if user else None
+                if user:
+                    return {
+                        "id": user.id,
+                        "email": user.email,
+                        "api_key": user.api_key,
+                        "model_settings": user.model_settings,
+                        "created_at": user.created_at.isoformat() if user.created_at else None,
+                        "updated_at": user.updated_at.isoformat() if user.updated_at else None
+                    }
+                return None
         except Exception as e:
             self.logger.error(f"Error getting user: {str(e)}")
             return None
@@ -640,23 +639,38 @@ class Database:
             self.logger.error(f"Error fetching all chapters: {str(e)}")
             raise
 
-    async def create_chapter(self, title: str, content: str, user_id: str, project_id: str, chapter_number: Optional[int] = None, embedding_id: Optional[str] = None) -> str:
+    async def create_chapter(
+        self,
+        title: str,
+        content: str,
+        project_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:  # Changed return type to Dict instead of str
         try:
-            current_time = datetime.now(timezone.utc).replace(tzinfo=None)
             async with self.Session() as session:
+                # Get the highest chapter number for this project
+                query = select(func.max(Chapter.chapter_number)).where(Chapter.project_id == project_id)
+                result = await session.execute(query)
+                max_chapter_number = result.scalar() or 0
+                
+                # Create new chapter with incremented chapter number
                 chapter = Chapter(
                     id=str(uuid.uuid4()),
                     title=title,
                     content=content,
+                    chapter_number=max_chapter_number + 1,  # Auto-increment chapter number
                     user_id=user_id,
                     project_id=project_id,
-                    chapter_number=chapter_number,
-                    embedding_id=embedding_id,
-                    created_at=current_time
+                    processed_types=[],
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None)
                 )
+                
                 session.add(chapter)
                 await session.commit()
-                return chapter.id
+                
+                # Return the chapter dictionary directly instead of just the ID
+                return chapter.to_dict()
+                    
         except Exception as e:
             self.logger.error(f"Error creating chapter: {str(e)}")
             raise
@@ -804,89 +818,52 @@ class Database:
             raise
 
         
-    async def save_api_key(self, user_id: str, api_key: str):
-        try:
-            # Get the user's email from the Supabase auth user (this part remains)
-            user_response = await self.supabase.auth.admin.get_user_by_id(user_id)
-            if not user_response or not user_response.user:
-                raise Exception("User not found in auth system")
-            user_email = user_response.user.email
-            # Encrypt the API key before saving
-            encrypted_key = self.fernet.encrypt(api_key.encode())
-            encoded_key = b64encode(encrypted_key).decode()
-            # Update or insert the API key using SQLAlchemy
-            session = self.Session()
-            try:
-                user = session.query(User).filter_by(id=user_id).first()
-                if user:
-                    # User exists, update the API key and updated_at
-                    user.api_key = encoded_key
-                    user.updated_at = datetime.now(timezone.utc)
-                else:
-                    # User does not exist, create a new record
-                    new_user = User(
-                        id=user_id,
-                        email=user_email,
-                        api_key=encoded_key,
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc),
-                    )
-                    session.add(new_user)
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                self.logger.error(f"Error saving API key to local database: {str(e)}")
-                raise
-            finally:
-                session.close()
-        except Exception as e:
-            self.logger.error(f"Error saving API key (Supabase auth or general): {str(e)}")
-            raise
-
-    async def get_api_key(self, user_id):
-        try:
-            async with self.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user and user.api_key:
-                    # Decrypt the API key before returning
-                    encrypted_key = b64decode(user.api_key)
-                    decrypted_key = self.fernet.decrypt(encrypted_key)
-                    return decrypted_key.decode()
-                return None
-        except Exception as e:
-            self.logger.error(f"Error getting API key: {str(e)}")
-            raise
-
-    async def remove_api_key(self, user_id):
-        try:
-            async with self.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user:
-                    user.api_key = None
-                    user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                else:
-                    raise Exception("User not found")
-        except Exception as e:
-            self.logger.error(f"Error removing API key: {str(e)}")
-            raise
 
     async def save_model_settings(self, user_id, settings):
         try:
             async with self.Session() as session:
-                user = session.query(User).filter_by(id=user_id).first()
+                # Use select() instead of query
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                
                 if user:
-                    user.model_settings = json.dumps(settings)
+                    # Convert settings to string if it's not already
+                    settings_str = json.dumps(settings) if isinstance(settings, dict) else settings
+                    user.model_settings = settings_str
                     user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
+                    return True  # Add return value to confirm success
                 else:
                     raise Exception("User not found")
         except Exception as e:
             self.logger.error(f"Error saving model settings: {str(e)}")
+            raise
+
+    async def get_model_settings(self, user_id):
+        try:
+            async with self.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user and user.model_settings:
+                    # Parse the JSON string back to a dictionary
+                    settings = json.loads(user.model_settings)
+                    # Ensure temperature is a float
+                    if 'temperature' in settings:
+                        settings['temperature'] = float(settings['temperature'])
+                    return settings
+                return {
+                    'mainLLM': 'gemini-1.5-pro-002',
+                    'checkLLM': 'gemini-1.5-pro-002',
+                    'embeddingsModel': 'models/text-embedding-004',
+                    'titleGenerationLLM': 'gemini-1.5-pro-002',
+                    'extractionLLM': 'gemini-1.5-pro-002',
+                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002',
+                    'temperature': 0.7
+                }
+        except Exception as e:
+            self.logger.error(f"Error getting model settings: {str(e)}")
             raise
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
@@ -936,24 +913,34 @@ class Database:
             self.logger.error(f"Error deleting location: {str(e)}")
             raise
 
-    async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str) -> None:
+    async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str):
         try:
             async with self.Session() as session:
-                # Fetch the chapter
-                query = select(Chapter).where(Chapter.id == chapter_id, Chapter.user_id == user_id)
+                # Get the chapter with a SELECT FOR UPDATE to prevent race conditions
+                query = select(Chapter).where(
+                    Chapter.id == chapter_id,
+                    Chapter.user_id == user_id
+                ).with_for_update()
+                
                 result = await session.execute(query)
                 chapter = result.scalars().first()
-                if not chapter:
-                    raise Exception("Chapter not found")
-
-                processed_types = chapter.processed_types
-
-                # Update processed_types if the process_type is not already present
-                if process_type not in processed_types:
-                    processed_types.append(process_type)
-                    chapter.processed_types = processed_types
-                    chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
+                
+                if chapter:
+                    # Initialize processed_types if it's None or empty list
+                    if not chapter.processed_types:
+                        chapter.processed_types = []
+                    
+                    # Add the process_type if not already present
+                    if process_type not in chapter.processed_types:
+                        # Create a new list with the added process_type
+                        chapter.processed_types = chapter.processed_types + [process_type]
+                        chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        await session.commit()
+                        self.logger.debug(f"Marked chapter {chapter_id} as processed for {process_type}")
+                        return True
+                
+                return False
+                        
         except Exception as e:
             self.logger.error(f"Error marking chapter as processed: {str(e)}")
             raise
@@ -1324,26 +1311,6 @@ class Database:
             self.logger.error(f"Error checking chapter processed status: {str(e)}")
             raise
 
-    async def get_model_settings(self, user_id):
-        try:
-            async with self.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user and user.model_settings:
-                    return json.loads(user.model_settings)
-                return {
-                    'mainLLM': 'gemini-1.5-pro-002',
-                    'checkLLM': 'gemini-1.5-pro-002',
-                    'embeddingsModel': 'models/text-embedding-004',
-                    'titleGenerationLLM': 'gemini-1.5-pro-002',
-                    'extractionLLM': 'gemini-1.5-pro-002',
-                    'knowledgeBaseQueryLLM': 'gemini-1.5-pro-002'
-                }
-        except Exception as e:
-            self.logger.error(f"Error getting model settings: {str(e)}")
-            raise
-
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
         try:
             async with self.Session() as session:
@@ -1391,22 +1358,17 @@ class Database:
                 result = await session.execute(query)
                 chat_history = result.scalars().first()
                 
-                chat_data = {
-                    "messages": json.dumps(messages),
-                    "user_id": user_id,
-                    "project_id": project_id
-                }
-                
                 if chat_history:
                     # Update existing chat history
-                    chat_history.messages = chat_data["messages"]
+                    chat_history.messages = json.dumps(messages)
                     chat_history.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 else:
                     # Create new chat history
                     new_chat_history = ChatHistory(
                         id=str(uuid.uuid4()),
-                        **chat_data,
-                        created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                        user_id=user_id,
+                        project_id=project_id,
+                        messages=json.dumps(messages)
                     )
                     session.add(new_chat_history)
                 
@@ -1567,10 +1529,13 @@ class Database:
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
+                # Create an alias for the second join to CodexItem
+                RelatedCharacter = aliased(CodexItem)
+                
                 query = (
                     select(CharacterRelationship)
-                    .join(CodexItem, CharacterRelationship.character_id == CodexItem.id, isouter=True)
-                    .join(CodexItem, CharacterRelationship.related_character_id == CodexItem.id, isouter=True, aliased=True)
+                    .join(CodexItem, CharacterRelationship.character_id == CodexItem.id)
+                    .join(RelatedCharacter, CharacterRelationship.related_character_id == RelatedCharacter.id)
                     .where(CharacterRelationship.project_id == project_id)
                     .options(
                         joinedload(CharacterRelationship.character),

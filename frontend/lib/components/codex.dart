@@ -29,6 +29,12 @@ class _CodexState extends State<Codex> {
   bool _isLoadingMore = false;
   final ScrollController _scrollController = ScrollController();
   bool _mounted = true;
+  bool _isExpanded = false;
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  String _selectedType = 'lore';
+  String _selectedSubtype = 'all';
+  bool _isAdding = false;
 
   @override
   void initState() {
@@ -39,6 +45,8 @@ class _CodexState extends State<Codex> {
 
   @override
   void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
     _mounted = false;
     _scrollController.dispose();
     super.dispose();
@@ -301,14 +309,70 @@ class _CodexState extends State<Codex> {
   }
 
   Future<void> _deleteSelectedItems() async {
-    for (String itemId in _selectedItems) {
-      await deleteCodexItem(context, itemId);
+    // Show a single loading indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Deleting selected items...')),
+    );
+
+    try {
+      for (String itemId in _selectedItems) {
+        await deleteCodexItem(context, itemId, showSnackbar: false);
+      }
+
+      // Show success message only once
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Successfully deleted selected items')),
+      );
+
+      setState(() {
+        _selectedItems.clear();
+        _isSelectionMode = false;
+      });
+      _fetchCodexItems();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting items: $e')),
+      );
     }
-    setState(() {
-      _selectedItems.clear();
-      _isSelectionMode = false;
-    });
-    _fetchCodexItems();
+  }
+
+  Future<void> deleteCodexItem(BuildContext context, String itemId,
+      {bool showSnackbar = true}) async {
+    try {
+      final headers = await getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse('$apiUrl/codex-items/$itemId?project_id=${widget.projectId}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        if (showSnackbar) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Codex item deleted successfully')),
+          );
+          Navigator.of(context).pop(); // Close the dialog
+        }
+        _fetchCodexItems();
+      } else {
+        final responseBody = json.decode(response.body);
+        final error = responseBody['detail'] ?? 'Error deleting codex item';
+        if (showSnackbar) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('Error: $error (Status: ${response.statusCode})')),
+          );
+        }
+        throw Exception(error);
+      }
+    } catch (e) {
+      if (showSnackbar) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting codex item: $e')),
+        );
+      }
+      rethrow;
+    }
   }
 
   void _toggleSelectAll(List<dynamic> items) {
@@ -324,24 +388,192 @@ class _CodexState extends State<Codex> {
     });
   }
 
+  Future<void> _addCodexItem(BuildContext context) async {
+    setState(() => _isAdding = true);
+
+    try {
+      final headers = await getAuthHeaders();
+      final body = json.encode({
+        'name': _nameController.text,
+        'description': _descriptionController.text,
+        'type': _selectedType,
+        'subtype': _selectedSubtype == 'all' ? null : _selectedSubtype,
+      });
+
+      final response = await http.post(
+        Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
+        headers: headers,
+        body: body,
+      );
+
+      if (response.statusCode == 200) {
+        _nameController.clear();
+        _descriptionController.clear();
+        setState(() {
+          _selectedType = 'lore';
+          _selectedSubtype = 'all';
+        });
+        Navigator.of(context).pop(); // Close the dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Codex item added successfully')),
+        );
+        _fetchCodexItems(); // Refresh the list
+      } else {
+        final error =
+            json.decode(response.body)['error'] ?? 'Error adding codex item';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding codex item: $e')),
+      );
+    } finally {
+      setState(() => _isAdding = false);
+    }
+  }
+
+  void _showAddCodexItemDialog(BuildContext context, String type,
+      {String? subtype}) {
+    setState(() {
+      _selectedType = type;
+      _selectedSubtype = subtype ?? 'history';
+    });
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(
+                  'Add ${type[0].toUpperCase() + type.substring(1)} Codex Item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(labelText: 'Name'),
+                    ),
+                    TextField(
+                      controller: _descriptionController,
+                      decoration:
+                          const InputDecoration(labelText: 'Description'),
+                      maxLines: null,
+                    ),
+                    if (type == 'worldbuilding')
+                      DropdownButtonFormField<String>(
+                        value: _selectedSubtype,
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedSubtype = newValue!;
+                          });
+                        },
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'history', child: Text('History')),
+                          DropdownMenuItem(
+                              value: 'culture', child: Text('Culture')),
+                          DropdownMenuItem(
+                              value: 'geography', child: Text('Geography')),
+                        ],
+                        decoration: const InputDecoration(labelText: 'Subtype'),
+                      ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+                TextButton(
+                  onPressed: _isAdding ? null : () => _addCodexItem(context),
+                  child: _isAdding
+                      ? const CircularProgressIndicator()
+                      : const Text('Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final filteredItems = _getFilteredItems();
-
-    return Column(
-      children: [
-        _buildHeader(),
-        _buildSearchAndFilters(),
-        Expanded(
-          child: _error.isNotEmpty
-              ? _buildErrorState()
-              : _buildCodexList(filteredItems),
-        ),
-      ],
+    return Scaffold(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _buildHeader(),
+                _buildSearchAndFilters(),
+                Expanded(
+                  child: _error.isNotEmpty
+                      ? _buildErrorState()
+                      : _buildCodexList(_getFilteredItems()),
+                ),
+              ],
+            ),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (_isExpanded) ...[
+            FloatingActionButton(
+              heroTag: 'addLore',
+              onPressed: () => _showAddCodexItemDialog(context, 'lore'),
+              mini: true,
+              child: const Icon(Icons.book),
+            ),
+            const SizedBox(height: 10),
+            FloatingActionButton(
+              heroTag: 'addWorldbuilding',
+              onPressed: () =>
+                  _showAddCodexItemDialog(context, 'worldbuilding'),
+              mini: true,
+              child: const Icon(Icons.public),
+            ),
+            const SizedBox(height: 10),
+            FloatingActionButton(
+              heroTag: 'addItem',
+              onPressed: () => _showAddCodexItemDialog(context, 'item'),
+              mini: true,
+              child: const Icon(Icons.category),
+            ),
+            const SizedBox(height: 10),
+            FloatingActionButton(
+              heroTag: 'addCharacter',
+              onPressed: () => _showAddCodexItemDialog(context, 'character'),
+              mini: true,
+              child: const Icon(Icons.person),
+            ),
+            const SizedBox(height: 10),
+            FloatingActionButton(
+              heroTag: 'addFaction',
+              onPressed: () => _showAddCodexItemDialog(context, 'faction'),
+              mini: true,
+              child: const Icon(Icons.groups),
+            ),
+            const SizedBox(height: 10),
+          ],
+          FloatingActionButton(
+            heroTag: 'expandButton',
+            onPressed: () {
+              setState(() {
+                _isExpanded = !_isExpanded;
+              });
+            },
+            child: Icon(_isExpanded ? Icons.close : Icons.add),
+          ),
+        ],
+      ),
     );
   }
 
@@ -662,34 +894,6 @@ class _CodexState extends State<Codex> {
       child: Text('No items found.',
           style: Theme.of(context).textTheme.bodyMedium),
     );
-  }
-
-  Future<void> deleteCodexItem(BuildContext context, String itemId) async {
-    try {
-      final headers = await getAuthHeaders();
-      final response = await http.delete(
-        Uri.parse('$apiUrl/codex-items/$itemId?project_id=${widget.projectId}'),
-        headers: headers,
-      );
-
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Codex item deleted successfully')),
-        );
-        _fetchCodexItems();
-      } else {
-        final responseBody = json.decode(response.body);
-        final error = responseBody['detail'] ?? 'Error deleting codex item';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $error (Status: ${response.statusCode})')),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting codex item: $e')),
-      );
-    }
   }
 
   Widget _buildSubtypeDropdown() {

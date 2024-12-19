@@ -66,24 +66,6 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Reset settings to default
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Settings reset to default'),
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.only(
-                bottom: 80.0, // Add margin to avoid FAB
-                left: 20.0,
-                right: 20.0,
-              ),
-            ),
-          );
-        },
-        icon: const Icon(Icons.restore),
-        label: const Text('Reset to Default'),
-      ),
     );
   }
 }

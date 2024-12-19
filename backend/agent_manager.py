@@ -319,13 +319,13 @@ class AgentManager:
             llm = ChatGoogleGenerativeAI(
                 model=model,
                 google_api_key=self.api_key,
-                temperature=0.7,
+                temperature=self.model_settings.get('temperature', 0.7),  # Get temperature from settings
                 max_output_tokens=self.MAX_OUTPUT_TOKENS,
                 max_input_tokens=self.MAX_INPUT_TOKENS,
                 caching=True,
                 streaming=True,
                 callbacks=[rate_limiter],
-                convert_system_message_to_human=True
+                #convert_system_message_to_human=True
             )
 
             self._llm_cache[model] = llm
@@ -399,7 +399,7 @@ class AgentManager:
             )
 
             # Collect the full chapter content
-            chapter_content = ""
+            chapter_content = []  # Use list instead of string for better memory management
             async for chunk in self._stream_chapter_generation(
                 chain,
                 {
@@ -412,49 +412,34 @@ class AgentManager:
                 },
                 config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
             ):
-                if isinstance(chunk, dict) and "content" in chunk:
-                    chapter_content += chunk["content"]
-                yield chunk
+                if isinstance(chunk, dict):
+                    if "content" in chunk:
+                        chapter_content.append(chunk["content"])
+                    yield chunk
+                elif isinstance(chunk, str):
+                    chapter_content.append(chunk)
+                    yield {"type": "chunk", "content": chunk}
 
-            # Add validation here
-            if not chapter_content:
-                raise ValueError("No chapter content was generated")
-
-            # Continue with the rest of processing only if we have content
-
+            # Join the chunks and validate
+            chapter_content = " ".join(chapter_content).strip()
             if not chapter_content:
                 raise ValueError("No chapter content was generated")
 
             # Generate title before returning
             chapter_title = await self.generate_title(chapter_content, chapter_number)
 
-            # Check and extend chapter if necessary
-            expected_word_count = instructions.get('minWordCount', 0)
-            if expected_word_count > 0:
-                chapter_content = await self.check_and_extend_chapter(
-                    chapter_content, 
-                    instructions, 
-                    context, 
-                    expected_word_count
-                )
 
-            # Run validity check
-            validity_result = await self.check_chapter(
-                chapter_content,
-                instructions,
-                previous_chapters
-            )
-
-            # Extract and process new codex items
-            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content)
-
-            # Return the chapter content and metadata without saving
+            # Return the chapter content and metadata
             yield {
                 "type": "complete",
                 "content": chapter_content,
                 "chapter_title": chapter_title,
-                "new_codex_items": new_codex_items,
-                "validity_check": validity_result
+                "new_codex_items": await self.check_and_extract_new_codex_items(chapter_content),
+                "validity_check": await self.check_chapter(
+                    chapter_content,
+                    instructions,
+                    await self.vector_store.similarity_search(plot, k=3)
+                )
             }
 
         except Exception as e:
@@ -522,17 +507,17 @@ class AgentManager:
             Dict[str, Any]: Chunks of generated content or error information.
         """
         try:
-            self.logger.debug(f"Starting chapter generation with variables: {variables}")
+            #self.logger.debug(f"Starting chapter generation with variables: {variables}")
             stream_kwargs = {}
             if config:
                 stream_kwargs['config'] = config
 
             async for chunk in chain.astream(variables, **stream_kwargs):
                 if isinstance(chunk, str):
-                    self.logger.debug(f"Received chunk: {chunk[:100]}...")  # Log first 100 chars
+                    #self.logger.debug(f"Received chunk: {chunk[:100]}...")  # Log first 100 chars
                     yield {"type": "chunk", "content": chunk}
                 else:
-                    self.logger.debug(f"Received non-string chunk: {chunk}")
+                   # self.logger.debug(f"Received non-string chunk: {chunk}")
                     yield chunk
         except Exception as e:
             self.logger.error(f"Error in _stream_chapter_generation: {str(e)}")
@@ -973,20 +958,34 @@ class AgentManager:
         return await db_instance.get_chat_history(self.user_id, self.project_id)
 
     def chunk_content(self, content: str, max_tokens: int) -> List[str]:
+        if not content or not content.strip():
+            return []
+        
         chunks = []
         current_chunk = ""
         current_tokens = 0
         
-        for sentence in content.split('.'):
-            sentence_tokens = self.estimate_token_count(sentence)
-            if current_tokens + sentence_tokens > max_tokens:
-                chunks.append(current_chunk.strip())
-                current_chunk = sentence
-                current_tokens = sentence_tokens
-            else:
-                current_chunk += sentence + '.'
-                current_tokens += sentence_tokens
+        # Split by sentences but filter out empty ones
+        sentences = [s.strip() for s in content.split('.') if s.strip()]
         
+        for sentence in sentences:
+            # Add the period back since we split it off
+            sentence = sentence + '.'
+            try:
+                sentence_tokens = self.estimate_token_count(sentence)
+                if current_tokens + sentence_tokens > max_tokens:
+                    if current_chunk:  # Only append non-empty chunks
+                        chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                    current_tokens = sentence_tokens
+                else:
+                    current_chunk += ' ' + sentence if current_chunk else sentence
+                    current_tokens += sentence_tokens
+            except ValueError:
+                # Skip empty sentences that might cause token counting errors
+                continue
+        
+        # Add the last chunk if it exists
         if current_chunk:
             chunks.append(current_chunk.strip())
         
@@ -1105,11 +1104,15 @@ class AgentManager:
     async def check_and_extract_new_codex_items(self, chapter: str) -> List[Dict[str, str]]:
         """Extract new codex items from a chapter"""
         try:
+            if not chapter or not chapter.strip():
+                self.logger.warning("Empty chapter content provided to check_and_extract_new_codex_items")
+                return []
+
             # Get existing codex items from vector store for comparison
             existing_items = await self.vector_store.similarity_search(
                 query_text=chapter,
-                filter={"type": {"$in": [t.value for t in CodexExtractionTypes]}},  # Use CodexExtractionTypes instead
-                k=50  # Adjust as needed
+                filter={"type": {"$in": [t.value for t in CodexExtractionTypes]}},
+                k=50
             )
             
             existing_names = {doc.metadata.get('name') for doc in existing_items if doc.metadata.get('name')}

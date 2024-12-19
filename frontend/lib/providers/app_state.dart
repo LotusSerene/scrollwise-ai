@@ -387,6 +387,9 @@ class AppState extends ChangeNotifier {
     }
     if (generatedChapters != null) {
       _chapterCreationState['generatedChapters'] = generatedChapters;
+    } else if (!_chapterCreationState.containsKey('generatedChapters')) {
+      // Initialize with empty list if not present
+      _chapterCreationState['generatedChapters'] = <String>[];
     }
     notifyListeners();
   }

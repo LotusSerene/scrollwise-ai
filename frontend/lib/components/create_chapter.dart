@@ -36,14 +36,9 @@ class _CreateChapterState extends State<CreateChapter> {
 
   int _numChapters = 1;
   bool _isGenerating = false;
-  String _streamedContent = '';
-  bool _isExpanded = false;
-  int _currentChapter = 0;
-  double _progress = 0.0;
-  List<String> _generatedChapters = [];
-  int _displayedChapterIndex = 0;
-  List<String> _generatedChapterIds = [];
   String _currentChapterContent = '';
+  List<String> _generatedChapterIds = [];
+  int _displayedChapterIndex = 0;
 
   @override
   void initState() {
@@ -51,20 +46,36 @@ class _CreateChapterState extends State<CreateChapter> {
     final appState = Provider.of<AppState>(context, listen: false);
 
     // Initialize controllers with saved state
-    _plotController.text = appState.chapterCreationState['plot'];
+    _plotController.text = appState.chapterCreationState['plot'] ?? '';
     _writingStyleController.text =
-        appState.chapterCreationState['writingStyle'];
-    _styleGuideController.text = appState.chapterCreationState['styleGuide'];
+        appState.chapterCreationState['writingStyle'] ?? '';
+    _styleGuideController.text =
+        appState.chapterCreationState['styleGuide'] ?? '';
     _minWordCountController.text =
-        appState.chapterCreationState['minWordCount'];
+        appState.chapterCreationState['minWordCount'] ?? '';
     _additionalInstructionsController.text =
-        appState.chapterCreationState['additionalInstructions'];
+        appState.chapterCreationState['additionalInstructions'] ?? '';
 
     // Add listeners to update state when text changes
     _plotController.addListener(() {
       appState.updateChapterCreationField('plot', _plotController.text);
     });
-    // Add similar listeners for other controllers...
+    _writingStyleController.addListener(() {
+      appState.updateChapterCreationField(
+          'writingStyle', _writingStyleController.text);
+    });
+    _styleGuideController.addListener(() {
+      appState.updateChapterCreationField(
+          'styleGuide', _styleGuideController.text);
+    });
+    _minWordCountController.addListener(() {
+      appState.updateChapterCreationField(
+          'minWordCount', _minWordCountController.text);
+    });
+    _additionalInstructionsController.addListener(() {
+      appState.updateChapterCreationField(
+          'additionalInstructions', _additionalInstructionsController.text);
+    });
 
     _presetProvider = Provider.of<PresetProvider>(context, listen: false);
     _updateFieldsFromPreset(_presetProvider.currentPreset);
@@ -172,22 +183,37 @@ class _CreateChapterState extends State<CreateChapter> {
 
         if (response.statusCode == 200) {
           final responseData = json.decode(response.body);
-          setState(() {
-            _generatedChapterIds =
+
+          List<String> chapterIds = [];
+
+          if (responseData['generated_chapter_ids'] != null) {
+            chapterIds =
                 List<String>.from(responseData['generated_chapter_ids']);
-            _displayedChapterIndex = 0;
-          });
-          await _fetchChapterContent(_generatedChapterIds[0]);
-          appState.completeChapterGeneration();
-          Fluttertoast.showToast(msg: 'Chapters generated successfully');
+          } else if (responseData['generated_chapters'] != null) {
+            chapterIds = List<String>.from(
+                (responseData['generated_chapters'] as List)
+                    .map((chapter) => chapter['id']));
+          }
+
+          if (chapterIds.isNotEmpty) {
+            setState(() {
+              _generatedChapterIds = chapterIds;
+              _displayedChapterIndex = 0;
+            });
+
+            await _fetchChapterContent(chapterIds[0]);
+
+            appState.completeChapterGeneration();
+            Fluttertoast.showToast(msg: 'Chapters generated successfully');
+          } else {
+            throw Exception('No chapter IDs received from server');
+          }
         } else {
-          appState.cancelChapterGeneration();
-          Fluttertoast.showToast(msg: 'Error generating chapters');
+          throw Exception('Error ${response.statusCode}: ${response.body}');
         }
       } catch (error) {
-        print('Error generating chapters: $error');
         appState.cancelChapterGeneration();
-        Fluttertoast.showToast(msg: 'Error generating chapters');
+        Fluttertoast.showToast(msg: 'Error generating chapters: $error');
       }
     }
   }
@@ -209,7 +235,6 @@ class _CreateChapterState extends State<CreateChapter> {
         Fluttertoast.showToast(msg: 'Error fetching chapter content');
       }
     } catch (error) {
-      print('Error fetching chapter content: $error');
       Fluttertoast.showToast(msg: 'Error fetching chapter content');
     }
   }
@@ -233,7 +258,6 @@ class _CreateChapterState extends State<CreateChapter> {
       );
 
       if (response.statusCode == 200) {
-        // Use the cancelChapterGeneration method from AppState instead of setState
         appState.cancelChapterGeneration();
         Fluttertoast.showToast(msg: 'Chapter generation cancelled');
       } else {
@@ -249,7 +273,6 @@ class _CreateChapterState extends State<CreateChapter> {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
     if (newValue == null) {
       presetProvider.clearSelectedPreset();
-      // Reset all form fields to default values
       setState(() {
         _numChapters = 1;
         _plotController.text = '';
@@ -418,74 +441,44 @@ class _CreateChapterState extends State<CreateChapter> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        height: _isExpanded ? MediaQuery.of(context).size.height * 0.6 : 120,
-        child: Column(
-          children: [
-            ListTile(
-              title: Text(
-                'Generated Chapter ${_displayedChapterIndex + 1}',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_generatedChapterIds.length > 1) ...[
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: _displayedChapterIndex > 0
-                          ? () => _navigateChapters(-1)
-                          : null,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.arrow_forward),
-                      onPressed: _displayedChapterIndex <
-                              _generatedChapterIds.length - 1
-                          ? () => _navigateChapters(1)
-                          : null,
-                    ),
-                  ],
+      child: Column(
+        children: [
+          ListTile(
+            title: Text(
+              'Generated Chapter ${_displayedChapterIndex + 1}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_generatedChapterIds.length > 1) ...[
                   IconButton(
-                    icon: Icon(
-                        _isExpanded ? Icons.expand_less : Icons.expand_more),
-                    onPressed: () {
-                      setState(() => _isExpanded = !_isExpanded);
-                    },
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: _displayedChapterIndex > 0
+                        ? () => _navigateChapters(-1)
+                        : null,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward),
+                    onPressed:
+                        _displayedChapterIndex < _generatedChapterIds.length - 1
+                            ? () => _navigateChapters(1)
+                            : null,
                   ),
                 ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                _currentChapterContent,
+                style: Theme.of(context).textTheme.bodyLarge,
               ),
             ),
-            if (_isExpanded)
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    _currentChapterContent,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGenerateButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: ElevatedButton.icon(
-        icon: const Icon(Icons.auto_awesome),
-        label: const Text('Generate Chapter'),
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 32,
-            vertical: 16,
           ),
-          textStyle: const TextStyle(fontSize: 18),
-        ),
-        onPressed: () => _handleSubmit(context),
+        ],
       ),
     );
   }
@@ -495,13 +488,7 @@ class _CreateChapterState extends State<CreateChapter> {
     return Consumer<AppState>(
       builder: (context, appState, child) {
         final generationState = appState.chapterCreationState;
-
-        // Use generationState values instead of local state
         _isGenerating = generationState['isGenerating'];
-        _streamedContent = generationState['streamedContent'];
-        _progress = generationState['progress'];
-        _currentChapter = generationState['currentChapter'];
-        _generatedChapters = generationState['generatedChapters'];
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -709,18 +696,16 @@ class _CreateChapterState extends State<CreateChapter> {
                             if (_isGenerating)
                               Column(
                                 children: [
-                                  LinearProgressIndicator(
-                                    value: _progress,
-                                    backgroundColor: const Color(0xFF343a40),
-                                    valueColor:
-                                        const AlwaysStoppedAnimation<Color>(
-                                            Color(0xFF007bff)),
+                                  const LinearProgressIndicator(
+                                    value: 1,
+                                    backgroundColor: Color(0xFF343a40),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Color(0xFF007bff)),
                                   ),
                                   const SizedBox(height: 10),
-                                  Text(
-                                    'Generating chapter $_currentChapter of $_numChapters...',
-                                    style: const TextStyle(
-                                        color: Color(0xFFf8f9fa)),
+                                  const Text(
+                                    'Generating chapter...',
+                                    style: TextStyle(color: Color(0xFFf8f9fa)),
                                   ),
                                   const SizedBox(height: 10),
                                   ElevatedButton(
@@ -754,102 +739,8 @@ class _CreateChapterState extends State<CreateChapter> {
                 ),
               ),
               const SizedBox(height: 20),
-              // Add an expandable container for generated chapters
-              if (_generatedChapters.isNotEmpty)
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _isExpanded = !_isExpanded;
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    height: _isExpanded
-                        ? MediaQuery.of(context).size.height * 0.6
-                        : 100,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2C3136),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Generated Chapter ${_displayedChapterIndex + 1}',
-                              style: const TextStyle(
-                                color: Color(0xFFf8f9fa),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                              ),
-                            ),
-                            if (_generatedChapters.length > 1)
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_back,
-                                        color: Color(0xFFf8f9fa)),
-                                    onPressed: _displayedChapterIndex > 0
-                                        ? () {
-                                            setState(() {
-                                              _displayedChapterIndex--;
-                                              _streamedContent =
-                                                  _generatedChapters[
-                                                      _displayedChapterIndex];
-                                            });
-                                          }
-                                        : null,
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_forward,
-                                        color: Color(0xFFf8f9fa)),
-                                    onPressed: _displayedChapterIndex <
-                                            _generatedChapters.length - 1
-                                        ? () {
-                                            setState(() {
-                                              _displayedChapterIndex++;
-                                              _streamedContent =
-                                                  _generatedChapters[
-                                                      _displayedChapterIndex];
-                                            });
-                                          }
-                                        : null,
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            child: Text(
-                              _streamedContent,
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                            ),
-                          ),
-                        ),
-                        if (_isExpanded)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  _isExpanded = false;
-                                });
-                              },
-                              child: const Text(
-                                'Close',
-                                style: TextStyle(color: Color(0xFF007bff)),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+              if (_generatedChapterIds.isNotEmpty)
+                _buildGeneratedChaptersSection(),
             ],
           ),
         );

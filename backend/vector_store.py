@@ -1,5 +1,5 @@
-import asyncio  # Add this import at the top
-from langchain_community.vectorstores import Chroma
+import asyncio 
+from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.docstore.document import Document
 from typing import List, Dict, Any, Optional
@@ -42,7 +42,8 @@ class VectorStore:
         try:
             # Use local persistence instead of HTTP
             chroma_client = chromadb.PersistentClient(
-                path="./chroma_db"  # Local path to store embeddings
+                path="./chroma_db",  # Local path to store embeddings
+                settings=Settings(anonymized_telemetry=False)  # Disable telemetry
             )
             
             collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
