@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "flutterfrontend" "\0"
+            VALUE "CompanyName", "Lotus" "\0"
+            VALUE "FileDescription", "ScrollWise AI - Your AI Writing Assistant" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "flutterfrontend" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2024 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "flutterfrontend.exe" "\0"
-            VALUE "ProductName", "flutterfrontend" "\0"
+            VALUE "InternalName", "ScrollWise" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2024 Lotus. All rights reserved." "\0"
+            VALUE "OriginalFilename", "ScrollWise.exe" "\0"
+            VALUE "ProductName", "ScrollWise" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

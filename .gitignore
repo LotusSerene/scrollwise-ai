@@ -51,3 +51,6 @@ changelog.md
 .DS_Store
 .env
 *.log
+
+# Temp
+ScrollWise/

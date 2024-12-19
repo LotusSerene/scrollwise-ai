@@ -1,4 +1,4 @@
-package com.example.flutterfrontend
+package com.lotus.scrollwise
 
 import io.flutter.embedding.android.FlutterActivity
 

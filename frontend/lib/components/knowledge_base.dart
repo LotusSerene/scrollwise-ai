@@ -5,7 +5,7 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:html' as html;
+import 'dart:io';
 import 'package:http_parser/http_parser.dart';
 
 class KnowledgeBase extends StatefulWidget {
@@ -308,16 +308,18 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         markdown.writeln('---\n');
       }
 
-      final content = markdown.toString();
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Knowledge Base Export',
+        fileName: 'knowledge_base_export.md',
+        type: FileType.custom,
+        allowedExtensions: ['md'],
+      );
 
-      final blob = html.Blob([content], 'text/markdown');
-      final url = html.Url.createObjectUrlFromBlob(blob);
-      html.AnchorElement(href: url)
-        ..setAttribute('download', 'knowledge_base_export.md')
-        ..click();
-      html.Url.revokeObjectUrl(url);
-
-      Fluttertoast.showToast(msg: 'Export started');
+      if (outputFile != null) {
+        final file = File(outputFile);
+        await file.writeAsString(markdown.toString());
+        Fluttertoast.showToast(msg: 'Knowledge base exported successfully');
+      }
     } catch (error) {
       print('Error exporting knowledge base: $error');
       Fluttertoast.showToast(msg: 'Error exporting knowledge base');

@@ -1,4 +1,4 @@
-# flutterfrontend
+# Scrollwise
 
 A new Flutter project.
 

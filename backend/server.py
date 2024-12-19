@@ -40,6 +40,10 @@ from docx import Document
 import pdfplumber
 import io
 
+import sys
+import subprocess
+import signal
+import psutil
 
 # Load environment variables
 load_dotenv()
@@ -66,41 +70,46 @@ async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
     
-    
-    # Initialize database
-    logger.info("Initializing database...")
-    await db_instance.initialize()
-    
-    # Start session cleanup task
-    async def cleanup_sessions():
-        while True:
-            current_time = datetime.now(timezone.utc)
-            expired_sessions = [
-                sid for sid, session in session_manager.sessions.items()
-                if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
-            ]
-            for sid in expired_sessions:
-                await session_manager.remove_session(sid)
-            await asyncio.sleep(300)  # Run every 5 minutes
-    
-    cleanup_task = asyncio.create_task(cleanup_sessions())
-    
     try:
+        # Initialize database
+        logger.info("Initializing database...")
+        await db_instance.initialize()
+        
+        # Start session cleanup task
+        async def cleanup_sessions():
+            while True:
+                current_time = datetime.now(timezone.utc)
+                expired_sessions = [
+                    sid for sid, session in session_manager.sessions.items()
+                    if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
+                ]
+                for sid in expired_sessions:
+                    await session_manager.remove_session(sid)
+                await asyncio.sleep(300)  # Run every 5 minutes
+        
+        cleanup_task = asyncio.create_task(cleanup_sessions())
+        
+        # Set keep_alive flag directly
+        setattr(app.state, "keep_alive", True)
+        
         yield
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise
     finally:
-        # Cleanup
-        logger.info("Shutting down server...")
-        cleanup_task.cancel()
-        tasks = []
-        async with agent_manager_store._lock:
-            for manager in agent_manager_store._managers.values():
-                if hasattr(manager, 'vector_store'):
-                    manager.vector_store.close()
-                tasks.append(manager.close())
-        await asyncio.gather(*tasks)
-        await db_instance.dispose()
-        #Shutdown all sub processes
-        logger.info("Cleanup complete")
+        # Check keep_alive flag directly
+        if not getattr(app.state, "keep_alive", True):
+            logger.info("Shutting down server...")
+            cleanup_task.cancel()
+            tasks = []
+            async with agent_manager_store._lock:
+                for manager in agent_manager_store._managers.values():
+                    if hasattr(manager, 'vector_store'):
+                        manager.vector_store.close()
+                    tasks.append(manager.close())
+            await asyncio.gather(*tasks)
+            await db_instance.dispose()
+            logger.info("Cleanup complete")
 
 app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
 
@@ -1667,20 +1676,24 @@ async def log_requests(request: Request, call_next):
 @app.get("/health")
 async def health_check():
     try:
-        # Vector Store Check
-        try:
-            vector_store = VectorStore("test_user", "test_api_key", "models/embedding-001")
-            await vector_store.add_to_knowledge_base("Test content")
-            test_result = await vector_store.similarity_search("test", k=1)
+        # Basic health checks
+        if not db_instance:
+            return JSONResponse(
+                status_code=500,
+                content={"status": "error", "message": "Database not initialized"}
+            )
             
-            return JSONResponse({"status": "OK", "database": "Connected", "vector_store": "Connected"})
-        except Exception as e:
-            logger.error(f"Vector Store check failed: {str(e)}")
-            return JSONResponse({"status": "Error", "database": "Connected", "vector_store": str(e)}, status_code=500)
-            
+        # Don't initialize VectorStore in health check
+        return JSONResponse(
+            status_code=200,
+            content={"status": "healthy", "message": "Server is running"}
+        )
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
-        return JSONResponse({"status": "Error", "error": str(e)}, status_code=500)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
 
 @app.get("/validity-checks")
 async def get_validity_checks(project_id: str, current_user: User = Depends(get_current_active_user)):
@@ -2497,6 +2510,68 @@ async def get_location_connections(
     except Exception as e:
         logger.error(f"Error fetching location connections: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+@app.post("/shutdown")
+async def shutdown_endpoint(current_user: User = Depends(get_current_active_user)):
+    try:
+        logger.info("Shutdown request received from user: %s", current_user.id)
+        
+        # 1. Save any pending data
+        try:
+            # Save any pending chat histories
+            for project_id in agent_manager_store._managers.keys():
+                async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+                    chat_history = await agent_manager.get_chat_history()
+                    if chat_history:
+                        await db_instance.save_chat_history(current_user.id, project_id, chat_history)
+        except Exception as e:
+            logger.error(f"Error saving pending data: {str(e)}")
+
+        # 2. Close all active sessions
+        active_sessions = list(session_manager.sessions.keys())
+        for sid in active_sessions:
+            await session_manager.remove_session(sid)
+            logger.info(f"Closed session: {sid}")
+
+        # 3. Close vector stores and agent managers
+        async with agent_manager_store._lock:
+            for manager in agent_manager_store._managers.values():
+                if hasattr(manager, 'vector_store'):
+                    manager.vector_store.close()
+                await manager.close()
+            agent_manager_store._managers.clear()
+
+        # 4. Close database connections
+        await db_instance.dispose()
+
+        # 5. Terminate child processes
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+                child.wait(timeout=3)  # Wait up to 3 seconds for each process
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                try:
+                    child.kill()  # Force kill if termination fails
+                except psutil.NoSuchProcess:
+                    pass
+
+        # 6. Flush logs
+        for handler in logger.handlers:
+            handler.flush()
+
+        # 7. Signal the server to stop
+        stop_server()  # Your existing shutdown function
+        
+        return {"message": "Server shutdown initiated successfully"}
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Shutdown failed: {str(e)}"
+        )
 
 
 # Add the router to the app
@@ -2513,13 +2588,102 @@ app.include_router(codex_router)
 app.include_router(relationship_router)
 app.include_router(project_router)
 
+def is_port_in_use(port: int) -> bool:
+    for conn in psutil.net_connections():
+        if conn.laddr.port == port:
+            return True
+    return False
+
+def stop_server():
+    # Cleanup and shutdown logic
+    logger.info("Stopping server...")
+    for process in psutil.process_iter():
+        try:
+            if "uvicorn" in process.name().lower():
+                process.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+async def cleanup_resources():
+    """Cleanup function to handle graceful shutdown"""
+    logger.info("Starting cleanup process...")
+    try:
+        # Cleanup sessions
+        for sid in list(session_manager.sessions.keys()):
+            await session_manager.remove_session(sid)
+        
+        # Cleanup agent managers
+        tasks = []
+        async with agent_manager_store._lock:
+            for manager in agent_manager_store._managers.values():
+                if hasattr(manager, 'vector_store'):
+                    manager.vector_store.close()
+                tasks.append(manager.close())
+        if tasks:
+            await asyncio.gather(*tasks)
+            
+        # Cleanup database connections
+        await db_instance.dispose()
+        
+        # Kill any remaining subprocesses
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        
+        logger.info("Cleanup completed successfully")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+def signal_handler(signum, frame):
+    """Handle various termination signals"""
+    signal_name = signal.Signals(signum).name
+    logger.info(f"Received signal {signal_name}")
+    
+    try:
+        # Run cleanup in the event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(cleanup_resources())
+        else:
+            loop.run_until_complete(cleanup_resources())
+            
+        # Give processes a chance to cleanup (2 seconds)
+        loop.run_until_complete(asyncio.sleep(2))
+    except Exception as e:
+        logger.error(f"Error in signal handler: {str(e)}")
+    finally:
+        # Force exit if cleanup takes too long
+        sys.exit(0)
+
+# Register signal handlers with platform check
+signal.signal(signal.SIGINT, signal_handler)   # Handle Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Handle termination request
+
+# Only register SIGHUP and SIGQUIT on non-Windows platforms
+if hasattr(signal, 'SIGHUP'):  # Check if SIGHUP exists
+    signal.signal(signal.SIGHUP, signal_handler)   # Handle terminal window closing
+if hasattr(signal, 'SIGQUIT'):  # Check if SIGQUIT exists
+    signal.signal(signal.SIGQUIT, signal_handler)  # Handle quit request
+
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app,
-        host="localhost",
-        port=8080,
-        log_level="info",
-        reload=True  # Enable auto-reload for development
-    )
+   try:
+       import uvicorn
+       config = uvicorn.Config(
+           app,
+           host="localhost",
+           port=8080,
+           log_level="debug",  # Change to debug for more info
+           reload=False,
+           workers=1,
+           access_log=True
+       )
+       server = uvicorn.Server(config)
+       server.run()
+   except Exception as e:
+       logger.error(f"Fatal error: {str(e)}", exc_info=True)
+       sys.exit(1)

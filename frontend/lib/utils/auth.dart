@@ -1,5 +1,3 @@
-// flutterfrontend/lib/utils/auth.dart
-
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;

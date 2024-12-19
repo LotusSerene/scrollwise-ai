@@ -180,12 +180,21 @@ Win32Window::MessageHandler(HWND hwnd,
                             LPARAM const lparam) noexcept {
   switch (message) {
     case WM_DESTROY:
-      window_handle_ = nullptr;
-      Destroy();
       if (quit_on_close_) {
+        window_handle_ = nullptr;
+        Destroy();
         PostQuitMessage(0);
+      } else {
+        return 0;
       }
       return 0;
+
+    case WM_CLOSE:
+      if (!quit_on_close_) {
+        ShowWindow(hwnd, SW_MINIMIZE);
+        return 0;
+      }
+      break;
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
