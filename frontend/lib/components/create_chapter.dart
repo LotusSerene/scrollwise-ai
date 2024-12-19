@@ -503,245 +503,269 @@ class _CreateChapterState extends State<CreateChapter> {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Generate New Chapter',
-                        style: TextStyle(
-                          color: Color(0xFF007bff),
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.',
-                        style: TextStyle(
-                          color: Color(0xFFf8f9fa),
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Consumer<PresetProvider>(
-                        builder: (context, presetProvider, child) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Preset Settings:',
-                                style: TextStyle(
-                                  color: Color(0xFFf8f9fa),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Generate New Chapter',
+                            style: TextStyle(
+                              color: Color(0xFF007bff),
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'Fill in the form below to generate a new chapter for your story. Provide as much detail as possible to get the best results.',
+                            style: TextStyle(
+                              color: Color(0xFFf8f9fa),
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Consumer<PresetProvider>(
+                            builder: (context, presetProvider, child) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: _buildPresetDropdown(presetProvider),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  _buildPresetActions(presetProvider),
-                                ],
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      Form(
-                        key: _formKey,
-                        child: Column(
-                          children: [
-                            TextFormField(
-                              decoration: const InputDecoration(
-                                labelText: 'Number of Chapters',
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              keyboardType: TextInputType.number,
-                              initialValue: _numChapters.toString(),
-                              onChanged: (value) {
-                                setState(() {
-                                  _numChapters = int.tryParse(value) ?? 1;
-                                });
-                              },
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please enter a number';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 15),
-                            TextFormField(
-                              controller: _plotController,
-                              decoration: const InputDecoration(
-                                labelText: 'Plot',
-                                alignLabelWithHint: true,
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              maxLines: null,
-                              minLines: 3,
-                            ),
-                            const SizedBox(height: 15),
-                            TextFormField(
-                              controller: _writingStyleController,
-                              decoration: const InputDecoration(
-                                labelText: 'Writing Style',
-                                alignLabelWithHint: true,
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              maxLines: null,
-                              minLines: 2,
-                            ),
-                            const SizedBox(height: 15),
-                            TextFormField(
-                              controller: _styleGuideController,
-                              decoration: const InputDecoration(
-                                labelText: 'Style Guide',
-                                alignLabelWithHint: true,
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              maxLines: null,
-                              minLines: 3,
-                            ),
-                            const SizedBox(height: 15),
-                            TextFormField(
-                              controller: _minWordCountController,
-                              decoration: const InputDecoration(
-                                labelText: 'Minimum Word Count',
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              keyboardType: TextInputType.number,
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please enter a number';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 15),
-                            TextFormField(
-                              controller: _additionalInstructionsController,
-                              decoration: const InputDecoration(
-                                labelText: 'Additional Instructions',
-                                alignLabelWithHint: true,
-                                labelStyle: TextStyle(color: Color(0xFFf8f9fa)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFFced4da)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Color(0xFF007bff)),
-                                ),
-                              ),
-                              style: const TextStyle(color: Color(0xFFf8f9fa)),
-                              maxLines: null,
-                              minLines: 3,
-                            ),
-                            const SizedBox(height: 20),
-                            if (_isGenerating)
-                              Column(
-                                children: [
-                                  const LinearProgressIndicator(
-                                    value: 1,
-                                    backgroundColor: Color(0xFF343a40),
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Color(0xFF007bff)),
-                                  ),
-                                  const SizedBox(height: 10),
                                   const Text(
-                                    'Generating chapter...',
-                                    style: TextStyle(color: Color(0xFFf8f9fa)),
+                                    'Preset Settings:',
+                                    style: TextStyle(
+                                      color: Color(0xFFf8f9fa),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                   const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _buildPresetDropdown(
+                                            presetProvider),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      _buildPresetActions(presetProvider),
+                                    ],
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          Form(
+                            key: _formKey,
+                            child: Column(
+                              children: [
+                                TextFormField(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Number of Chapters',
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  keyboardType: TextInputType.number,
+                                  initialValue: _numChapters.toString(),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _numChapters = int.tryParse(value) ?? 1;
+                                    });
+                                  },
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter a number';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 15),
+                                TextFormField(
+                                  controller: _plotController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Plot',
+                                    alignLabelWithHint: true,
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  maxLines: null,
+                                  minLines: 3,
+                                ),
+                                const SizedBox(height: 15),
+                                TextFormField(
+                                  controller: _writingStyleController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Writing Style',
+                                    alignLabelWithHint: true,
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  maxLines: null,
+                                  minLines: 2,
+                                ),
+                                const SizedBox(height: 15),
+                                TextFormField(
+                                  controller: _styleGuideController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Style Guide',
+                                    alignLabelWithHint: true,
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  maxLines: null,
+                                  minLines: 3,
+                                ),
+                                const SizedBox(height: 15),
+                                TextFormField(
+                                  controller: _minWordCountController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Minimum Word Count',
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  keyboardType: TextInputType.number,
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter a number';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 15),
+                                TextFormField(
+                                  controller: _additionalInstructionsController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Additional Instructions',
+                                    alignLabelWithHint: true,
+                                    labelStyle:
+                                        TextStyle(color: Color(0xFFf8f9fa)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFFced4da)),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide:
+                                          BorderSide(color: Color(0xFF007bff)),
+                                    ),
+                                  ),
+                                  style:
+                                      const TextStyle(color: Color(0xFFf8f9fa)),
+                                  maxLines: null,
+                                  minLines: 3,
+                                ),
+                                const SizedBox(height: 20),
+                                if (_isGenerating)
+                                  Column(
+                                    children: [
+                                      const LinearProgressIndicator(
+                                        value: 1,
+                                        backgroundColor: Color(0xFF343a40),
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                Color(0xFF007bff)),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      const Text(
+                                        'Generating chapter...',
+                                        style:
+                                            TextStyle(color: Color(0xFFf8f9fa)),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      ElevatedButton(
+                                        onPressed: _handleCancel,
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 20, vertical: 10),
+                                          textStyle:
+                                              const TextStyle(fontSize: 18),
+                                        ),
+                                        child: const Text('Cancel'),
+                                      ),
+                                    ],
+                                  )
+                                else
                                   ElevatedButton(
-                                    onPressed: _handleCancel,
+                                    onPressed: () => _handleSubmit(context),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
+                                      backgroundColor: const Color(0xFF007bff),
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 20, vertical: 10),
                                       textStyle: const TextStyle(fontSize: 18),
                                     ),
-                                    child: const Text('Cancel'),
+                                    child: const Text('Generate Chapter'),
                                   ),
-                                ],
-                              )
-                            else
-                              ElevatedButton(
-                                onPressed: () => _handleSubmit(context),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF007bff),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 20, vertical: 10),
-                                  textStyle: const TextStyle(fontSize: 18),
-                                ),
-                                child: const Text('Generate Chapter'),
-                              ),
-                          ],
-                        ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              if (_generatedChapterIds.isNotEmpty)
-                _buildGeneratedChaptersSection(),
-            ],
+                  const SizedBox(height: 20),
+                  if (_generatedChapterIds.isNotEmpty)
+                    SizedBox(
+                      height: constraints.maxHeight * 0.4,
+                      child: _buildGeneratedChaptersSection(),
+                    ),
+                ],
+              );
+            },
           ),
         );
       },

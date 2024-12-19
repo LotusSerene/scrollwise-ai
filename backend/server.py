@@ -1971,7 +1971,7 @@ async def analyze_event_connections(
             # Convert each connection to a dictionary before returning
             connection_dicts = [
                 {
-                    'id': conn.id,
+                    'id': getattr(conn, 'connection_id', None),
                     'event1_id': conn.event1_id,
                     'event2_id': conn.event2_id,
                     'connection_type': conn.connection_type,

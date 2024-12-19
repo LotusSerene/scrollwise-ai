@@ -13,6 +13,7 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+backend/chroma_db/
 
 # Frontend specific gitignore
 .dart_tool/

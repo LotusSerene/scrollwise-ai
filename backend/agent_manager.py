@@ -167,25 +167,6 @@ class LocationAnalysis(BaseModel):
 class LocationAnalysisList(BaseModel):
     locations: List[LocationAnalysis]
 
-class TaskState(BaseModel):
-    task_type: str
-    current_position: int
-    intermediate_results: List[Any]
-
-class Subtask(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    description: str
-    status: str = "pending"
-    result: Optional[Any] = None
-
-class ComplexTask(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    description: str
-    subtasks: List[Subtask]
-    status: str = "pending"
-    result: Optional[Any] = None
-
-
 class EventConnection(BaseModel):
     event1_id: str
     event2_id: str
@@ -257,9 +238,7 @@ class AgentManager:
         self.chat_history = None
         self.vector_store = None
         self.summarize_chain = None
-        self.task_states = {}
         self.agents = {}
-        self.complex_tasks = {}
         self._lock = asyncio.Lock()
     @classmethod
     async def create(cls, user_id: str, project_id: str, api_key_manager: ApiKeyManager) -> 'AgentManager':
@@ -300,12 +279,10 @@ class AgentManager:
             # if hasattr(self.vector_store, '_client') and hasattr(self.vector_store._client, 'close'):
             #     self.vector_store._client.close()
         self.chat_history = []
-        self.task_states.clear()
         self.agents.clear()
-        self.complex_tasks.clear()
-        self._lock = None  # Update to _lock
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
+        self.logger.debug(f"Getting LLM instance for model: {model}")
         async with self._lock:
             if model in self._llm_cache:
                 return self._llm_cache[model]
@@ -319,24 +296,17 @@ class AgentManager:
             llm = ChatGoogleGenerativeAI(
                 model=model,
                 google_api_key=self.api_key,
-                temperature=self.model_settings.get('temperature', 0.7),  # Get temperature from settings
+                temperature=self.model_settings.get('temperature', 0.7),
                 max_output_tokens=self.MAX_OUTPUT_TOKENS,
                 max_input_tokens=self.MAX_INPUT_TOKENS,
                 caching=True,
                 streaming=True,
                 callbacks=[rate_limiter],
-                #convert_system_message_to_human=True
             )
 
             self._llm_cache[model] = llm
             return llm
 
-    async def process_large_request(self, messages):
-        llm = await self._get_llm(self.model_settings['mainLLM'])
-        full_response = ""
-        async for chunk in await llm.astream(messages):
-            full_response += chunk.content
-        return full_response
 
     async def _get_api_key(self) -> str:
         api_key = await self.api_key_manager.get_api_key(self.user_id)
@@ -527,12 +497,17 @@ class AgentManager:
 
     async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
         try:
+            self.logger.debug("Starting context construction")
+            #self.logger.debug(f"Plot length: {len(plot)}, Writing style length: {len(writing_style)}")
+            
             # Get relevant chapters
+            #self.logger.debug("Fetching relevant chapters...")
             chapters = await vector_store.similarity_search(
                 query_text=plot,
                 filter={"type": "chapter"},
                 k=3
             )
+           # self.logger.debug(f"Found {len(chapters)} relevant chapters")
             
             context_parts = []
             
@@ -541,17 +516,20 @@ class AgentManager:
             context_parts.append(f"Writing Style: {writing_style}\n")
             
             # Process chapters
+            self.logger.debug("Processing chapters...")
             for chapter in chapters:
                 chapter_number = chapter.metadata.get('chapter_number', 'Unknown')
                 chapter_content = chapter.page_content
                 context_parts.append(f"Chapter {chapter_number}: {chapter_content}\n")
             
             # Get relevant codex items
+            self.logger.debug("Fetching relevant codex items...")
             codex_items = await vector_store.similarity_search(
                 query_text=plot,
                 filter={"type": {"$in": [t.value for t in CodexItemType]}},
                 k=5
             )
+           # self.logger.debug(f"Found {len(codex_items)} relevant codex items")
             
             # Add codex items to context
             if codex_items:
@@ -561,10 +539,12 @@ class AgentManager:
                     item_type = item.metadata.get('type', 'Unknown')
                     context_parts.append(f"\n{name} ({item_type}): {item.page_content}")
             
-            return "\n".join(context_parts)
+            final_context = "\n".join(context_parts)
+            #self.logger.debug(f"Final context length: {len(final_context)} characters")
+            return final_context
             
         except Exception as e:
-            self.logger.error(f"Error constructing context: {str(e)}")
+            self.logger.error(f"Error constructing context: {str(e)}", exc_info=True)
             raise
 
     def summarize_chapter(self, chapter_content: str) -> str:
@@ -711,6 +691,15 @@ class AgentManager:
 
             filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
 
+            # Batch embeddings if multiple items need to be added
+            if not hasattr(self, '_embedding_batch'):
+                self._embedding_batch = []
+            
+            self._embedding_batch.append((content, filtered_metadata))
+            
+            if len(self._embedding_batch) >= 10:  # Process in batches of 10
+                await self._process_embedding_batch()
+
             # Add the content to the vector store and get the embedding ID
             embedding_id = await self.vector_store.add_to_knowledge_base(content, metadata=filtered_metadata)
 
@@ -745,29 +734,46 @@ class AgentManager:
             self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}")
             raise
 
-    async def query_knowledge_base(self, query: str, type_filter: List[CodexItemType], limit: int = 5):
-        # Convert enum values to strings for the type filter
-        type_filter_values = [t.value for t in type_filter]
+    async def query_knowledge_base(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
+        try:
+            docs = await self.vector_store.similarity_search(
+                query_text=query,
+                k=5
+            )
+            
+            if not docs:
+                return "I don't have enough information to answer that question."
 
-        # Log the query parameters
-        #self.logger.info(f"Processing query with params: {{'query': query, 'type_filter': type_filter_values, 'limit': limit}}")
+            context = "\n\n".join(doc.page_content for doc in docs)
 
-        # Perform the query
-        results = await self.vector_store.similarity_search(
-            query_text=query,
-            filter={"type": {"$in": type_filter_values}},
-            k=limit
-        )
+            messages = []
+            if chat_history:
+                for msg in chat_history:
+                    if msg["type"] == "human":
+                        messages.append(HumanMessage(content=msg["content"]))
+                    else:
+                        messages.append(AIMessage(content=msg["content"]))
 
-        # Log the results
-        #self.logger.info(f"Results for query '{query}' with type_filter {type_filter_values}:")
-        #for doc in results:
-            #self.logger.info(f"- Type: {doc.metadata.get('type')}")
-            #self.logger.info(f"  Content: {doc.page_content}")
-            #self.logger.info(f"  Metadata: {doc.metadata}")
-            #self.logger.info("---")
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a helpful AI assistant answering questions about a story. 
+                Use ONLY the provided context to answer questions. If you cannot answer based on the context, say so.
+                Context: {context}"""),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{question}")
+            ])
 
-        return results
+            llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
+            chain = prompt | llm | StrOutputParser()
+            
+            return await chain.ainvoke({
+                "context": context,
+                "chat_history": messages,
+                "question": query
+            })
+
+        except Exception as e:
+            self.logger.error(f"Error in query_knowledge_base: {str(e)}", exc_info=True)
+            raise
 
     async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         try:
@@ -990,116 +996,6 @@ class AgentManager:
             chunks.append(current_chunk.strip())
         
         return chunks
-
-    async def process_large_content(self, content: str, task_type: str, process_func: callable):
-        chunks = self.chunk_content(content, self.MAX_INPUT_TOKENS // 2)
-        state = self.task_states.get(task_type, TaskState(task_type=task_type, current_position=0, intermediate_results=[]))
-        
-        for i, chunk in enumerate(chunks[state.current_position:], start=state.current_position):
-            result = await process_func(chunk)
-            state.intermediate_results.extend(result)
-            state.current_position = i + 1
-            self.task_states[task_type] = state
-        
-        return state.intermediate_results
-
-    def decompose_task(self, task: str) -> ComplexTask:
-        prompt = ChatPromptTemplate.from_template("""
-        You are an expert task manager. Your job is to decompose a complex task into smaller, manageable subtasks.
-        
-        Complex task: {task}
-        
-        Break this task down into 3-5 subtasks. For each subtask, provide:
-        1. A brief description of the subtask
-        2. The expected output or result of the subtask
-        
-        Format your response as a JSON object with the following structure:
-        {{
-            "description": "overall task description",
-            "subtasks": [
-                {{
-                    "description": "subtask 1 description"
-                }},
-                ...
-            ]
-        }}
-        """)
-
-        chain = prompt | self.llm | StrOutputParser()
-        result = chain.invoke({"task": task})
-        
-        task_dict = json.loads(result)
-        complex_task = ComplexTask(
-            description=task_dict["description"],
-            subtasks=[Subtask(**subtask) for subtask in task_dict["subtasks"]]
-        )
-        self.complex_tasks[complex_task.id] = complex_task
-        return complex_task
-
-    async def process_subtask(self, subtask: Subtask) -> Any:
-        prompt = ChatPromptTemplate.from_template("""
-        Process the following subtask:
-        
-        Subtask: {subtask_description}
-        
-        Provide a detailed response or solution for this subtask.
-        """)
-
-        chain = prompt | self.llm | StrOutputParser()
-        result = await chain.ainvoke({"subtask_description": subtask.description})
-        
-        return result
-
-    async def process_complex_task(self, task_id: str) -> ComplexTask:
-        complex_task = self.complex_tasks.get(task_id)
-        if not complex_task:
-            raise ValueError(f"No complex task found with id: {task_id}")
-
-        for subtask in complex_task.subtasks:
-            if subtask.status == "pending":
-                subtask.result = await self.process_subtask(subtask)
-                subtask.status = "completed"
-
-        complex_task.result = await self.aggregate_results(complex_task)
-        complex_task.status = "completed"
-        return complex_task
-
-    async def aggregate_results(self, complex_task: ComplexTask) -> Any:
-        prompt = ChatPromptTemplate.from_template("""
-        You are tasked with aggregating the results of multiple subtasks into a coherent final result.
-        
-        Original task: {task_description}
-        
-        Subtask results:
-        {subtask_results}
-        
-        Please provide a comprehensive summary that combines all subtask results into a final, cohesive output for the original task.
-        """)
-
-        subtask_results = "\n".join([f"Subtask {i+1}: {subtask.result}" for i, subtask in enumerate(complex_task.subtasks)])
-
-        chain = prompt | self.llm | StrOutputParser()
-        result = await chain.ainvoke({
-            "task_description": complex_task.description,
-            "subtask_results": subtask_results
-        })
-        
-        return result
-
-    async def handle_complex_task(self, task: str) -> Any:
-        complex_task = self.decompose_task(task)
-        processed_task = await self.process_complex_task(complex_task.id)
-        return processed_task.result
-
-    def register_agent(self, agent_name: str, agent: Any):
-        self.agents[agent_name] = agent
-
-    async def allocate_task(self, task: str):
-        # Implement task allocation logic
-        for agent_name, agent in self.agents.items():
-            if agent.can_handle(task):
-                return await agent.process(task)
-        raise ValueError(f"No agent can handle task: {task}")
 
     async def check_and_extract_new_codex_items(self, chapter: str) -> List[Dict[str, str]]:
         """Extract new codex items from a chapter"""
