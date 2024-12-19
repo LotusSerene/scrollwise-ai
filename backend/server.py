@@ -53,16 +53,33 @@ load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('server.log'),
-        logging.StreamHandler()
-    ]
-)
+def setup_logging():
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    log_path = os.path.join(log_dir, 'server.log')
+    
+    # If server.log exists, rename it with timestamp
+    if os.path.exists(log_path):
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        new_log_path = os.path.join(log_dir, f'server_{timestamp}.log')
+        os.rename(log_path, new_log_path)
+        logger.info(f'Previous log file renamed to: {new_log_path}')
+    
+    # Configure logging with the new file
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_path),
+            logging.StreamHandler()
+        ]
+    )
+    
+    return logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
+# Initialize logging
+logger = setup_logging()
 
 
 @asynccontextmanager

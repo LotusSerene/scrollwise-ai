@@ -15,12 +15,29 @@ class ServerManager {
 
   static Future<void> initializeLogging() async {
     final String appDir = path.dirname(Platform.resolvedExecutable);
-    final logPath = path.join(appDir, 'logs', 'client.log');
+    final logsDir = path.join(appDir, 'logs');
+    final logPath = path.join(logsDir, 'client.log');
     
     // Ensure logs directory exists
-    await Directory(path.dirname(logPath)).create(recursive: true);
+    await Directory(logsDir).create(recursive: true);
     
-    _logFile = File(logPath).openWrite(mode: FileMode.append);
+    // If client.log exists, rename it with timestamp
+    final logFile = File(logPath);
+    if (await logFile.exists()) {
+      final now = DateTime.now();
+      final timestamp = '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}-'
+          '${now.minute.toString().padLeft(2, '0')}-'
+          '${now.second.toString().padLeft(2, '0')}';
+      
+      final newLogPath = path.join(logsDir, 'client_$timestamp.log');
+      await logFile.rename(newLogPath);
+      _logger.info('Previous log file renamed to: $newLogPath');
+    }
+    
+    // Create new log file
+    _logFile = File(logPath).openWrite(mode: FileMode.write);
     
     Logger.root.level = Level.ALL;
     Logger.root.onRecord.listen((record) {
