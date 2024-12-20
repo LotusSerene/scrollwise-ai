@@ -4,8 +4,8 @@ import '../models/character.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
-import '../widgets/character_detail_dialog.dart'; // Make sure to create this file
-import 'package:expandable/expandable.dart'; // Add this package to pubspec.yaml
+import '../widgets/character_detail_dialog.dart';
+import 'package:expandable/expandable.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 

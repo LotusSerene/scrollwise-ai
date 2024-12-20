@@ -3,9 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
+import '../utils/notifications.dart';
 
 class CodexGeneration extends StatefulWidget {
   final String projectId;
@@ -82,16 +82,16 @@ class _CodexGenerationState extends State<CodexGeneration> {
             isGenerating: false,
             generatedItem: data['item'],
           );
-          Fluttertoast.showToast(msg: 'Codex item generated successfully');
+          AppNotification.show(context, 'Codex item generated successfully');
         } else {
           appState.updateCodexGenerationProgress(isGenerating: false);
-          Fluttertoast.showToast(
-              msg: 'Error generating codex item: ${response.body}');
+          AppNotification.show(
+              context, 'Error generating codex item: ${response.body}');
         }
       } catch (error) {
         appState.updateCodexGenerationProgress(isGenerating: false);
         print('Error generating codex item: $error');
-        Fluttertoast.showToast(msg: 'Error generating codex item: $error');
+        AppNotification.show(context, 'Error generating codex item: $error');
       }
     }
   }

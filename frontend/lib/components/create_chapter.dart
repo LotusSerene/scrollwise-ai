@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:fluttertoast/fluttertoast.dart';
+import '../utils/notifications.dart';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import '../providers/preset_provider.dart';
@@ -122,7 +122,7 @@ class _CreateChapterState extends State<CreateChapter> {
     final newPresetName = _newPresetNameController.text;
 
     if (newPresetName.isEmpty) {
-      Fluttertoast.showToast(msg: 'Please enter a preset name');
+      AppNotification.show(context, 'Please enter a preset name');
       return;
     }
 
@@ -138,10 +138,10 @@ class _CreateChapterState extends State<CreateChapter> {
     try {
       await presetProvider.savePreset(
           newPresetName, presetData, widget.projectId);
-      Fluttertoast.showToast(msg: 'Preset saved successfully');
+      AppNotification.show(context, 'Preset saved successfully');
       _newPresetNameController.clear();
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Error saving preset: $e');
+      AppNotification.show(context, 'Error saving preset: $e');
     }
   }
 
@@ -204,7 +204,7 @@ class _CreateChapterState extends State<CreateChapter> {
             await _fetchChapterContent(chapterIds[0]);
 
             appState.completeChapterGeneration();
-            Fluttertoast.showToast(msg: 'Chapters generated successfully');
+            AppNotification.show(context, 'Chapters generated successfully');
           } else {
             throw Exception('No chapter IDs received from server');
           }
@@ -213,7 +213,7 @@ class _CreateChapterState extends State<CreateChapter> {
         }
       } catch (error) {
         appState.cancelChapterGeneration();
-        Fluttertoast.showToast(msg: 'Error generating chapters: $error');
+        AppNotification.show(context, 'Error generating chapters: $error');
       }
     }
   }
@@ -232,10 +232,10 @@ class _CreateChapterState extends State<CreateChapter> {
           _currentChapterContent = chapterData['content'];
         });
       } else {
-        Fluttertoast.showToast(msg: 'Error fetching chapter content');
+        AppNotification.show(context, 'Error fetching chapter content');
       }
     } catch (error) {
-      Fluttertoast.showToast(msg: 'Error fetching chapter content');
+      AppNotification.show(context, 'Error fetching chapter content');
     }
   }
 
@@ -259,13 +259,13 @@ class _CreateChapterState extends State<CreateChapter> {
 
       if (response.statusCode == 200) {
         appState.cancelChapterGeneration();
-        Fluttertoast.showToast(msg: 'Chapter generation cancelled');
+        AppNotification.show(context, 'Chapter generation cancelled');
       } else {
-        Fluttertoast.showToast(msg: 'Failed to cancel chapter generation');
+        AppNotification.show(context, 'Failed to cancel chapter generation');
       }
     } catch (error) {
       print('Error cancelling chapter generation: $error');
-      Fluttertoast.showToast(msg: 'Error cancelling chapter generation');
+      AppNotification.show(context, 'Error cancelling chapter generation');
     }
   }
 
@@ -290,9 +290,10 @@ class _CreateChapterState extends State<CreateChapter> {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
     try {
       await presetProvider.deletePreset(presetName, widget.projectId);
-      Fluttertoast.showToast(msg: 'Preset deleted successfully');
+      AppNotification.show(context, 'Preset deleted successfully');
     } catch (error) {
-      Fluttertoast.showToast(msg: 'Error deleting preset: ${error.toString()}');
+      AppNotification.show(
+          context, 'Error deleting preset: ${error.toString()}');
     }
   }
 

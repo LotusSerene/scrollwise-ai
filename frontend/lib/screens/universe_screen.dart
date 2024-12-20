@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
+import '../utils/notifications.dart';
 
 class UniverseScreen extends StatefulWidget {
   final String universeId;
@@ -86,8 +86,8 @@ class _UniverseScreenState extends State<UniverseScreen> {
       });
     } catch (error) {
       print('Error fetching universe data: $error');
-      Fluttertoast.showToast(
-          msg: 'Error fetching universe data: ${error.toString()}');
+      AppNotification.show(
+          context, 'Error fetching universe data: ${error.toString()}');
       setState(() {
         _isLoading = false;
       });

@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:fluttertoast/fluttertoast.dart';
+import '../utils/notifications.dart';
 
 class Settings extends StatefulWidget {
   const Settings({Key? key}) : super(key: key);
@@ -60,11 +60,11 @@ class _SettingsState extends State<Settings> {
           });
         }
       } else {
-        Fluttertoast.showToast(msg: 'Error checking API key');
+        AppNotification.show(context, 'Error checking API key');
       }
     } catch (error) {
       print('Error checking API key: $error');
-      Fluttertoast.showToast(msg: 'Error checking API key');
+      AppNotification.show(context, 'Error checking API key');
     }
   }
 
@@ -89,11 +89,11 @@ class _SettingsState extends State<Settings> {
           });
         }
       } else {
-        Fluttertoast.showToast(msg: 'Error fetching model settings');
+        AppNotification.show(context, 'Error fetching model settings');
       }
     } catch (error) {
       print('Error fetching model settings: $error');
-      Fluttertoast.showToast(msg: 'Error fetching model settings');
+      AppNotification.show(context, 'Error fetching model settings');
     }
   }
 
@@ -112,13 +112,13 @@ class _SettingsState extends State<Settings> {
             _isEditingApiKey = false;
           });
         }
-        Fluttertoast.showToast(msg: 'API key saved successfully');
+        AppNotification.show(context, 'API key saved successfully');
       } else {
-        Fluttertoast.showToast(msg: 'Error saving API key');
+        AppNotification.show(context, 'Error saving API key');
       }
     } catch (error) {
       print('Error saving API key: $error');
-      Fluttertoast.showToast(msg: 'Error saving API key');
+      AppNotification.show(context, 'Error saving API key');
     }
   }
 
@@ -136,13 +136,13 @@ class _SettingsState extends State<Settings> {
             _apiKey = '';
           });
         }
-        Fluttertoast.showToast(msg: 'API key removed successfully');
+        AppNotification.show(context, 'API key removed successfully');
       } else {
-        Fluttertoast.showToast(msg: 'Error removing API key');
+        AppNotification.show(context, 'Error removing API key');
       }
     } catch (error) {
       print('Error removing API key: $error');
-      Fluttertoast.showToast(msg: 'Error removing API key');
+      AppNotification.show(context, 'Error removing API key');
     }
   }
 
@@ -157,13 +157,13 @@ class _SettingsState extends State<Settings> {
       );
 
       if (response.statusCode == 200) {
-        Fluttertoast.showToast(msg: 'Model settings saved successfully');
+        AppNotification.show(context, 'Model settings saved successfully');
       } else {
-        Fluttertoast.showToast(msg: 'Error saving model settings');
+        AppNotification.show(context, 'Error saving model settings');
       }
     } catch (error) {
       print('Error saving model settings: $error');
-      Fluttertoast.showToast(msg: 'Error saving model settings');
+      AppNotification.show(context, 'Error saving model settings');
     }
   }
 

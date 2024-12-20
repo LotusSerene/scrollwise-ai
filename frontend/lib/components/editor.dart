@@ -3,13 +3,13 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../utils/text_utils.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http_parser/http_parser.dart';
+import '../utils/notifications.dart';
 
 class Editor extends StatefulWidget {
   final String projectId;
@@ -153,11 +153,11 @@ class _EditorState extends State<Editor> {
             _chapterContentController.text = chapter['content'];
           });
         } else {
-          Fluttertoast.showToast(msg: 'Error loading chapter');
+          AppNotification.show(context, 'Error loading chapter');
         }
       } catch (error) {
         print('Error loading chapter: $error');
-        Fluttertoast.showToast(msg: 'Error loading chapter');
+        AppNotification.show(context, 'Error loading chapter');
       }
     }
   }
@@ -181,11 +181,11 @@ class _EditorState extends State<Editor> {
         });
       } else {
         print('Error loading chapter: ${response.statusCode}');
-        Fluttertoast.showToast(msg: 'Error loading chapter');
+        AppNotification.show(context, 'Error loading chapter');
       }
     } catch (error) {
       print('Error loading chapter: $error');
-      Fluttertoast.showToast(msg: 'Error loading chapter');
+      AppNotification.show(context, 'Error loading chapter');
     }
   }
 
@@ -211,16 +211,16 @@ class _EditorState extends State<Editor> {
         setState(() {
           _selectedChapter = null;
         });
-        Fluttertoast.showToast(msg: 'Chapter deleted successfully');
+        AppNotification.show(context, 'Chapter deleted successfully');
         _fetchChapters();
       } else {
         final jsonResponse = json.decode(response.body);
         final errorMessage = jsonResponse['error'] ?? 'Error deleting chapter';
-        Fluttertoast.showToast(msg: errorMessage);
+        AppNotification.show(context, errorMessage);
       }
     } catch (error) {
       print('Error deleting chapter: $error');
-      Fluttertoast.showToast(msg: 'Error deleting chapter');
+      AppNotification.show(context, 'Error deleting chapter');
     }
   }
 
@@ -279,14 +279,14 @@ class _EditorState extends State<Editor> {
           _selectedChapter = updatedChapter;
         });
         if (response.statusCode == 200) {
-          Fluttertoast.showToast(msg: 'Chapter updated successfully');
+          AppNotification.show(context, 'Chapter updated successfully');
         } else {
-          Fluttertoast.showToast(msg: 'Chapter created successfully');
+          AppNotification.show(context, 'Chapter created successfully');
         }
         _fetchChapters();
       } else {
         final errorMessage = jsonResponse['error'] ?? 'Error saving chapter';
-        Fluttertoast.showToast(msg: errorMessage);
+        AppNotification.show(context, errorMessage);
         setState(() {
           _error = errorMessage;
         });
@@ -311,8 +311,8 @@ class _EditorState extends State<Editor> {
       if (result != null) {
         for (var file in result.files) {
           if (file.bytes == null) {
-            Fluttertoast.showToast(
-                msg: 'Error: Could not read file ${file.name}');
+            AppNotification.show(
+                context, 'Error: Could not read file ${file.name}');
             continue;
           }
 
@@ -353,7 +353,7 @@ class _EditorState extends State<Editor> {
               content = json.decode(utf8.decode(response.bodyBytes))['text'];
               await _createChapterFromContent(title, content);
             } else {
-              Fluttertoast.showToast(msg: 'Error processing: ${file.name}');
+              AppNotification.show(context, 'Error processing: ${file.name}');
               continue;
             }
           }
@@ -364,7 +364,7 @@ class _EditorState extends State<Editor> {
       }
     } catch (error) {
       print('Error importing documents: $error');
-      Fluttertoast.showToast(msg: 'Error importing documents');
+      AppNotification.show(context, 'Error importing documents');
     }
   }
 
@@ -381,13 +381,13 @@ class _EditorState extends State<Editor> {
       );
 
       if (response.statusCode == 200) {
-        Fluttertoast.showToast(msg: 'Imported: $title');
+        AppNotification.show(context, 'Imported: $title');
       } else {
-        Fluttertoast.showToast(msg: 'Error importing: $title');
+        AppNotification.show(context, 'Error importing: $title');
       }
     } catch (error) {
       print('Error creating chapter: $error');
-      Fluttertoast.showToast(msg: 'Error creating chapter: $title');
+      AppNotification.show(context, 'Error creating chapter: $title');
     }
   }
 

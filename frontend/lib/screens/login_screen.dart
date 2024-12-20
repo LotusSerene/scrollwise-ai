@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import '../utils/auth.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import '../widgets/privacy_policy_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/notifications.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -112,31 +112,30 @@ class _LoginScreenState extends State<LoginScreen> {
         if (response.statusCode == 201) {
           final data = json.decode(response.body);
           if (data['needs_verification'] == true) {
-            Fluttertoast.showToast(
-              msg:
-                  'Registration successful! Please check your email to verify your account.',
-              toastLength: Toast.LENGTH_LONG,
+            AppNotification.show(
+              context,
+              'Registration successful! Please check your email to verify your account.',
             );
           } else {
-            Fluttertoast.showToast(
-              msg: 'Registration successful! Please wait for admin approval.',
-              toastLength: Toast.LENGTH_LONG,
+            AppNotification.show(
+              context,
+              'Registration successful! Please wait for admin approval.',
             );
           }
           _emailController.clear();
           _passwordController.clear();
         } else {
           final error = json.decode(response.body);
-          Fluttertoast.showToast(
-            msg: error['detail'] ?? 'Registration failed',
-            toastLength: Toast.LENGTH_LONG,
+          AppNotification.show(
+            context,
+            error['detail'] ?? 'Registration failed',
           );
         }
       } catch (error) {
         print('Registration error: $error');
-        Fluttertoast.showToast(
-          msg: error.toString(),
-          toastLength: Toast.LENGTH_LONG,
+        AppNotification.show(
+          context,
+          error.toString(),
         );
       } finally {
         if (mounted) {

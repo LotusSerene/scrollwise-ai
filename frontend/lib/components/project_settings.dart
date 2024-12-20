@@ -5,7 +5,7 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import 'package:fluttertoast/fluttertoast.dart';
+import '../utils/notifications.dart';
 
 class ProjectSettings extends StatefulWidget {
   final String projectId;
@@ -51,7 +51,7 @@ class _ProjectSettingsState extends State<ProjectSettings> {
       }
     } catch (error) {
       print('Error fetching project data: $error');
-      Fluttertoast.showToast(msg: 'Error fetching project data');
+      AppNotification.show(context, 'Error fetching project data');
       setState(() {
         _isLoading = false;
       });
@@ -77,15 +77,15 @@ class _ProjectSettingsState extends State<ProjectSettings> {
           })),
         );
         if (response.statusCode == 200) {
-          Fluttertoast.showToast(msg: 'Project updated successfully');
+          AppNotification.show(context, 'Project updated successfully');
         } else {
           final errorData = json.decode(response.body);
           throw Exception(errorData['detail'] ?? 'Unknown error occurred');
         }
       } catch (error) {
         print('Error updating project: $error');
-        Fluttertoast.showToast(
-            msg: 'Error updating project: ${error.toString()}');
+        AppNotification.show(
+            context, 'Error updating project: ${error.toString()}');
       } finally {
         setState(() {
           _isLoading = false;
@@ -131,7 +131,7 @@ class _ProjectSettingsState extends State<ProjectSettings> {
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
-        Fluttertoast.showToast(msg: 'Project deleted successfully');
+        AppNotification.show(context, 'Project deleted successfully');
         Provider.of<AppState>(context, listen: false).setCurrentProject(null);
         Navigator.pushReplacementNamed(context, '/projects');
       } else {
@@ -139,7 +139,7 @@ class _ProjectSettingsState extends State<ProjectSettings> {
       }
     } catch (error) {
       print('Error deleting project: $error');
-      Fluttertoast.showToast(msg: 'Error deleting project');
+      AppNotification.show(context, 'Error deleting project');
     } finally {
       setState(() {
         _isLoading = false;

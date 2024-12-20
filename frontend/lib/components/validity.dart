@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import 'package:fluttertoast/fluttertoast.dart';
+import '../utils/notifications.dart';
 
 class Validity extends StatefulWidget {
   final String projectId;
@@ -102,7 +102,7 @@ class _ValidityState extends State<Validity> {
           _isLoading = false;
           _error = 'Failed to fetch validity checks';
         });
-        Fluttertoast.showToast(msg: 'Error fetching validity checks');
+        AppNotification.show(context, 'Error fetching validity checks');
       }
     } catch (error) {
       if (!_mounted) return;
@@ -111,7 +111,7 @@ class _ValidityState extends State<Validity> {
         _error = error.toString();
       });
       print('Error fetching validity checks: $error');
-      Fluttertoast.showToast(msg: 'Error fetching validity checks');
+      AppNotification.show(context, 'Error fetching validity checks');
     }
   }
 
@@ -135,15 +135,15 @@ class _ValidityState extends State<Validity> {
             _selectedCheck = null;
           }
         });
-        Fluttertoast.showToast(msg: 'Validity check deleted successfully');
+        AppNotification.show(context, 'Validity check deleted successfully');
       } else {
         final errorMessage = json.decode(response.body)['detail'] ??
             'Error deleting validity check';
-        Fluttertoast.showToast(msg: errorMessage);
+        AppNotification.show(context, errorMessage);
       }
     } catch (error) {
       print('Error deleting validity check: $error');
-      Fluttertoast.showToast(msg: 'Error deleting validity check');
+      AppNotification.show(context, 'Error deleting validity check');
     }
   }
 
