@@ -176,10 +176,11 @@ class _MyAppState extends State<MyApp>
   Future<void> _cleanupAndExit() async {
     Logger('main').info('Application shutting down...');
     _preventExit = false;
-    
+
     try {
       await ServerManager.stopServer();
-      await Future.delayed(const Duration(seconds: 2)); // Add delay after server stop
+      await Future.delayed(
+          const Duration(seconds: 2)); // Add delay after server stop
       await ServerManager.dispose();
       await windowManager.destroy();
       exit(0);
@@ -211,8 +212,8 @@ class _MyAppState extends State<MyApp>
       ],
       routes: {
         '/': (context) => const AuthWrapper(),
-        '/landing': (context) => const LandingScreen(),
-        '/projects': (context) => const ProjectsScreen(),
+        '/landing': (context) => LandingScreen(),
+        '/projects': (context) => ProjectsScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => LoginScreen(onLogin: (token) {
               final appState = Provider.of<AppState>(context, listen: false);

@@ -137,19 +137,23 @@ Future<bool> refreshSession() async {
     final session = supabase.Supabase.instance.client.auth.currentSession;
     if (session == null) return false;
 
-    // Check if token needs refresh
-    if (session.accessToken.isEmpty ||
-        JwtDecoder.isExpired(session.accessToken)) {
-      // Attempt to refresh the session
-      await supabase.Supabase.instance.client.auth.refreshSession();
+    // Always try to refresh the session on app restart
+    await supabase.Supabase.instance.client.auth.refreshSession();
 
-      // Get new session
-      final newSession = supabase.Supabase.instance.client.auth.currentSession;
-      return newSession != null &&
-          !JwtDecoder.isExpired(newSession.accessToken);
+    // Get new session
+    final newSession = supabase.Supabase.instance.client.auth.currentSession;
+    if (newSession != null) {
+      // Update the stored token with the new one
+      final appState =
+          Provider.of<AppState>(navigatorKey.currentContext!, listen: false);
+      appState.setToken(newSession.accessToken);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('access_token', newSession.accessToken);
+
+      return true;
     }
-
-    return true;
+    return false;
   } catch (e) {
     print('Error refreshing session: $e');
     return false;
@@ -166,12 +170,21 @@ Future<bool> validateSession() async {
       return false;
     }
 
-    // Changed from 5 minutes to 6 hours to match server
+    // First try to refresh the Supabase session
+    final refreshResult = await refreshSession();
+    if (!refreshResult) {
+      return false;
+    }
+
+    // Then check if we need to extend the local session
     if (JwtDecoder.isExpired(token) ||
         JwtDecoder.getExpirationDate(token).difference(DateTime.now()).inHours <
             6) {
       // Attempt to extend session
-      await _extendSession();
+      final extendResult = await _extendSession();
+      if (!extendResult) {
+        return false;
+      }
     }
     return true;
   } catch (e) {
@@ -180,7 +193,7 @@ Future<bool> validateSession() async {
   }
 }
 
-Future<void> _extendSession() async {
+Future<bool> _extendSession() async {
   try {
     final response = await http.post(
       Uri.parse('$apiUrl/auth/extend-session'),
@@ -191,10 +204,13 @@ Future<void> _extendSession() async {
       // We only need to handle session ID
       if (data['session_id'] != null) {
         await setSessionId(data['session_id']);
+        return true;
       }
     }
+    return false;
   } catch (e) {
     print('Error extending session: $e');
+    return false;
   }
 }
 
