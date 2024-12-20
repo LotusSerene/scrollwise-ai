@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'dart:async';
-import 'dart:convert';
 import 'package:logging/logging.dart';
+import 'config_handler.dart';
 
 class ServerManager {
   static final _logger = Logger('ServerManager');
@@ -17,10 +17,10 @@ class ServerManager {
     final String appDir = path.dirname(Platform.resolvedExecutable);
     final logsDir = path.join(appDir, 'logs');
     final logPath = path.join(logsDir, 'client.log');
-    
+
     // Ensure logs directory exists
     await Directory(logsDir).create(recursive: true);
-    
+
     // If client.log exists, rename it with timestamp
     final logFile = File(logPath);
     if (await logFile.exists()) {
@@ -30,23 +30,23 @@ class ServerManager {
           '${now.hour.toString().padLeft(2, '0')}-'
           '${now.minute.toString().padLeft(2, '0')}-'
           '${now.second.toString().padLeft(2, '0')}';
-      
+
       final newLogPath = path.join(logsDir, 'client_$timestamp.log');
       await logFile.rename(newLogPath);
       _logger.info('Previous log file renamed to: $newLogPath');
     }
-    
+
     // Create new log file
     _logFile = File(logPath).openWrite(mode: FileMode.write);
-    
+
     Logger.root.level = Level.ALL;
     Logger.root.onRecord.listen((record) {
       final time = record.time.toIso8601String();
       final message = '[$time] ${record.level.name}: ${record.message}';
-      
+
       // Write to console
       print(message);
-      
+
       // Write to file
       _logFile?.writeln(message);
       if (record.error != null) {
@@ -56,67 +56,19 @@ class ServerManager {
         _logFile?.writeln('Stack trace:\n${record.stackTrace}');
       }
     });
-    
+
     _logger.info('Logging initialized. Log file: $logPath');
   }
 
-  static Future<void> startServer() async {
-    if (_isRunning) {
-      _logger.info('Server is already running');
-      return;
-    }
+  static Future<Process> startServer() async {
+    final envVars = ConfigHandler.getEnvVars();
 
-    try {
-      _logger.info('Attempting to start server...');
-      final String appDir = path.dirname(Platform.resolvedExecutable);
-      final String serverExe = path.join(appDir, 'python', 'server.exe');
-      final String backendDir = path.join(appDir, 'backend');
-
-      _logger.fine('Server executable path: $serverExe');
-      _logger.fine('Working directory: $backendDir');
-      _logger.fine('Application directory: $appDir');
-
-      // Verify the server.exe exists
-      if (!File(serverExe).existsSync()) {
-        throw Exception('server.exe not found at $serverExe');
-      }
-
-      // Start the server process
-      _serverProcess = await Process.start(
-        serverExe,
-        [],
-        workingDirectory: backendDir,
-      );
-
-      // Listen to stdout
-      _serverProcess!.stdout.transform(utf8.decoder).listen((data) {
-        _logger.info('Server stdout: $data');
-      });
-
-      // Listen to stderr
-      _serverProcess!.stderr.transform(utf8.decoder).listen((data) {
-        _logger.severe('Server stderr: $data');
-      });
-
-      // Listen for process exit
-      _serverProcess!.exitCode.then((code) {
-        _logger.info('Server process exited with code: $code');
-        _isRunning = false;
-      });
-
-      _logger.info('Server process started with PID: ${_serverProcess?.pid}');
-
-      // Keep the server process alive
-      _keepServerAlive();
-
-      _isRunning = true;
-
-      // Wait for server to be ready
-      await _waitForServer();
-    } catch (e, stackTrace) {
-      _logger.severe('Failed to start server', e, stackTrace);
-      throw Exception('Failed to start server: $e');
-    }
+    return await Process.start(
+      'python/server/server.exe',
+      [],
+      environment: envVars, // Pass config values as environment variables
+      workingDirectory: await getInstallPath(),
+    );
   }
 
   static void _keepServerAlive() {
@@ -146,20 +98,21 @@ class ServerManager {
         final request = await client.post('localhost', serverPort, '/shutdown');
         final response = await request.close();
         await response.drain<void>();
-        
+
         _logger.info('Shutdown request sent, waiting for server to stop...');
-        
+
         // Wait a bit for the server to shutdown gracefully
         await Future.delayed(const Duration(seconds: 2));
-        
+
         // If server is still running after graceful shutdown attempt, force kill it
         if (await _isServerResponding()) {
-          _logger.warning('Server still running after graceful shutdown, forcing termination...');
+          _logger.warning(
+              'Server still running after graceful shutdown, forcing termination...');
           await _forceKillServer();
         } else {
           _logger.info('Server stopped gracefully');
         }
-        
+
         client.close();
       } catch (e) {
         _logger.warning('Graceful shutdown failed, forcing termination: $e');
@@ -168,7 +121,6 @@ class ServerManager {
 
       _isRunning = false;
       _logger.info('Server process terminated');
-      
     } catch (e, stackTrace) {
       _logger.severe('Error during server shutdown', e, stackTrace);
     } finally {
@@ -180,15 +132,13 @@ class ServerManager {
   // Add this helper method for force killing
   static Future<void> _forceKillServer() async {
     if (_serverProcess == null) return;
-    
+
     if (Platform.isWindows) {
       try {
         final result = await Process.run(
-          'taskkill', 
-          ['/F', '/T', '/PID', '${_serverProcess!.pid}'],
-          runInShell: true
-        );
-        
+            'taskkill', ['/F', '/T', '/PID', '${_serverProcess!.pid}'],
+            runInShell: true);
+
         _logger.info('Taskkill result: ${result.stdout}');
         if (result.exitCode != 0) {
           _logger.severe('Taskkill error: ${result.stderr}');
@@ -265,5 +215,24 @@ class ServerManager {
   static Future<void> dispose() async {
     await _logFile?.flush();
     await _logFile?.close();
+  }
+
+  static Future<String> getInstallPath() async {
+    if (Platform.isWindows) {
+      // Check common installation paths
+      final programFiles = Platform.environment['ProgramFiles'];
+      final possiblePaths = [
+        path.join(programFiles ?? '', 'ScrollWise AI'),
+        path.join(programFiles ?? '', 'ScrollWise'),
+        path.dirname(Platform.resolvedExecutable),
+      ];
+
+      for (final dir in possiblePaths) {
+        if (await Directory(dir).exists()) {
+          return dir;
+        }
+      }
+    }
+    return path.dirname(Platform.resolvedExecutable);
   }
 }

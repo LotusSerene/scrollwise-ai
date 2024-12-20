@@ -54,3 +54,7 @@ changelog.md
 
 # Temp
 ScrollWise/
+passwords
+backend/encrypt_config.py
+backend/config.key
+backend/config.enc

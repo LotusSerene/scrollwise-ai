@@ -7,20 +7,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
-from cryptography.fernet import Fernet
 from sqlalchemy import select, and_
 
 
 import json
 import os
-from dotenv import load_dotenv
 import uuid
 from typing import Optional, List, Dict, Any
-from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 from models import CodexItemType, WorldbuildingSubtype
 from database import User, Chapter, Project, CodexItem
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -32,7 +28,6 @@ from pydantic import BaseModel, Field, ValidationError, EmailStr
 from agent_manager import AgentManager, PROCESS_TYPES
 from api_key_manager import ApiKeyManager, SecurityManager
 from database import db_instance
-from vector_store import VectorStore
 from models import CodexItemType, WorldbuildingSubtype
 
 from PyPDF2 import PdfReader
@@ -41,12 +36,9 @@ import pdfplumber
 import io
 
 import sys
-import subprocess
 import signal
 import psutil
 
-# Load environment variables
-load_dotenv()
 
 
 #OAuth2

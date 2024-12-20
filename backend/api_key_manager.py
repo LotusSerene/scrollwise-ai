@@ -11,11 +11,31 @@ logger = logging.getLogger(__name__)
 
 class SecurityManager:
     def __init__(self):
-        encryption_key = os.getenv('ENCRYPTION_KEY')
-        if not encryption_key:
-            encryption_key = Fernet.generate_key()
-            logger.warning("No ENCRYPTION_KEY found in environment, generated new key")
-        self.fernet = Fernet(encryption_key)
+        self.key_path = os.path.join(os.path.dirname(__file__), 'encryption.key')
+        self.fernet = self._initialize_encryption()
+
+    def _initialize_encryption(self) -> Fernet:
+        try:
+            # Try to load existing key
+            if os.path.exists(self.key_path):
+                with open(self.key_path, 'rb') as key_file:
+                    encryption_key = key_file.read()
+            else:
+                # Generate new key if none exists
+                encryption_key = Fernet.generate_key()
+                # Save key securely with restricted permissions
+                with open(self.key_path, 'wb') as key_file:
+                    key_file.write(encryption_key)
+                # Set file permissions (on Unix systems)
+                if os.name != 'nt':  # not Windows
+                    os.chmod(self.key_path, 0o600)
+                logger.info("Generated new encryption key")
+
+            return Fernet(encryption_key)
+
+        except Exception as e:
+            logger.error(f"Error initializing encryption: {e}")
+            raise
 
     def encrypt_data(self, data: str) -> str:
         try:
@@ -69,3 +89,4 @@ class ApiKeyManager:
         except Exception as e:
             logger.error(f"Error retrieving API key: {e}")
             raise HTTPException(status_code=500, detail="Error retrieving API key")
+        

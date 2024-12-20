@@ -1,3 +1,4 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'config_handler.dart';
 
-final String apiUrl = dotenv.get('API_URL', fallback: 'http://localhost:8080');
+final String apiUrl =
+    ConfigHandler.get('API_URL', fallback: 'http://localhost:8080');

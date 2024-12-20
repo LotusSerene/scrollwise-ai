@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:io';
 import 'dart:async';
 import 'package:provider/provider.dart';
@@ -26,6 +25,8 @@ import 'utils/server_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:protocol_handler/protocol_handler.dart';
+import 'utils/config_handler.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -59,13 +60,12 @@ Future<void> main() async {
   }
 
   try {
-    await dotenv.load();
     await ServerManager.startServer();
 
     // Initialize Supabase
     await supabase.Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL'] ?? '',
-      anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+      url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
+      anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
     );
 
     // Force the window to stay open
@@ -85,6 +85,12 @@ Future<void> main() async {
         WidgetsBinding.instance.scheduleFrame();
       });
     }
+
+    // Create instance using singleton constructor
+    final protocolHandler = ProtocolHandler.instance;
+
+    // Then register
+    await protocolHandler.register('scrollwise');
 
     runApp(
       MultiProvider(
@@ -263,3 +269,14 @@ class AuthWrapper extends StatelessWidget {
 
 // Add this class to handle app lifecycle
 class _ServerLifecycleObserver extends NavigatorObserver {}
+
+// Add handler for verification
+void handleVerificationUrl(Uri uri) {
+  if (uri.host == 'verify') {
+    final token = uri.queryParameters['token'];
+    if (token != null) {
+      // Navigate to verification screen or handle token
+      navigatorKey.currentState?.pushNamed('/login', arguments: token);
+    }
+  }
+}

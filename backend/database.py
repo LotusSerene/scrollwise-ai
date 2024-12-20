@@ -11,7 +11,6 @@ import uuid
 from typing import Optional, List, Dict, Any
 from models import CodexItemType
 from supabase import create_client, Client
-
 load_dotenv()
 
 Base = declarative_base()
@@ -27,8 +26,6 @@ class User(Base):
     
 
     projects = relationship("Project", back_populates="user")
-
-
 
 class Project(Base):
     __tablename__ = 'projects'
@@ -69,8 +66,6 @@ class Project(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
         return base_dict
-
-
 
 class Chapter(Base):
     __tablename__ = 'chapters'
@@ -210,6 +205,7 @@ class Universe(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
 class ProcessedChapter(Base):
     __tablename__ = 'processed_chapters'
     id = Column(String, primary_key=True)
@@ -316,7 +312,6 @@ class CharacterBackstory(Base):
             'chapter_id': self.chapter_id,
             'created_at': self.created_at.isoformat()
         }
-
 
 class CharacterRelationshipAnalysis(Base):
     __tablename__ = 'character_relationship_analyses'
@@ -460,8 +455,6 @@ class ConnectionService:
             self.logger.error(f"Error getting connections: {str(e)}")
             raise
 
-
-
 class KnowledgeBaseItem(Base):
     __tablename__ = 'knowledge_base_items'
     id = Column(String, primary_key=True)
@@ -473,17 +466,15 @@ class Database:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
         
-        # Initialize Supabase client
+        # Initialize credentials
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        if not supabase_url or not supabase_key:
-            raise ValueError("Missing Supabase credentials in environment variables")
         self.supabase: Client = create_client(supabase_url, supabase_key)
     
         
         # Initialize async SQLAlchemy engine
         self.engine = create_async_engine(
-            os.getenv('DATABASE_URL', "sqlite+aiosqlite:///local.db"),
+            "sqlite+aiosqlite:///local.db",
             echo=False
         )
         

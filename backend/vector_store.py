@@ -8,6 +8,11 @@ import logging
 from chromadb.config import Settings
 import chromadb
 
+# Constants for Chroma configuration
+CHROMA_HOST = "localhost"
+CHROMA_PORT = 8000
+CHROMA_URL = f"http://{CHROMA_HOST}:{CHROMA_PORT}"
+
 def flatten_metadata(metadata):
     flattened = {}
     for key, value in metadata.items():
@@ -21,10 +26,9 @@ def flatten_metadata(metadata):
 
 class VectorStore:
     def __init__(self, user_id, project_id, api_key, embeddings_model):
-        self.chroma_url = os.getenv("CHROMA_SERVER_URL", "http://localhost:8000")
-        parsed_url = self.chroma_url.replace("http://", "").replace("https://", "")
-        self.host = parsed_url.split(':')[0]
-        self.chroma_port = int(os.getenv("CHROMA_SERVER_PORT", "8000"))
+        self.chroma_url = CHROMA_URL
+        self.host = CHROMA_HOST
+        self.chroma_port = CHROMA_PORT
         self.user_id = user_id
         self.project_id = project_id
         self.api_key = api_key

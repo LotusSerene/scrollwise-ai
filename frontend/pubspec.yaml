@@ -51,6 +51,8 @@ dependencies:
   supabase_flutter: ^1.10.25
   logging: ^1.2.0
   window_manager: ^0.4.0
+  protocol_handler: ^0.1.5
+  encrypt: ^5.0.3
 
 dev_dependencies:
   flutter_test:
