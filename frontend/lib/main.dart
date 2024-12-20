@@ -22,7 +22,6 @@ import 'providers/relationship_provider.dart';
 import 'screens/timeline_screen.dart';
 import 'screens/landing_screen.dart';
 import 'utils/server_manager.dart';
-import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:protocol_handler/protocol_handler.dart';
@@ -60,7 +59,9 @@ Future<void> main() async {
   }
 
   try {
+    Logger('main').info('Starting server...');
     await ServerManager.startServer();
+    Logger('main').info('Server started successfully');
 
     // Initialize Supabase
     await supabase.Supabase.initialize(
