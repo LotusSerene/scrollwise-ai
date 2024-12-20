@@ -176,10 +176,17 @@ class _MyAppState extends State<MyApp>
   Future<void> _cleanupAndExit() async {
     Logger('main').info('Application shutting down...');
     _preventExit = false;
-    await ServerManager.stopServer();
-    await ServerManager.dispose();
-    await windowManager.destroy();
-    exit(0);
+    
+    try {
+      await ServerManager.stopServer();
+      await Future.delayed(const Duration(seconds: 2)); // Add delay after server stop
+      await ServerManager.dispose();
+      await windowManager.destroy();
+      exit(0);
+    } catch (e, stack) {
+      Logger('main').severe('Error during cleanup', e, stack);
+      exit(1);
+    }
   }
 
   @override

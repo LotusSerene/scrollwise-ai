@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'dart:async';
+import 'dart:convert';
 import 'package:logging/logging.dart';
 import 'config_handler.dart';
 
@@ -61,14 +62,42 @@ class ServerManager {
   }
 
   static Future<Process> startServer() async {
-    final envVars = ConfigHandler.getEnvVars();
+    if (_serverProcess != null) {
+      _logger
+          .warning('Attempting to start server while previous instance exists');
+      await stopServer();
+      await Future.delayed(const Duration(seconds: 2));
+    }
 
-    return await Process.start(
-      'python/server/server.exe',
-      [],
-      environment: envVars, // Pass config values as environment variables
-      workingDirectory: await getInstallPath(),
-    );
+    final envVars = ConfigHandler.getEnvVars();
+    _logger.info('Starting server with environment variables configured');
+
+    try {
+      _serverProcess = await Process.start(
+        'python/server/server.exe',
+        [],
+        environment: envVars,
+        workingDirectory: await getInstallPath(),
+      );
+
+      // Add stdout and stderr logging
+      _serverProcess!.stdout.transform(utf8.decoder).listen((data) {
+        _logger.info('Server stdout: $data');
+      });
+      _serverProcess!.stderr.transform(utf8.decoder).listen((data) {
+        _logger.warning('Server stderr: $data');
+      });
+
+      _isRunning = true;
+      _keepAlive = true;
+      _keepServerAlive();
+
+      await _waitForServer(); // Wait for server to be ready
+      return _serverProcess!;
+    } catch (e, stack) {
+      _logger.severe('Failed to start server', e, stack);
+      throw Exception('Failed to start server: $e');
+    }
   }
 
   static void _keepServerAlive() {
@@ -84,48 +113,26 @@ class ServerManager {
   }
 
   static Future<void> stopServer() async {
-    if (_isShuttingDown) return;
-    _keepAlive = false;
-    if (!_isRunning) return;
+    if (_isShuttingDown) {
+      _logger.info('Server already shutting down, skipping...');
+      return;
+    }
 
     try {
       _isShuttingDown = true;
-      _logger.info('Initiating server shutdown sequence...');
+      _keepAlive = false;
+      _logger.info('Stopping server...');
 
-      // Try graceful shutdown first
-      try {
-        final client = HttpClient();
-        final request = await client.post('localhost', serverPort, '/shutdown');
-        final response = await request.close();
-        await response.drain<void>();
-
-        _logger.info('Shutdown request sent, waiting for server to stop...');
-
-        // Wait a bit for the server to shutdown gracefully
-        await Future.delayed(const Duration(seconds: 2));
-
-        // If server is still running after graceful shutdown attempt, force kill it
-        if (await _isServerResponding()) {
-          _logger.warning(
-              'Server still running after graceful shutdown, forcing termination...');
-          await _forceKillServer();
-        } else {
-          _logger.info('Server stopped gracefully');
-        }
-
-        client.close();
-      } catch (e) {
-        _logger.warning('Graceful shutdown failed, forcing termination: $e');
+      if (_serverProcess != null) {
         await _forceKillServer();
+        _serverProcess = null;
       }
 
       _isRunning = false;
-      _logger.info('Server process terminated');
-    } catch (e, stackTrace) {
-      _logger.severe('Error during server shutdown', e, stackTrace);
+    } catch (e, stack) {
+      _logger.severe('Error stopping server', e, stack);
     } finally {
       _isShuttingDown = false;
-      _serverProcess = null;
     }
   }
 

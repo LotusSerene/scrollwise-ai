@@ -40,7 +40,6 @@ import signal
 import psutil
 
 
-
 #OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
@@ -56,19 +55,21 @@ def setup_logging():
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         new_log_path = os.path.join(log_dir, f'server_{timestamp}.log')
         os.rename(log_path, new_log_path)
-        logger.info(f'Previous log file renamed to: {new_log_path}')
     
     # Configure logging with the new file
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_path),
-            logging.StreamHandler()
+            logging.FileHandler(log_path, mode='a'),  # Add mode='a' for append
+            logging.StreamHandler(sys.stdout)  # Change to sys.stdout for console output
         ]
     )
     
-    return logging.getLogger(__name__)
+    # Create and return the logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)  # Ensure logger level is set
+    return logger
 
 # Initialize logging
 logger = setup_logging()
