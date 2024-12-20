@@ -58,3 +58,4 @@ passwords
 backend/encrypt_config.py
 backend/config.key
 backend/config.enc
+frontend/build_frontend.bat
