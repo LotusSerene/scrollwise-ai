@@ -24,9 +24,7 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 - Relationship mapping between story elements
 
 ### Cross-Platform
-- Available for Windows, macOS, Linux
-- Web version accessible through modern browsers
-- Mobile-responsive design
+- Available for Windows only (Cross-platform coming soon)
 
 ## 🚀 Getting Started
 
@@ -82,7 +80,7 @@ flutter run
 - SQLAlchemy
 - LangChain
 - ChromaDB for vector storage
-- Various AI models for content generation
+- Gemini AI API
 
 ## 🤝 Contributing
 
