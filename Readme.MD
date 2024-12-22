@@ -110,9 +110,9 @@ This means:
 
 ## 🌐 Links
 
-- [Official Website](https://scrollwise.ai)
+- [Official Website](https://scrollwise.netlify.app/)
 - [Discord](https://discord.gg/QHkAMkss)
-- [Changelog](https://github.com/LotusSerene/scrollwise-ai/changelog.md)
+- [Changelog](https://github.com/LotusSerene/scrollwise-ai/blob/master/changelog.md)
 
 ## 💝 Support the Project
 
