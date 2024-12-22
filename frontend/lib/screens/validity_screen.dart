@@ -9,7 +9,12 @@ class ValidityScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Validity')),
-      body: Validity(projectId: projectId),
+      body: SafeArea(
+        child: Container(
+          color: Theme.of(context).colorScheme.background,
+          child: Validity(projectId: projectId),
+        ),
+      ),
     );
   }
 }

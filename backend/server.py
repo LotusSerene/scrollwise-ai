@@ -1463,7 +1463,7 @@ async def save_model_settings(settings: ModelSettings, current_user: User = Depe
 # Preset routes
 
 
-@preset_router.post("/")
+@preset_router.post("")
 async def create_preset(preset: PresetCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         preset_id = await db_instance.create_preset(current_user.id, project_id, preset.name, preset.data)

@@ -141,7 +141,8 @@ class _CreateChapterState extends State<CreateChapter> {
       AppNotification.show(context, 'Preset saved successfully');
       _newPresetNameController.clear();
     } catch (e) {
-      AppNotification.show(context, 'Error saving preset: $e');
+      print('Error saving preset: $e');
+      AppNotification.show(context, 'Error saving preset: ${e.toString()}');
     }
   }
 

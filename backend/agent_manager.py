@@ -1788,3 +1788,22 @@ class AgentManager:
         except Exception as e:
             self.logger.error(f"Error analyzing location connections: {str(e)}")
             return []
+
+    async def _process_embedding_batch(self):
+        """Process a batch of embeddings and add them to the vector store."""
+        try:
+            if not self._embedding_batch:
+                return
+            
+            # Process all items in the current batch
+            for content, metadata in self._embedding_batch:
+                await self.vector_store.add_to_knowledge_base(content, metadata=metadata)
+            
+            # Clear the batch after processing
+            self._embedding_batch = []
+            
+        except Exception as e:
+            self.logger.error(f"Error processing embedding batch: {str(e)}")
+            # Clear the batch even if there's an error to prevent getting stuck
+            self._embedding_batch = []
+            raise

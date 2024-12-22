@@ -96,10 +96,10 @@ class PresetProvider with ChangeNotifier {
         }),
       );
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
+      if (response.statusCode == 200) {
         await fetchPresets(projectId);
       } else {
-        throw Exception('Failed to save preset');
+        throw Exception('Failed to save preset: ${response.body}');
       }
     } catch (error) {
       print('Error saving preset: $error');

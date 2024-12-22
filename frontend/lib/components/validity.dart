@@ -164,15 +164,20 @@ class _ValidityState extends State<Validity> {
       return _buildErrorState();
     }
 
-    return Column(
-      children: [
-        _buildHeader(),
-        Expanded(
-          child: _validityChecks.isEmpty
-              ? _buildEmptyState()
-              : _buildValidityList(),
+    return Container(
+      color: Theme.of(context).colorScheme.background,
+      child: SizedBox.expand(
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: _validityChecks.isEmpty
+                  ? _buildEmptyState()
+                  : _buildValidityList(),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
