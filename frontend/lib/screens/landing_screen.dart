@@ -123,9 +123,12 @@ class LandingScreen extends StatelessWidget {
               ),
               const SizedBox(width: 16),
               IconButton.filled(
-                onPressed: () {
-                  // TODO: Add GitHub repository link
-                  print('GitHub link clicked');
+                onPressed: () async {
+                  final Uri url =
+                      Uri.parse('https://github.com/LotusSerene/scrollwise-ai');
+                  if (!await launchUrl(url)) {
+                    throw Exception('Could not launch $url');
+                  }
                 },
                 icon: const Icon(Icons.developer_mode),
                 iconSize: 32,
