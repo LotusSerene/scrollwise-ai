@@ -80,7 +80,7 @@ flutter run
 - SQLAlchemy
 - LangChain
 - ChromaDB for vector storage
-- Various AI models for content generation
+- Gemini AI API
 
 ## 🤝 Contributing
 
