@@ -1478,7 +1478,7 @@ async def create_preset(preset: PresetCreate, project_id: str, current_user: Use
 async def get_presets(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         presets = await db_instance.get_presets(current_user.id, project_id)
-        return presets
+        return {"presets": presets}  # Return presets in an object
     except Exception as e:
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
