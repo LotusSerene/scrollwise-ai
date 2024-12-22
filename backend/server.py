@@ -1474,7 +1474,7 @@ async def create_preset(preset: PresetCreate, project_id: str, current_user: Use
         logger.error(f"Error creating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@preset_router.get("/")
+@preset_router.get("")
 async def get_presets(project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         presets = await db_instance.get_presets(current_user.id, project_id)
