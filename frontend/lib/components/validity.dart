@@ -164,20 +164,15 @@ class _ValidityState extends State<Validity> {
       return _buildErrorState();
     }
 
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      child: SizedBox.expand(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _validityChecks.isEmpty
-                  ? _buildEmptyState()
-                  : _buildValidityList(),
-            ),
-          ],
+    return Column(
+      children: [
+        _buildHeader(),
+        Expanded(
+          child: _validityChecks.isEmpty
+              ? _buildEmptyState()
+              : _buildValidityList(),
         ),
-      ),
+      ],
     );
   }
 
@@ -222,70 +217,78 @@ class _ValidityState extends State<Validity> {
   }
 
   Widget _buildValidityList() {
-    return ListView.builder(
-      controller: _scrollController,
-      itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
-      padding: const EdgeInsets.all(16),
-      itemBuilder: (context, index) {
-        if (index == _displayedChecks.length) {
-          return _buildLoadingIndicator();
-        }
+    return Container(
+      color: Theme.of(context).colorScheme.background,
+      child: ListView.builder(
+        controller: _scrollController,
+        itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == _displayedChecks.length) {
+            return _buildLoadingIndicator();
+          }
 
-        final check = _displayedChecks[index];
-        final isValid = check['isValid'] as bool;
+          final check = _displayedChecks[index];
+          final isValid = check['isValid'] as bool;
 
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.only(bottom: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: InkWell(
-            onTap: () => _showValidityDetails(check),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Card(
+              elevation: 1,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                ),
+              ),
+              child: InkWell(
+                onTap: () => _showValidityDetails(check),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        isValid ? Icons.check_circle : Icons.error,
-                        color: isValid
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.error,
+                      Row(
+                        children: [
+                          Icon(
+                            isValid ? Icons.check_circle : Icons.error,
+                            color: isValid
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              check['chapterTitle'],
+                              style: Theme.of(context).textTheme.titleMedium,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete),
+                            onPressed: () => _showDeleteDialog(check['id']),
+                            tooltip: 'Delete check',
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          check['chapterTitle'],
-                          style: Theme.of(context).textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () => _showDeleteDialog(check['id']),
-                        tooltip: 'Delete check',
+                      const SizedBox(height: 8),
+                      _buildScoreIndicator(check),
+                      const SizedBox(height: 12),
+                      Text(
+                        check['generalFeedback'] ?? 'No feedback available',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  _buildScoreIndicator(check),
-                  const SizedBox(height: 12),
-                  Text(
-                    check['generalFeedback'] ?? 'No feedback available',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
