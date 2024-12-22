@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:logging/logging.dart';
 import 'config_handler.dart';
+import 'package:flutter/foundation.dart';
 
 class ServerManager {
   static final _logger = Logger('ServerManager');
@@ -57,6 +58,23 @@ class ServerManager {
         _logFile?.writeln('Stack trace:\n${record.stackTrace}');
       }
     });
+
+    // Add Flutter error handling
+    FlutterError.onError = (FlutterErrorDetails details) {
+      _logger.severe(
+        'Flutter error: ${details.exception}',
+        details.exception,
+        details.stack,
+      );
+      // Still show errors in debug mode
+      FlutterError.dumpErrorToConsole(details);
+    };
+
+    // Capture uncaught async errors
+    PlatformDispatcher.instance.onError = (error, stack) {
+      _logger.severe('Uncaught async error', error, stack);
+      return true;
+    };
 
     _logger.info('Logging initialized. Log file: $logPath');
   }

@@ -10,10 +10,7 @@ class ValidityScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Validity')),
       body: SafeArea(
-        child: Container(
-          color: Theme.of(context).colorScheme.surface,
-          child: Validity(projectId: projectId),
-        ),
+        child: Validity(projectId: projectId),
       ),
     );
   }

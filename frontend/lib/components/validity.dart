@@ -165,6 +165,7 @@ class _ValidityState extends State<Validity> {
     }
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildHeader(),
         Expanded(
@@ -219,22 +220,23 @@ class _ValidityState extends State<Validity> {
   Widget _buildValidityList() {
     return Container(
       color: Theme.of(context).colorScheme.surface,
-      child: ListView.builder(
+      child: Scrollbar(
         controller: _scrollController,
-        itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index == _displayedChecks.length) {
-            return _buildLoadingIndicator();
-          }
+        child: ListView.builder(
+          padding: const EdgeInsets.all(16),
+          controller: _scrollController,
+          itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index == _displayedChecks.length) {
+              return _buildLoadingIndicator();
+            }
 
-          final check = _displayedChecks[index];
-          final isValid = check['isValid'] as bool;
+            final check = _displayedChecks[index];
+            final isValid = check['isValid'] as bool;
 
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Card(
+            return Card(
               elevation: 1,
-              margin: EdgeInsets.zero,
+              margin: const EdgeInsets.only(bottom: 8),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
@@ -285,15 +287,18 @@ class _ValidityState extends State<Validity> {
                   ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
 
   Widget _buildScoreIndicator(dynamic check) {
-    final overallScore = check['overallScore'] as double? ?? 0.0;
+    final overallScore = (check['overallScore'] is int) 
+        ? (check['overallScore'] as int).toDouble() 
+        : (check['overallScore'] as double?) ?? 0.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -332,9 +337,18 @@ class _ValidityState extends State<Validity> {
   }
 
   void _showValidityDetails(dynamic check) {
+    double convertScore(dynamic score) {
+      if (score == null) return 0.0;
+      return score is int ? score.toDouble() : (score as double);
+    }
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
+        final overallScore = convertScore(check['overallScore']);
+        final styleGuideScore = convertScore(check['styleGuideAdherenceScore']);
+        final continuityScore = convertScore(check['continuityScore']);
+
         return AlertDialog(
           title: Row(
             children: [
@@ -358,11 +372,11 @@ class _ValidityState extends State<Validity> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildDetailItem('Overall Score',
-                    '${((check['overallScore'] ?? 0.0) * 10).toStringAsFixed(1)}%'),
+                    '${(overallScore * 10).toStringAsFixed(1)}%'),
                 _buildDetailItem('Style Guide Score',
-                    '${((check['styleGuideAdherenceScore'] ?? 0.0) * 10).toStringAsFixed(1)}%'),
+                    '${(styleGuideScore * 10).toStringAsFixed(1)}%'),
                 _buildDetailItem('Continuity Score',
-                    '${((check['continuityScore'] ?? 0.0) * 10).toStringAsFixed(1)}%'),
+                    '${(continuityScore * 10).toStringAsFixed(1)}%'),
                 const Divider(),
                 _buildDetailItem('General Feedback',
                     check['generalFeedback'] ?? 'No feedback available'),
