@@ -165,7 +165,7 @@ class _ValidityState extends State<Validity> {
     }
 
     return Container(
-      color: Theme.of(context).colorScheme.background,
+      color: Theme.of(context).colorScheme.surface,
       child: SizedBox.expand(
         child: Column(
           children: [
