@@ -69,6 +69,9 @@ Future<void> main() async {
       anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
     );
 
+    // Add this line to initialize auth state
+    await initializeAuthState();
+
     // Force the window to stay open
     if (Platform.isWindows) {
       await SystemChrome.setPreferredOrientations([
@@ -212,8 +215,8 @@ class _MyAppState extends State<MyApp>
       ],
       routes: {
         '/': (context) => const AuthWrapper(),
-        '/landing': (context) => LandingScreen(),
-        '/projects': (context) => ProjectsScreen(),
+        '/landing': (context) => const LandingScreen(),
+        '/projects': (context) => const ProjectsScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => LoginScreen(onLogin: (token) {
               final appState = Provider.of<AppState>(context, listen: false);
