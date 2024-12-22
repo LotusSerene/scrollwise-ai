@@ -218,7 +218,7 @@ class _ValidityState extends State<Validity> {
 
   Widget _buildValidityList() {
     return Container(
-      color: Theme.of(context).colorScheme.background,
+      color: Theme.of(context).colorScheme.surface,
       child: ListView.builder(
         controller: _scrollController,
         itemCount: _displayedChecks.length + (_isLoadingMore ? 1 : 0),
