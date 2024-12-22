@@ -157,3 +157,7 @@
 ## 0.0.40
 
 - Migrated database from Remote to being local
+
+## 1.0.2-beta
+
+- Fix some issues I came across
