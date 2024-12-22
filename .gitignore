@@ -45,7 +45,6 @@ frontend/chroma_data/
 # Project specific
 chrome_data/
 TODOLIST.md
-changelog.md
 
 # Root level gitignore
 .DS_Store
@@ -53,9 +52,4 @@ changelog.md
 *.log
 
 # Temp
-ScrollWise/
-passwords
-backend/encrypt_config.py
-backend/config.key
-backend/config.enc
 frontend/build_frontend.bat
