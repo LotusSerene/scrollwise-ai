@@ -101,13 +101,30 @@ class ServerManager {
   }
 
   static void _keepServerAlive() {
-    Timer.periodic(const Duration(seconds: 5), (timer) {
+    Timer.periodic(const Duration(seconds: 5), (timer) async {
       if (!_keepAlive) {
         timer.cancel();
         return;
       }
+
       if (_serverProcess != null) {
         _logger.info('Server heartbeat check - PID: ${_serverProcess!.pid}');
+
+        // Actually check if the server is responding
+        final isResponding = await _isServerResponding();
+        if (!isResponding) {
+          _logger.warning('Server not responding, attempting restart...');
+          await stopServer();
+          await Future.delayed(const Duration(seconds: 2));
+          try {
+            await startServer();
+            _logger.info('Server successfully restarted');
+          } catch (e) {
+            _logger.severe('Failed to restart server: $e');
+          }
+        } else {
+          _logger.info('Server health check successful');
+        }
       }
     });
   }
