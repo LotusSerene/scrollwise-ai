@@ -38,7 +38,7 @@
 
 ## 0.0.10
 
-- Introduced project management capabilities, enabling users to create, read, update, and delete projects. Each project functions as a separate instance of the application's frontend, utilizing a unique project ID for backend communication.  User login now directs to a project dashboard, providing access to project-specific homescreens, chat histories, chapters, and other data. Settings remain global and are not project-specific.
+- Introduced project management capabilities, enabling users to create, read, update, and delete projects. Each project functions as a separate instance of the application's frontend, utilizing a unique project ID for backend communication. User login now directs to a project dashboard, providing access to project-specific homescreens, chat histories, chapters, and other data. Settings remain global and are not project-specific.
 
 ## 0.0.11
 
@@ -136,6 +136,23 @@
 
 - Optimized server.py to handle concurrent users efficiently, enabling smooth multi-user functionality.
 
+## Recent Changes
+
+### Refactor
+
+- Migrated `update_codex_item` to use SQLAlchemy (38ee798)
+- Migrated `delete_codex_item` to use SQLAlchemy (81b3c40)
+- Migrated `get_codex_item_by_id` to use SQLAlchemy (1bb33c5)
+- Use SQLAlchemy for API key storage (a3cf53c)
+- Use SQLAlchemy to get and decrypt API key (ada1eaa)
+- Remove API key using SQLAlchemy (ee0c581)
+- Migrated `save_model_settings` to use SQLAlchemy (790f9b3)
+- Update `create_location` to use SQLAlchemy (022e1b5)
+- Migrated `delete_location` method to use SQLAlchemy (b5f12aa)
+
+### Fixes
+
+- Handle missing user in `save_api_key` (7766436)
 
 ## 0.0.40
 
