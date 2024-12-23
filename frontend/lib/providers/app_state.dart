@@ -3,6 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('AppState');
 
 class GenerationState {
   final String type;
@@ -139,8 +142,13 @@ class AppState extends ChangeNotifier {
           body: json.encode({'target_word_count': targetWordCount}),
         );
 
-        if (response.statusCode != 200) {}
-      } catch (error) {}
+        if (response.statusCode != 200) {
+          _logger.severe(
+              'Error updating target word count: ${response.statusCode}');
+        }
+      } catch (error) {
+        _logger.severe('Error updating target word count: $error');
+      }
     }
   }
 
@@ -162,31 +170,11 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       } else {
         // Handle error fetching progress data
-        print('Error fetching progress data: ${response.statusCode}');
+        _logger.severe('Error fetching progress data: ${response.statusCode}');
       }
     } catch (error) {
       // Handle error fetching progress data
-      print('Error fetching progress data: $error');
-    }
-  }
-
-  Future<void> _updateTargetWordCountInBackend(
-      String projectId, int targetWordCount) async {
-    try {
-      final headers = await getAuthHeaders();
-      final response = await http.put(
-        Uri.parse('$apiUrl/projects/$projectId'),
-        headers: headers,
-        body: json.encode({'targetWordCount': targetWordCount}),
-      );
-
-      if (response.statusCode != 200) {
-        // Handle error updating target word count
-        print('Error updating target word count: ${response.statusCode}');
-      }
-    } catch (error) {
-      // Handle error updating target word count
-      print('Error updating target word count: $error');
+      _logger.severe('Error fetching progress data: $error');
     }
   }
 
@@ -217,7 +205,7 @@ class AppState extends ChangeNotifier {
         throw Exception('Failed to fetch chapters: ${response.statusCode}');
       }
     } catch (error) {
-      print('Error fetching chapters: $error');
+      _logger.severe('Error fetching chapters: $error');
       // Rethrow to allow UI to handle the error
       rethrow;
     }
@@ -242,7 +230,7 @@ class AppState extends ChangeNotifier {
         throw Exception('Failed to fetch codex items: ${response.statusCode}');
       }
     } catch (error) {
-      print('Error fetching codex items: $error');
+      _logger.severe('Error fetching codex items: $error');
       rethrow;
     }
   }
@@ -268,7 +256,7 @@ class AppState extends ChangeNotifier {
             'Failed to fetch validity checks: ${response.statusCode}');
       }
     } catch (error) {
-      print('Error fetching validity checks: $error');
+      _logger.severe('Error fetching validity checks: $error');
       rethrow;
     }
   }

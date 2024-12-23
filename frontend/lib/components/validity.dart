@@ -3,7 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Validity');
 
 class Validity extends StatefulWidget {
   final String projectId;
@@ -102,23 +104,21 @@ class _ValidityState extends State<Validity> {
           _isLoading = false;
           _error = 'Failed to fetch validity checks';
         });
-        AppNotification.show(context, 'Error fetching validity checks');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error fetching validity checks')));
       }
     } catch (error) {
-      if (!_mounted) return;
+      if (!mounted) return;
       _safeSetState(() {
         _isLoading = false;
         _error = error.toString();
       });
-      print('Error fetching validity checks: $error');
-      AppNotification.show(context, 'Error fetching validity checks');
+      _logger.severe('Error fetching validity checks: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error fetching validity checks')));
     }
-  }
-
-  void _handleCheckClick(dynamic check) {
-    setState(() {
-      _selectedCheck = check;
-    });
   }
 
   Future<void> _handleDeleteCheck(String checkId) async {
@@ -135,24 +135,21 @@ class _ValidityState extends State<Validity> {
             _selectedCheck = null;
           }
         });
-        AppNotification.show(context, 'Validity check deleted successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Validity check deleted successfully')));
       } else {
-        final errorMessage = json.decode(response.body)['detail'] ??
-            'Error deleting validity check';
-        AppNotification.show(context, errorMessage);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error deleting validity check')));
       }
     } catch (error) {
-      print('Error deleting validity check: $error');
-      AppNotification.show(context, 'Error deleting validity check');
+      _logger.severe('Error deleting validity check: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error deleting validity check')));
     }
   }
-
-  String _formatBool(bool? value) => value == null
-      ? 'N/A'
-      : value
-          ? 'Yes'
-          : 'No';
-  String _formatString(String? value) => value ?? 'N/A';
 
   @override
   Widget build(BuildContext context) {
@@ -295,8 +292,8 @@ class _ValidityState extends State<Validity> {
   }
 
   Widget _buildScoreIndicator(dynamic check) {
-    final overallScore = (check['overallScore'] is int) 
-        ? (check['overallScore'] as int).toDouble() 
+    final overallScore = (check['overallScore'] is int)
+        ? (check['overallScore'] as int).toDouble()
         : (check['overallScore'] as double?) ?? 0.0;
 
     return Column(

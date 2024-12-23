@@ -23,8 +23,8 @@ class CharacterRelationshipCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final characterRelationships = relationships
         .where((relationship) =>
-            relationship.character1_id == characterId ||
-            relationship.character2_id == characterId)
+            relationship.character1Id == characterId ||
+            relationship.character2Id == characterId)
         .toList();
 
     if (characterRelationships.isEmpty) {

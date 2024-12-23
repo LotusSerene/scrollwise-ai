@@ -24,7 +24,7 @@ class LocationList extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _LocationListState createState() => _LocationListState();
+  State<LocationList> createState() => _LocationListState();
 }
 
 class _LocationListState extends State<LocationList> {
@@ -518,101 +518,5 @@ class _LocationListState extends State<LocationList> {
 
   void _deleteLocationConnection(String connectionId) {
     widget.onDeleteConnection(connectionId);
-  }
-
-  Widget _buildLocationConnectionsList(Location location) {
-    final locationConnections = widget.connections
-        .where((conn) =>
-            conn.location1Id == location.id || conn.location2Id == location.id)
-        .toList();
-
-    if (locationConnections.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Divider(),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Text(
-            'Connected Locations',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-        ),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: locationConnections.length,
-          itemBuilder: (context, index) {
-            final conn = locationConnections[index];
-            final connectedLocation = widget.locations.firstWhere(
-              (l) =>
-                  l.id ==
-                  (conn.location1Id == location.id
-                      ? conn.location2Id
-                      : conn.location1Id),
-            );
-
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: ListTile(
-                leading: const Icon(Icons.compare_arrows),
-                title: Text(connectedLocation.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (conn.travelRoute.isNotEmpty)
-                      Text('Travel: ${conn.travelRoute}'),
-                    if (conn.culturalExchange.isNotEmpty)
-                      Text('Exchange: ${conn.culturalExchange}'),
-                  ],
-                ),
-                trailing: PopupMenuButton(
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      child: const Text('Edit'),
-                      onTap: () => _editLocationConnection(conn),
-                    ),
-                    PopupMenuItem(
-                      child: const Text('Delete'),
-                      onTap: () => _showDeleteConnectionDialog(conn.id),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Future<void> _showDeleteConnectionDialog(String connectionId) async {
-    final bool confirm = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Connection'),
-        content: const Text('Are you sure you want to delete this connection?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      widget.onDeleteConnection(connectionId);
-    }
   }
 }

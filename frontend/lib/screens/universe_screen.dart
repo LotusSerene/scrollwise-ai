@@ -4,7 +4,9 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:intl/intl.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Universes');
 
 class UniverseScreen extends StatefulWidget {
   final String universeId;
@@ -12,10 +14,10 @@ class UniverseScreen extends StatefulWidget {
   const UniverseScreen({Key? key, required this.universeId}) : super(key: key);
 
   @override
-  _UniverseScreenState createState() => _UniverseScreenState();
+  UniverseScreenState createState() => UniverseScreenState();
 }
 
-class _UniverseScreenState extends State<UniverseScreen> {
+class UniverseScreenState extends State<UniverseScreen> {
   Map<String, dynamic> _universeData = {};
   List<dynamic> _codexItems = [];
   Map<String, List<dynamic>> _knowledgeBaseItems = {};
@@ -85,12 +87,15 @@ class _UniverseScreenState extends State<UniverseScreen> {
         _isLoading = false;
       });
     } catch (error) {
-      print('Error fetching universe data: $error');
-      AppNotification.show(
-          context, 'Error fetching universe data: ${error.toString()}');
-      setState(() {
-        _isLoading = false;
-      });
+      _logger.severe('Error fetching universe data: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Error fetching universe data: ${error.toString()}')));
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 

@@ -12,10 +12,10 @@ class EditRelationshipDialog extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _EditRelationshipDialogState createState() => _EditRelationshipDialogState();
+  EditRelationshipDialogState createState() => EditRelationshipDialogState();
 }
 
-class _EditRelationshipDialogState extends State<EditRelationshipDialog> {
+class EditRelationshipDialogState extends State<EditRelationshipDialog> {
   late TextEditingController _relationshipTypeController;
   late TextEditingController _descriptionController;
 
@@ -43,7 +43,7 @@ class _EditRelationshipDialogState extends State<EditRelationshipDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-              'Between: ${widget.relationship.character1_name} and ${widget.relationship.character2_name}'),
+              'Between: ${widget.relationship.character1Name} and ${widget.relationship.character2Name}'),
           const SizedBox(height: 16),
           TextField(
             controller: _relationshipTypeController,
@@ -66,10 +66,10 @@ class _EditRelationshipDialogState extends State<EditRelationshipDialog> {
           onPressed: () {
             final updatedRelationship = Relationship(
               id: widget.relationship.id,
-              character1_id: widget.relationship.character1_id,
-              character2_id: widget.relationship.character2_id,
-              character1_name: widget.relationship.character1_name,
-              character2_name: widget.relationship.character2_name,
+              character1Id: widget.relationship.character1Id,
+              character2Id: widget.relationship.character2Id,
+              character1Name: widget.relationship.character1Name,
+              character2Name: widget.relationship.character2Name,
               relationshipType: _relationshipTypeController.text,
               description: _descriptionController.text,
             );

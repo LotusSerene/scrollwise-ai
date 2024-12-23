@@ -9,7 +9,7 @@ class CreateScreen extends StatefulWidget {
   const CreateScreen({Key? key, required this.projectId}) : super(key: key);
 
   @override
-  _CreateScreenState createState() => _CreateScreenState();
+  State<CreateScreen> createState() => _CreateScreenState();
 }
 
 class _CreateScreenState extends State<CreateScreen> {
@@ -53,8 +53,17 @@ class _CreateScreenState extends State<CreateScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _onWillPop().then((shouldPop) {
+            if (shouldPop && context.mounted) {
+              Navigator.of(context).pop();
+            }
+          });
+        }
+      },
       child: Scaffold(
         appBar: AppBar(
           elevation: 0,

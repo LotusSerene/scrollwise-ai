@@ -6,7 +6,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Login');
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLogin;
@@ -14,7 +16,7 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key, required this.onLogin}) : super(key: key);
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
@@ -51,21 +53,15 @@ class _LoginScreenState extends State<LoginScreen> {
             throw Exception('No access token received');
           }
 
-          print('Login response received successfully');
+          // First store the session data
+          await setSessionId(sessionId);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('access_token', accessToken);
 
-          // Initialize session
-          await initializeSession(accessToken, sessionId);
-
-          // Verify authentication state
-          final isAuthenticated = await verifyAuthState();
-          if (!isAuthenticated) {
-            print('Authentication verification failed');
-            throw Exception('Authentication state verification failed');
-          }
-
-          print('Authentication successful, proceeding to projects screen');
+          // Then call onLogin callback
           widget.onLogin(accessToken);
 
+          // Finally navigate (if still mounted)
           if (mounted) {
             Navigator.pushReplacementNamed(context, '/projects');
           }
@@ -74,13 +70,10 @@ class _LoginScreenState extends State<LoginScreen> {
           throw Exception(error['detail'] ?? 'Error logging in');
         }
       } catch (error) {
-        print('Login error: $error');
+        _logger.severe('Login error: $error');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: ${error.toString()}'),
-              duration: const Duration(seconds: 3),
-            ),
+            SnackBar(content: Text('Error: ${error.toString()}')),
           );
         }
       } finally {
@@ -112,31 +105,27 @@ class _LoginScreenState extends State<LoginScreen> {
         if (response.statusCode == 201) {
           final data = json.decode(response.body);
           if (data['needs_verification'] == true) {
-            AppNotification.show(
-              context,
-              'Registration successful! Please check your email to verify your account.',
-            );
-          } else {
-            AppNotification.show(
-              context,
-              'Registration successful! Please wait for admin approval.',
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text(
+                      'Registration successful! Please check your email to verify your account.')));
+            }
           }
           _emailController.clear();
           _passwordController.clear();
         } else {
           final error = json.decode(response.body);
-          AppNotification.show(
-            context,
-            error['detail'] ?? 'Registration failed',
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(error['detail'] ?? 'Registration failed')));
+          }
         }
       } catch (error) {
-        print('Registration error: $error');
-        AppNotification.show(
-          context,
-          error.toString(),
-        );
+        _logger.severe('Registration error: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(error.toString())));
+        }
       } finally {
         if (mounted) {
           setState(() {
@@ -152,35 +141,35 @@ class _LoginScreenState extends State<LoginScreen> {
       final token = await getAuthToken();
       final sessionId = await getSessionId();
 
-      print('Verifying authentication state');
+      _logger.info('Verifying authentication state');
 
       if (token == null || sessionId == null) {
-        print('Missing token or sessionId');
+        _logger.warning('Missing token or sessionId');
         return false;
       }
 
       // Verify token is not expired
       try {
         if (JwtDecoder.isExpired(token)) {
-          print('Token is expired');
+          _logger.warning('Token is expired');
           return false;
         }
 
-        print('Auth state verified successfully');
+        _logger.info('Auth state verified successfully');
         return true;
       } catch (e) {
-        print('Error decoding/verifying token: $e');
+        _logger.severe('Error decoding/verifying token: $e');
         return false;
       }
     } catch (e) {
-      print('Error verifying auth state: $e');
+      _logger.severe('Error verifying auth state: $e');
       return false;
     }
   }
 
   Future<void> initializeSession(String accessToken, String sessionId) async {
     try {
-      print('Initializing session with token and sessionId');
+      _logger.info('Initializing session with token and sessionId');
 
       // Store session ID first
       await setSessionId(sessionId);
@@ -194,13 +183,13 @@ class _LoginScreenState extends State<LoginScreen> {
       final storedToken = await getAuthToken();
       final storedSessionId = await getSessionId();
 
-      print('Session initialized successfully');
+      _logger.info('Session initialized successfully');
 
       if (storedToken == null || storedSessionId == null) {
         throw Exception('Failed to store session credentials');
       }
     } catch (e) {
-      print('Error initializing session: $e');
+      _logger.severe('Error initializing session: $e');
       // Clean up any partial session data
       await removeSessionId();
       throw Exception('Failed to initialize session: $e');
@@ -226,7 +215,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       return response.statusCode == 200;
     } catch (e) {
-      print('Error checking backend session: $e');
+      _logger.severe('Error checking backend session: $e');
       return false;
     }
   }
@@ -236,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getString('access_token');
     } catch (e) {
-      print('Error getting auth token: $e');
+      _logger.severe('Error getting auth token: $e');
       return null;
     }
   }
@@ -246,7 +235,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('access_token');
     } catch (e) {
-      print('Error removing auth token: $e');
+      _logger.severe('Error removing auth token: $e');
     }
   }
 
@@ -261,13 +250,15 @@ class _LoginScreenState extends State<LoginScreen> {
       // Clear any other stored data
       localStorage.clear();
 
-      // go to login screen
-      Navigator.pushReplacementNamed(context, '/login');
-
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
+
+      // Add mounted check before using context
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     } catch (e) {
-      print('Error during sign out: $e');
+      _logger.severe('Error during sign out: $e');
       throw Exception('Failed to sign out');
     }
   }

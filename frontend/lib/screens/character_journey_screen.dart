@@ -4,10 +4,12 @@ import '../models/character.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
-import '../widgets/character_detail_dialog.dart';
 import 'package:expandable/expandable.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('CharacterJourneyScreen');
 
 class CharacterJourneyScreen extends StatefulWidget {
   final String projectId;
@@ -16,7 +18,7 @@ class CharacterJourneyScreen extends StatefulWidget {
       : super(key: key);
 
   @override
-  _CharacterJourneyScreenState createState() => _CharacterJourneyScreenState();
+  State<CharacterJourneyScreen> createState() => _CharacterJourneyScreenState();
 }
 
 class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
@@ -55,6 +57,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading characters: $e')),
       );
@@ -116,17 +119,20 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
       );
 
       if (anyUpdates) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Character information updated')),
         );
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No new information found')),
         );
       }
     } catch (e) {
       appState.updateCharacterJourneyProgress(isGenerating: false);
-      print('Error updating character information: $e');
+      _logger.severe('Error updating character information: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating character information: $e')),
       );
@@ -149,6 +155,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
             characters[index] = characters[index].copyWith(backstory: '');
           }
         });
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backstory deleted successfully')),
         );
@@ -156,11 +163,14 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         throw Exception('Failed to delete backstory');
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error deleting backstory: $e')),
       );
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 
@@ -213,18 +223,21 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
               characters[index] = characters[index].copyWith(backstory: result);
             }
           });
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Backstory updated successfully')),
           );
         } else {
-          print('Error updating backstory: ${response.body}');
+          _logger.severe('Error updating backstory: ${response.body}');
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text('Error updating backstory: ${response.body}')),
           );
         }
       } catch (e) {
-        print('Error updating backstory: $e');
+        _logger.severe('Error updating backstory: $e');
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error updating backstory: $e')),
         );
@@ -232,15 +245,6 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         setState(() => isLoading = false);
       }
     }
-  }
-
-  void _showCharacterDetails(Character character) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return CharacterDetailDialog(character: character);
-      },
-    );
   }
 
   @override

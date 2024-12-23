@@ -99,25 +99,29 @@ class _CodexState extends State<Codex> {
   Future<void> _fetchCodexItems() async {
     if (!_mounted) return;
 
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _error = '';
     });
 
     try {
+      if (!mounted) return;
       await Provider.of<AppState>(context, listen: false)
           .fetchCodexItems(widget.projectId);
 
-      if (_mounted) {
+      if (_mounted && mounted) {
         final appState = Provider.of<AppState>(context, listen: false);
-        setState(() {
-          _codexItems = appState.codexItems;
-          _displayedItems = _codexItems.take(_itemsPerPage).toList();
-          _isLoading = false;
-        });
+        if (_mounted && mounted) {
+          setState(() {
+            _codexItems = appState.codexItems;
+            _displayedItems = _codexItems.take(_itemsPerPage).toList();
+            _isLoading = false;
+          });
+        }
       }
     } catch (error) {
-      if (_mounted) {
+      if (_mounted && mounted) {
         setState(() {
           _error = 'Error fetching codex items: $error';
           _isLoading = false;
@@ -147,6 +151,7 @@ class _CodexState extends State<Codex> {
   }
 
   void _showCodexItemDetails(BuildContext context, dynamic item) {
+    if (!mounted) return;
     final TextEditingController nameController =
         TextEditingController(text: item['name']);
     final TextEditingController descriptionController =
@@ -156,6 +161,10 @@ class _CodexState extends State<Codex> {
     bool isUpdating = false;
 
     Future<void> updateCodexItem(BuildContext context) async {
+      if (!context.mounted) return;
+      final scaffoldMessenger = ScaffoldMessenger.of(context);
+      final navigator = Navigator.of(context);
+
       setState(() {
         isUpdating = true;
       });
@@ -174,29 +183,33 @@ class _CodexState extends State<Codex> {
           }),
         );
 
+        if (!context.mounted) return;
         if (response.statusCode == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          scaffoldMessenger.showSnackBar(
             const SnackBar(content: Text('Codex item updated successfully')),
           );
-          Navigator.of(context).pop(); // Close the dialog
+          navigator.pop(); // Close the dialog
           _fetchCodexItems(); // Refresh the codex items
         } else {
           final responseBody = json.decode(response.body);
           final error = responseBody['detail'] ?? 'Error updating codex item';
-          ScaffoldMessenger.of(context).showSnackBar(
+          scaffoldMessenger.showSnackBar(
             SnackBar(
                 content:
                     Text('Error: $error (Status: ${response.statusCode})')),
           );
         }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (!context.mounted) return;
+        scaffoldMessenger.showSnackBar(
           SnackBar(content: Text('Error updating codex item: $e')),
         );
       } finally {
-        setState(() {
-          isUpdating = false;
-        });
+        if (mounted) {
+          setState(() {
+            isUpdating = false;
+          });
+        }
       }
     }
 
@@ -309,8 +322,10 @@ class _CodexState extends State<Codex> {
   }
 
   Future<void> _deleteSelectedItems() async {
-    // Show a single loading indicator
-    ScaffoldMessenger.of(context).showSnackBar(
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    // Show initial loading indicator
+    scaffoldMessenger.showSnackBar(
       const SnackBar(content: Text('Deleting selected items...')),
     );
 
@@ -319,8 +334,8 @@ class _CodexState extends State<Codex> {
         await deleteCodexItem(context, itemId, showSnackbar: false);
       }
 
-      // Show success message only once
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
         const SnackBar(content: Text('Successfully deleted selected items')),
       );
 
@@ -330,7 +345,8 @@ class _CodexState extends State<Codex> {
       });
       _fetchCodexItems();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
         SnackBar(content: Text('Error deleting items: $e')),
       );
     }
@@ -338,6 +354,10 @@ class _CodexState extends State<Codex> {
 
   Future<void> deleteCodexItem(BuildContext context, String itemId,
       {bool showSnackbar = true}) async {
+    if (!context.mounted) return;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
@@ -345,19 +365,20 @@ class _CodexState extends State<Codex> {
         headers: headers,
       );
 
+      if (!context.mounted) return;
       if (response.statusCode == 200) {
         if (showSnackbar) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          scaffoldMessenger.showSnackBar(
             const SnackBar(content: Text('Codex item deleted successfully')),
           );
-          Navigator.of(context).pop(); // Close the dialog
+          navigator.pop(); // Close the dialog
         }
         _fetchCodexItems();
       } else {
         final responseBody = json.decode(response.body);
         final error = responseBody['detail'] ?? 'Error deleting codex item';
         if (showSnackbar) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          scaffoldMessenger.showSnackBar(
             SnackBar(
                 content:
                     Text('Error: $error (Status: ${response.statusCode})')),
@@ -366,8 +387,9 @@ class _CodexState extends State<Codex> {
         throw Exception(error);
       }
     } catch (e) {
+      if (!context.mounted) return;
       if (showSnackbar) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffoldMessenger.showSnackBar(
           SnackBar(content: Text('Error deleting codex item: $e')),
         );
       }
@@ -389,6 +411,10 @@ class _CodexState extends State<Codex> {
   }
 
   Future<void> _addCodexItem(BuildContext context) async {
+    if (!context.mounted) return;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     setState(() => _isAdding = true);
 
     try {
@@ -406,6 +432,7 @@ class _CodexState extends State<Codex> {
         body: body,
       );
 
+      if (!context.mounted) return;
       if (response.statusCode == 200) {
         _nameController.clear();
         _descriptionController.clear();
@@ -413,29 +440,33 @@ class _CodexState extends State<Codex> {
           _selectedType = 'lore';
           _selectedSubtype = 'all';
         });
-        Navigator.of(context).pop(); // Close the dialog
-        ScaffoldMessenger.of(context).showSnackBar(
+        navigator.pop(); // Close the dialog
+        scaffoldMessenger.showSnackBar(
           const SnackBar(content: Text('Codex item added successfully')),
         );
         _fetchCodexItems(); // Refresh the list
       } else {
         final error =
             json.decode(response.body)['error'] ?? 'Error adding codex item';
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffoldMessenger.showSnackBar(
           SnackBar(content: Text(error)),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
         SnackBar(content: Text('Error adding codex item: $e')),
       );
     } finally {
-      setState(() => _isAdding = false);
+      if (mounted) {
+        setState(() => _isAdding = false);
+      }
     }
   }
 
   void _showAddCodexItemDialog(BuildContext context, String type,
       {String? subtype}) {
+    if (!mounted) return;
     setState(() {
       _selectedType = type;
       _selectedSubtype = subtype ?? 'history';

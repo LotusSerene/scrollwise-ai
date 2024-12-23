@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Query');
 
 class Query extends StatefulWidget {
   final String projectId;
@@ -137,7 +140,7 @@ class _QueryState extends State<Query> {
         body: json.encode({'chatHistory': appState.queryState['chatHistory']}),
       );
     } catch (error) {
-      print('Error saving chat history: $error');
+      _logger.severe('Error saving chat history: $error');
     }
   }
 
@@ -182,7 +185,7 @@ class _QueryState extends State<Query> {
               if (message == null ||
                   message['type'] == null ||
                   message['content'] == null) {
-                print('Invalid message at index $index: $message');
+                _logger.severe('Invalid message at index $index: $message');
                 return const SizedBox.shrink();
               }
               final isUser = message['type'] == 'human';

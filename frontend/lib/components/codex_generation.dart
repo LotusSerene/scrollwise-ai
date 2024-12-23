@@ -5,7 +5,6 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import '../utils/notifications.dart';
 
 class CodexGeneration extends StatefulWidget {
   final String projectId;
@@ -59,6 +58,7 @@ class _CodexGenerationState extends State<CodexGeneration> {
   Future<void> _handleSubmit() async {
     if (_formKey.currentState!.validate()) {
       final appState = Provider.of<AppState>(context, listen: false);
+      final scaffoldMessenger = ScaffoldMessenger.of(context);
       appState.updateCodexGenerationProgress(isGenerating: true);
 
       try {
@@ -82,16 +82,25 @@ class _CodexGenerationState extends State<CodexGeneration> {
             isGenerating: false,
             generatedItem: data['item'],
           );
-          AppNotification.show(context, 'Codex item generated successfully');
+
+          if (!context.mounted) return;
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Codex item generated successfully')),
+          );
         } else {
           appState.updateCodexGenerationProgress(isGenerating: false);
-          AppNotification.show(
-              context, 'Error generating codex item: ${response.body}');
+          if (!context.mounted) return;
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+                content: Text('Error generating codex item: ${response.body}')),
+          );
         }
       } catch (error) {
         appState.updateCodexGenerationProgress(isGenerating: false);
-        print('Error generating codex item: $error');
-        AppNotification.show(context, 'Error generating codex item: $error');
+        if (!context.mounted) return;
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Error generating codex item: $error')),
+        );
       }
     }
   }

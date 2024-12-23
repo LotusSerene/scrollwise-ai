@@ -7,30 +7,29 @@ import '../main.dart';
 import 'constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Auth');
 
 const String utf8Charset = 'UTF-8';
 
 Future<String?> getAuthToken() async {
   try {
-    // First try to get from AppState
-    final appState =
-        Provider.of<AppState>(navigatorKey.currentContext!, listen: false);
-    if (appState.token != null) {
-      return appState.token;
-    }
-
-    // If not in AppState, try SharedPreferences
+    // First try SharedPreferences to avoid context dependency
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token');
+    String? token = prefs.getString('access_token');
 
-    if (token != null) {
-      // If found in SharedPreferences, update AppState
-      appState.setToken(token);
+    // Only try to access AppState if we have a valid context
+    if (navigatorKey.currentContext != null) {
+      final appState =
+          Provider.of<AppState>(navigatorKey.currentContext!, listen: false);
+      // Prefer AppState token over SharedPreferences if available
+      token = appState.token ?? token;
     }
 
     return token;
   } catch (e) {
-    print('Error getting auth token: $e');
+    _logger.severe('Error in getAuthToken: $e');
     return null;
   }
 }
@@ -45,8 +44,15 @@ Future<Map<String, String>> getAuthHeaders() async {
   final sessionId = await getSessionId();
 
   if (token == null) {
-    await _handleInvalidSession();
+    _logger.warning('No auth token available');
     throw Exception('No authentication token available');
+  }
+
+  // Only validate session if token exists but might be invalid
+  if (!await validateSession()) {
+    _logger.warning('Session validation failed');
+    await _handleInvalidSession();
+    throw Exception('Invalid session');
   }
 
   return {
@@ -85,7 +91,7 @@ Future<bool> isLoggedIn() async {
 
     return isTokenValid && hasSession;
   } catch (e) {
-    print('Error checking login status: $e');
+    _logger.severe('Error checking login status: $e');
     return false;
   }
 }
@@ -127,7 +133,7 @@ Future<void> signOut() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
   } catch (e) {
-    print('Error during sign out: $e');
+    _logger.severe('Error during sign out: $e');
     throw Exception('Failed to sign out');
   }
 }
@@ -136,27 +142,44 @@ Future<void> signOut() async {
 Future<bool> refreshSession() async {
   try {
     final session = supabase.Supabase.instance.client.auth.currentSession;
-    if (session == null) return false;
-
-    // Always try to refresh the session on app restart
-    await supabase.Supabase.instance.client.auth.refreshSession();
-
-    // Get new session
-    final newSession = supabase.Supabase.instance.client.auth.currentSession;
-    if (newSession != null) {
-      // Update the stored token with the new one
-      final appState =
-          Provider.of<AppState>(navigatorKey.currentContext!, listen: false);
-      appState.setToken(newSession.accessToken);
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('access_token', newSession.accessToken);
-
-      return true;
+    if (session == null) {
+      _logger.info('No current session to refresh');
+      return false;
     }
+
+    // Add retry logic for refresh
+    int retries = 3;
+    while (retries > 0) {
+      try {
+        await supabase.Supabase.instance.client.auth.refreshSession();
+
+        final newSession =
+            supabase.Supabase.instance.client.auth.currentSession;
+        if (newSession != null) {
+          final appState = Provider.of<AppState>(navigatorKey.currentContext!,
+              listen: false);
+          appState.setToken(newSession.accessToken);
+
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('access_token', newSession.accessToken);
+
+          _logger.info('Session refreshed successfully');
+          return true;
+        }
+        break; // Exit loop if refresh completed without error
+      } catch (e) {
+        retries--;
+        if (retries > 0) {
+          _logger.warning(
+              'Refresh attempt failed, retrying... ($retries attempts left)');
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+    }
+
     return false;
   } catch (e) {
-    print('Error refreshing session: $e');
+    _logger.severe('Error in refreshSession: $e');
     return false;
   }
 }
@@ -168,51 +191,43 @@ Future<bool> validateSession() async {
     final sessionId = await getSessionId();
 
     if (token == null || sessionId == null) {
-      await _handleInvalidSession();
+      _logger.info('No token or session ID available');
       return false;
     }
 
-    // Check if token is still valid
+    // Check if token is valid
     if (!JwtDecoder.isExpired(token)) {
-      // Token is still valid, try to restore Supabase session
       final supabaseClient = supabase.Supabase.instance.client;
+
+      // Try to recover Supabase session if needed
       if (supabaseClient.auth.currentSession == null) {
         try {
-          // First try to recover the session
           await supabaseClient.auth.recoverSession(token);
         } catch (e) {
-          print('Error recovering Supabase session: $e');
-          // If recovery fails, try to refresh
-          final refreshResult = await refreshSession();
-          if (!refreshResult) {
-            await _handleInvalidSession();
-            return false;
-          }
+          _logger.warning('Failed to recover Supabase session: $e');
+          // Don't immediately fail - continue with local validation
         }
       }
 
-      // Check if local session needs extension
+      // Check if session needs extension
       final tokenExpiration = JwtDecoder.getExpirationDate(token);
-      if (tokenExpiration.difference(DateTime.now()).inHours < 6) {
-        final extendResult = await _extendSession();
-        if (!extendResult) {
-          await _handleInvalidSession();
-          return false;
+      if (tokenExpiration.difference(DateTime.now()).inHours < 12) {
+        // Increased from 6 to 12
+        _logger.info('Token expiring soon, extending session');
+        if (!await _extendSession()) {
+          _logger.warning('Failed to extend session');
+          // Don't immediately fail - token is still valid
         }
       }
+
       return true;
     }
 
-    // If token is expired, try refresh
-    final refreshResult = await refreshSession();
-    if (!refreshResult) {
-      await _handleInvalidSession();
-      return false;
-    }
-    return true;
+    // Token is expired, try refresh
+    _logger.info('Token expired, attempting refresh');
+    return await refreshSession();
   } catch (e) {
-    print('Error validating session: $e');
-    await _handleInvalidSession();
+    _logger.warning('Error in validateSession: $e');
     return false;
   }
 }
@@ -233,7 +248,7 @@ Future<bool> _extendSession() async {
     }
     return false;
   } catch (e) {
-    print('Error extending session: $e');
+    _logger.severe('Error extending session: $e');
     return false;
   }
 }
@@ -252,7 +267,7 @@ Future<void> initializeSession(String token, String sessionId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('access_token', token);
   } catch (e) {
-    print('Error initializing session: $e');
+    _logger.severe('Error initializing session: $e');
     throw Exception('Failed to initialize session');
   }
 }
@@ -262,10 +277,13 @@ Future<void> persistSupabaseSession(String token) async {
   try {
     final supabaseClient = supabase.Supabase.instance.client;
     if (supabaseClient.auth.currentSession == null) {
-      await supabaseClient.auth.recoverSession(token);
+      // Don't try to recover session with our custom JWT
+      // Instead, just initialize a new session
+      await supabaseClient.auth.setSession(token);
     }
   } catch (e) {
-    print('Error persisting Supabase session: $e');
+    _logger.warning('Could not persist Supabase session: $e');
+    // Don't throw - this is not critical
   }
 }
 
@@ -285,7 +303,7 @@ Future<void> _handleInvalidSession() async {
     navigatorKey.currentState
         ?.pushNamedAndRemoveUntil('/login', (route) => false);
   } catch (e) {
-    print('Error handling invalid session: $e');
+    _logger.severe('Error handling invalid session: $e');
   }
 }
 
@@ -294,30 +312,24 @@ Future<void> initializeAuthState() async {
   try {
     final token = await getAuthToken();
     if (token != null && !JwtDecoder.isExpired(token)) {
-      final supabaseClient = supabase.Supabase.instance.client;
-
-      // Try to recover session first
-      try {
-        await supabaseClient.auth.recoverSession(token);
-
-        // Verify the session is valid
-        if (await validateSession()) {
-          // Update AppState
-          final appState = Provider.of<AppState>(navigatorKey.currentContext!,
-              listen: false);
+      // Skip Supabase session recovery
+      if (await validateSession()) {
+        // Only update AppState if we have a valid context
+        if (navigatorKey.currentContext != null) {
+          final appState = Provider.of<AppState>(
+            navigatorKey.currentContext!,
+            listen: false,
+          );
           appState.setLoggedIn(true);
           appState.setToken(token);
-          return;
         }
-      } catch (e) {
-        print('Error recovering session: $e');
+        return;
       }
     }
 
-    // If we get here, either there was no token or it was invalid
     await _handleInvalidSession();
   } catch (e) {
-    print('Error initializing auth state: $e');
+    _logger.severe('Error initializing auth state: $e');
     await _handleInvalidSession();
   }
 }

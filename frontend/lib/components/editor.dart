@@ -9,7 +9,9 @@ import '../providers/app_state.dart';
 import '../utils/text_utils.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http_parser/http_parser.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Editor');
 
 class Editor extends StatefulWidget {
   final String projectId;
@@ -128,6 +130,7 @@ class _EditorState extends State<Editor> {
 
   Future<void> _loadChapter(String chapterId) async {
     final appState = Provider.of<AppState>(context, listen: false);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
     final chapter = appState.chapters
         .firstWhere((c) => c['id'] == chapterId, orElse: () => null);
     if (chapter != null) {
@@ -153,23 +156,33 @@ class _EditorState extends State<Editor> {
             _chapterContentController.text = chapter['content'];
           });
         } else {
-          AppNotification.show(context, 'Error loading chapter');
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Error loading chapter')),
+          );
         }
       } catch (error) {
-        print('Error loading chapter: $error');
-        AppNotification.show(context, 'Error loading chapter');
+        _logger.severe('Error loading chapter: $error');
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Error loading chapter')),
+        );
       }
     }
   }
 
   Future<void> _handleChapterClick(dynamic chapter) async {
+    if (!mounted) return;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
       final headers = await getAuthHeaders();
+      if (!mounted) return;
+
       final response = await http.get(
         Uri.parse(
             '$apiUrl/chapters/${chapter['id']}?project_id=${widget.projectId}'),
         headers: headers,
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final fetchedChapter = json.decode(utf8.decode(response.bodyBytes));
@@ -180,12 +193,17 @@ class _EditorState extends State<Editor> {
           _error = null;
         });
       } else {
-        print('Error loading chapter: ${response.statusCode}');
-        AppNotification.show(context, 'Error loading chapter');
+        _logger.severe('Error loading chapter: ${response.statusCode}');
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Error loading chapter')),
+        );
       }
     } catch (error) {
-      print('Error loading chapter: $error');
-      AppNotification.show(context, 'Error loading chapter');
+      if (!mounted) return;
+      _logger.severe('Error loading chapter: $error');
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Error loading chapter')),
+      );
     }
   }
 
@@ -199,32 +217,49 @@ class _EditorState extends State<Editor> {
   }
 
   Future<void> _handleDeleteChapter(String chapterId) async {
+    if (!mounted) return;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final appState = Provider.of<AppState>(context, listen: false);
+
     try {
       final headers = await getAuthHeaders();
+      if (!mounted) return;
+
       final response = await http.delete(
         Uri.parse('$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
+
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
-        // Remove from state first
-        Provider.of<AppState>(context, listen: false).removeChapter(chapterId);
+        appState.removeChapter(chapterId);
         setState(() {
           _selectedChapter = null;
         });
-        AppNotification.show(context, 'Chapter deleted successfully');
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Chapter deleted successfully')),
+        );
         _fetchChapters();
       } else {
         final jsonResponse = json.decode(response.body);
         final errorMessage = jsonResponse['error'] ?? 'Error deleting chapter';
-        AppNotification.show(context, errorMessage);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text(errorMessage)),
+        );
       }
     } catch (error) {
-      print('Error deleting chapter: $error');
-      AppNotification.show(context, 'Error deleting chapter');
+      if (!mounted) return;
+      _logger.severe('Error deleting chapter: $error');
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Error deleting chapter')),
+      );
     }
   }
 
   Future<void> _handleSaveChapter() async {
+    if (!mounted) return;
+
     if (_chapterTitleController.text.isEmpty) {
       setState(() {
         _error = 'Chapter title is required.';
@@ -233,6 +268,8 @@ class _EditorState extends State<Editor> {
     }
 
     final headers = await getAuthHeaders();
+    if (!mounted) return;
+
     final chapterId =
         _selectedChapter != null ? _selectedChapter['id'] : const Uuid().v4();
 
@@ -260,6 +297,9 @@ class _EditorState extends State<Editor> {
           body: utf8.encode(json.encode(requestBody)),
         );
       }
+
+      if (!mounted) return;
+
       final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
       if ((response.statusCode == 200 || response.statusCode == 201) &&
           !jsonResponse.containsKey('error')) {
@@ -267,32 +307,44 @@ class _EditorState extends State<Editor> {
           'id': chapterId,
           ...requestBody,
         };
+
+        final appState = Provider.of<AppState>(context, listen: false);
         if (_selectedChapter != null) {
-          Provider.of<AppState>(context, listen: false)
-              .updateChapter(updatedChapter);
+          appState.updateChapter(updatedChapter);
         } else {
-          Provider.of<AppState>(context, listen: false)
-              .addChapter(updatedChapter);
+          appState.addChapter(updatedChapter);
         }
+
+        if (!mounted) return;
+
         setState(() {
           _error = null;
           _selectedChapter = updatedChapter;
         });
+
+        if (!mounted) return;
+
         if (response.statusCode == 200) {
-          AppNotification.show(context, 'Chapter updated successfully');
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Chapter updated successfully')));
         } else {
-          AppNotification.show(context, 'Chapter created successfully');
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Chapter created successfully')));
         }
-        _fetchChapters();
+        await _fetchChapters();
       } else {
+        if (!mounted) return;
+
         final errorMessage = jsonResponse['error'] ?? 'Error saving chapter';
-        AppNotification.show(context, errorMessage);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(errorMessage)));
         setState(() {
           _error = errorMessage;
         });
       }
     } catch (error) {
-      print('Error saving chapter: $error');
+      if (!mounted) return;
+      _logger.severe('Error saving chapter: $error');
       setState(() {
         _error = 'Error saving chapter. Please try again later.';
       });
@@ -300,6 +352,8 @@ class _EditorState extends State<Editor> {
   }
 
   Future<void> _importDocuments() async {
+    if (!mounted) return;
+
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -308,11 +362,14 @@ class _EditorState extends State<Editor> {
         withData: true,
       );
 
+      if (!mounted) return;
+
       if (result != null) {
         for (var file in result.files) {
+          if (!mounted) break;
           if (file.bytes == null) {
-            AppNotification.show(
-                context, 'Error: Could not read file ${file.name}');
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Error: Could not read file ${file.name}')));
             continue;
           }
 
@@ -353,18 +410,23 @@ class _EditorState extends State<Editor> {
               content = json.decode(utf8.decode(response.bodyBytes))['text'];
               await _createChapterFromContent(title, content);
             } else {
-              AppNotification.show(context, 'Error processing: ${file.name}');
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error processing: ${file.name}')));
               continue;
             }
           }
         }
         // Refresh chapter list
+        if (!mounted) return;
         await Provider.of<AppState>(context, listen: false)
             .fetchChapters(widget.projectId);
       }
     } catch (error) {
-      print('Error importing documents: $error');
-      AppNotification.show(context, 'Error importing documents');
+      if (!mounted) return;
+      _logger.severe('Error importing documents: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error importing documents')));
     }
   }
 
@@ -381,13 +443,19 @@ class _EditorState extends State<Editor> {
       );
 
       if (response.statusCode == 200) {
-        AppNotification.show(context, 'Imported: $title');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Imported: $title')));
       } else {
-        AppNotification.show(context, 'Error importing: $title');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error importing: $title')));
       }
     } catch (error) {
-      print('Error creating chapter: $error');
-      AppNotification.show(context, 'Error creating chapter: $title');
+      _logger.severe('Error creating chapter: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating chapter: $title')));
     }
   }
 
@@ -418,6 +486,7 @@ class _EditorState extends State<Editor> {
             margin: const EdgeInsets.all(16),
             child: Column(
               children: [
+                _buildChapterHeader(),
                 _buildCreateChapterButton(),
                 if (_isLoading)
                   _buildLoadingIndicator()

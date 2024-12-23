@@ -5,7 +5,9 @@ import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('ProjectSettings');
 
 class ProjectSettings extends StatefulWidget {
   final String projectId;
@@ -50,8 +52,10 @@ class _ProjectSettingsState extends State<ProjectSettings> {
         throw Exception('Failed to load project data');
       }
     } catch (error) {
-      print('Error fetching project data: $error');
-      AppNotification.show(context, 'Error fetching project data');
+      _logger.severe('Error fetching project data: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error fetching project data')));
       setState(() {
         _isLoading = false;
       });
@@ -76,20 +80,26 @@ class _ProjectSettingsState extends State<ProjectSettings> {
             'universe_id': _universeId,
           })),
         );
+        if (!mounted) return;
+
         if (response.statusCode == 200) {
-          AppNotification.show(context, 'Project updated successfully');
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Project updated successfully')));
         } else {
           final errorData = json.decode(response.body);
           throw Exception(errorData['detail'] ?? 'Unknown error occurred');
         }
       } catch (error) {
-        print('Error updating project: $error');
-        AppNotification.show(
-            context, 'Error updating project: ${error.toString()}');
+        _logger.severe('Error updating project: $error');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error updating project: ${error.toString()}')));
       } finally {
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }
@@ -131,19 +141,25 @@ class _ProjectSettingsState extends State<ProjectSettings> {
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
-        AppNotification.show(context, 'Project deleted successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Project deleted successfully')));
         Provider.of<AppState>(context, listen: false).setCurrentProject(null);
         Navigator.pushReplacementNamed(context, '/projects');
       } else {
         throw Exception('Failed to delete project');
       }
     } catch (error) {
-      print('Error deleting project: $error');
-      AppNotification.show(context, 'Error deleting project');
+      _logger.severe('Error deleting project: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error deleting project')));
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 

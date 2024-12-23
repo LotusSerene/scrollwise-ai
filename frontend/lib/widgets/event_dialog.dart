@@ -8,7 +8,7 @@ class EventDialog extends StatefulWidget {
   const EventDialog({Key? key, this.event}) : super(key: key);
 
   @override
-  _EventDialogState createState() => _EventDialogState();
+  State<EventDialog> createState() => _EventDialogState();
 }
 
 class _EventDialogState extends State<EventDialog> {

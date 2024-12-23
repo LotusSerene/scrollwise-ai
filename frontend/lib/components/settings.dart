@@ -3,7 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Settings');
 
 class Settings extends StatefulWidget {
   const Settings({Key? key}) : super(key: key);
@@ -60,11 +62,15 @@ class _SettingsState extends State<Settings> {
           });
         }
       } else {
-        AppNotification.show(context, 'Error checking API key');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error checking API key')));
       }
     } catch (error) {
-      print('Error checking API key: $error');
-      AppNotification.show(context, 'Error checking API key');
+      _logger.severe('Error checking API key: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error checking API key')));
     }
   }
 
@@ -89,11 +95,15 @@ class _SettingsState extends State<Settings> {
           });
         }
       } else {
-        AppNotification.show(context, 'Error fetching model settings');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error fetching model settings')));
       }
     } catch (error) {
-      print('Error fetching model settings: $error');
-      AppNotification.show(context, 'Error fetching model settings');
+      _logger.severe('Error fetching model settings: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error fetching model settings')));
     }
   }
 
@@ -112,13 +122,19 @@ class _SettingsState extends State<Settings> {
             _isEditingApiKey = false;
           });
         }
-        AppNotification.show(context, 'API key saved successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('API key saved successfully')));
       } else {
-        AppNotification.show(context, 'Error saving API key');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error saving API key')));
       }
     } catch (error) {
-      print('Error saving API key: $error');
-      AppNotification.show(context, 'Error saving API key');
+      _logger.severe('Error saving API key: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Error saving API key')));
     }
   }
 
@@ -136,13 +152,19 @@ class _SettingsState extends State<Settings> {
             _apiKey = '';
           });
         }
-        AppNotification.show(context, 'API key removed successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('API key removed successfully')));
       } else {
-        AppNotification.show(context, 'Error removing API key');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error removing API key')));
       }
     } catch (error) {
-      print('Error removing API key: $error');
-      AppNotification.show(context, 'Error removing API key');
+      _logger.severe('Error removing API key: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error removing API key')));
     }
   }
 
@@ -157,13 +179,19 @@ class _SettingsState extends State<Settings> {
       );
 
       if (response.statusCode == 200) {
-        AppNotification.show(context, 'Model settings saved successfully');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Model settings saved successfully')));
       } else {
-        AppNotification.show(context, 'Error saving model settings');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error saving model settings')));
       }
     } catch (error) {
-      print('Error saving model settings: $error');
-      AppNotification.show(context, 'Error saving model settings');
+      _logger.severe('Error saving model settings: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error saving model settings')));
     }
   }
 

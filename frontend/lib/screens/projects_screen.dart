@@ -8,8 +8,9 @@ import '../providers/app_state.dart';
 import 'dart:async';
 import 'universe_screen.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
+import 'package:logging/logging.dart';
 
-final GlobalKey<FormState> _formKey = GlobalKey<FormState>(); // Form Key
+final _logger = Logger('Projects');
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
@@ -138,10 +139,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       final token = await getAuthToken();
       final sessionId = await getSessionId();
 
-      print('Fetching project data');
+      _logger.info('Fetching project data');
 
       if (token == null || sessionId == null) {
-        print('Missing authentication credentials');
+        _logger.severe('Missing authentication credentials');
+        if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/login');
         return;
       }
@@ -152,17 +154,19 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         _fetchUniverses(),
       ]);
     } catch (error) {
-      print('Error fetching data: $error');
+      _logger.severe('Error fetching data: $error');
       if (!_mounted) return;
 
       if (error.toString().contains('401') ||
           error.toString().contains('authentication') ||
           error.toString().contains('No authentication token available')) {
-        print('Authentication error detected, redirecting to login');
+        _logger.severe('Authentication error detected, redirecting to login');
+        if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/login');
         return;
       }
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error fetching data: ${error.toString()}')),
       );
@@ -180,7 +184,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
     try {
       final headers = await getAuthHeaders();
-      print('Fetching projects');
+      _logger.info('Fetching projects');
 
       final response = await http
           .get(
@@ -199,11 +203,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           _displayedProjects = projects.take(_itemsPerPage).toList();
         });
       } else {
-        print('Error fetching projects: ${response.statusCode}');
+        _logger.severe('Error fetching projects: ${response.statusCode}');
         throw Exception('Failed to load projects');
       }
     } catch (error) {
-      print('Error in _fetchProjects: $error');
+      _logger.severe('Error in _fetchProjects: $error');
       if (!_mounted) return;
       rethrow;
     }
@@ -213,7 +217,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     if (!_mounted) return [];
     try {
       final headers = await getAuthHeaders();
-      print('Fetching universes');
+      _logger.info('Fetching universes');
 
       final response = await http.get(
         Uri.parse('$apiUrl/universes/'),
@@ -234,11 +238,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         });
         return universes;
       } else {
-        print('Error fetching universes: ${response.statusCode}');
+        _logger.severe('Error fetching universes: ${response.statusCode}');
         throw Exception('Failed to load universes: ${response.statusCode}');
       }
     } catch (error) {
-      print('Error in _fetchUniverses: $error');
+      _logger.severe('Error in _fetchUniverses: $error');
       rethrow;
     }
   }
@@ -286,7 +290,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
           throw Exception(errorData['detail'] ?? 'Unknown error occurred');
         }
       } catch (error) {
-        print('Error creating project: $error');
+        _logger.severe('Error creating project: $error');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -311,6 +315,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       );
 
       if (response.statusCode == 200) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Universe created successfully'),
@@ -324,7 +329,8 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         throw Exception('Failed to create universe');
       }
     } catch (error) {
-      print('Error creating universe: $error');
+      _logger.severe('Error creating universe: $error');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error creating universe: ${error.toString()}'),
@@ -343,6 +349,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       );
 
       if (response.statusCode == 200) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Universe updated successfully'),
@@ -354,7 +361,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         throw Exception('Failed to update universe');
       }
     } catch (error) {
-      print('Error updating universe: $error');
+      _logger.severe('Error updating universe: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error updating universe: ${error.toString()}'),
@@ -372,6 +379,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       );
 
       if (response.statusCode == 200) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Universe deleted successfully'),
@@ -383,7 +391,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         throw Exception('Failed to delete universe');
       }
     } catch (error) {
-      print('Error deleting universe: $error');
+      _logger.severe('Error deleting universe: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error deleting universe: ${error.toString()}'),
@@ -469,7 +477,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         throw Exception('Failed to update project');
       }
     } catch (error) {
-      print('Error updating project universe: $error');
+      _logger.severe('Error updating project universe: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -962,13 +970,12 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        if (Navigator.of(context).canPop()) {
+    return PopScope(
+      canPop: Navigator.of(context).canPop(),
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
           Navigator.of(context).pop();
-          return false;
         }
-        return true;
       },
       child: Scaffold(
         appBar: AppBar(
@@ -1047,7 +1054,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         throw Exception('Failed to sign out');
       }
     } catch (error) {
-      print('Sign out error: $error');
+      _logger.severe('Sign out error: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Error signing out')),

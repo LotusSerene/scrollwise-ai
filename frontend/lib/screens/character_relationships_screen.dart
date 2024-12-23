@@ -9,6 +9,9 @@ import '../utils/constants.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../providers/app_state.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('Relationships');
 
 class CharacterRelationshipsScreen extends StatefulWidget {
   final String projectId;
@@ -17,7 +20,7 @@ class CharacterRelationshipsScreen extends StatefulWidget {
       : super(key: key);
 
   @override
-  _CharacterRelationshipsScreenState createState() =>
+  State<CharacterRelationshipsScreen> createState() =>
       _CharacterRelationshipsScreenState();
 }
 
@@ -71,7 +74,8 @@ class _CharacterRelationshipsScreenState
         throw Exception('Failed to load characters');
       }
     } catch (e) {
-      print('Error fetching characters: $e');
+      _logger.severe('Error fetching characters: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error fetching characters: $e')),
       );
@@ -124,6 +128,7 @@ class _CharacterRelationshipsScreenState
         isGenerating: false,
       );
 
+      if (!mounted) return;
       final relationshipProvider =
           Provider.of<RelationshipProvider>(context, listen: false);
       if (relationshipProvider.message != null) {
@@ -136,6 +141,7 @@ class _CharacterRelationshipsScreenState
       appState.updateCharacterRelationshipsProgress(
         isGenerating: false,
       );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error analyzing relationships: $error')),
       );

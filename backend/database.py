@@ -522,21 +522,17 @@ class Database:
             self.logger.error(f"Error getting universes: {str(e)}")
             raise
 
-
-    async def check_user_approval(self, user_id: str) -> bool:
-        try:
-            # Query Supabase for the approved_users table
-            response = self.supabase.table('approved_users').select("*").eq('user_id', user_id).execute()
-            
-            # If the user is found in the approved_users table, they're approved
-            return len(response.data) > 0
-            
-        except Exception as e:
-            self.logger.error(f"Error checking user approval status: {str(e)}")
-            return False
-
     async def sign_up(self, email: str, password: str) -> Dict[str, Any]:
         try:
+            # First check if user already exists locally
+            async with self.Session() as session:
+                query = select(User).where(User.email == email)
+                result = await session.execute(query)
+                existing_user = result.scalars().first()
+                if existing_user:
+                    raise Exception("User with this email already exists")
+
+            # If no existing user, proceed with Supabase signup
             auth_response = self.supabase.auth.sign_up({
                 "email": email,
                 "password": password
@@ -544,7 +540,7 @@ class Database:
             if not auth_response.user:
                 raise Exception("No user data in signup response")
 
-            # Create local user record with correct field names matching User model
+            # Create local user record
             local_user = {
                 "id": str(uuid.uuid4()),
                 "email": email,

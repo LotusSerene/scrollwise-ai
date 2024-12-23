@@ -32,83 +32,95 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _preventExit = true;
 
 Future<void> main() async {
-  // Ensure Flutter is initialized
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize window manager
-  if (Platform.isWindows) {
-    await windowManager.ensureInitialized();
-    windowManager.setPreventClose(true); // Prevent default close
-  }
-
-  // Initialize logging first, before any other operations
-  await ServerManager.initializeLogging();
-
-  // Prevent the app from closing
-  if (Platform.isWindows) {
-    // Override the exit behavior
-    ProcessSignal.sigint.watch().listen((signal) {
-      // Prevent default exit behavior
-      if (_preventExit) return;
-    });
-
-    ProcessSignal.sigterm.watch().listen((signal) {
-      // Prevent default exit behavior
-      if (_preventExit) return;
-    });
-  }
+  final log = Logger('main');
+  log.info('Application starting...');
 
   try {
-    Logger('main').info('Starting server...');
-    await ServerManager.startServer();
-    Logger('main').info('Server started successfully');
+    log.info('Initializing Flutter bindings...');
+    WidgetsFlutterBinding.ensureInitialized();
 
-    // Initialize Supabase
-    await supabase.Supabase.initialize(
-      url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
-      anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
-    );
-
-    // Add this line to initialize auth state
-    await initializeAuthState();
-
-    // Force the window to stay open
+    // Initialize window manager
     if (Platform.isWindows) {
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      log.info('Initializing window manager...');
+      await windowManager.ensureInitialized();
+      windowManager.setPreventClose(true);
+      log.info('Window manager initialized');
+    }
 
-      // Keep the event loop alive
-      Timer.periodic(const Duration(milliseconds: 100), (timer) {
-        if (!_preventExit) {
-          timer.cancel();
-          return;
-        }
-        WidgetsBinding.instance.scheduleFrame();
+    log.info('Initializing logging system...');
+    await ServerManager.initializeLogging();
+
+    // Prevent the app from closing
+    if (Platform.isWindows) {
+      // Override the exit behavior
+      ProcessSignal.sigint.watch().listen((signal) {
+        // Prevent default exit behavior
+        if (_preventExit) return;
+      });
+
+      ProcessSignal.sigterm.watch().listen((signal) {
+        // Prevent default exit behavior
+        if (_preventExit) return;
       });
     }
 
-    // Create instance using singleton constructor
-    final protocolHandler = ProtocolHandler.instance;
+    try {
+      log.info('Starting server...');
+      await ServerManager.startServer();
+      log.info('Server started successfully');
 
-    // Then register
-    await protocolHandler.register('scrollwise');
+      log.info('Initializing Supabase...');
+      await supabase.Supabase.initialize(
+        url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
+        anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
+      );
+      log.info('Supabase initialized');
 
-    runApp(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(create: (_) => AppState()),
-          ChangeNotifierProvider(create: (_) => RelationshipProvider()),
-          ChangeNotifierProvider(create: (context) => PresetProvider()),
-        ],
-        child: const MyApp(),
-      ),
-    );
+      log.info('Initializing auth state...');
+      await initializeAuthState();
+      log.info('Auth state initialized');
+
+      // Force the window to stay open
+      if (Platform.isWindows) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+
+        // Keep the event loop alive
+        Timer.periodic(const Duration(milliseconds: 100), (timer) {
+          if (!_preventExit) {
+            timer.cancel();
+            return;
+          }
+          WidgetsBinding.instance.scheduleFrame();
+        });
+      }
+
+      log.info('Registering protocol handler...');
+      final protocolHandler = ProtocolHandler.instance;
+      await protocolHandler.register('scrollwise');
+      log.info('Protocol handler registered');
+
+      log.info('Starting Flutter application...');
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) => AppState()),
+            ChangeNotifierProvider(create: (_) => RelationshipProvider()),
+            ChangeNotifierProvider(create: (context) => PresetProvider()),
+          ],
+          child: const MyApp(),
+        ),
+      );
+      log.info('Application started successfully');
+    } catch (e, stackTrace) {
+      log.severe('Error during server/app initialization', e, stackTrace);
+      rethrow;
+    }
   } catch (e, stackTrace) {
-    // Enhanced error logging
-    Logger('main').severe('Error during initialization', e, stackTrace);
+    log.severe('Fatal error during application startup', e, stackTrace);
     _preventExit = false;
     runApp(
       MaterialApp(
@@ -116,7 +128,7 @@ Future<void> main() async {
           backgroundColor: Colors.black,
           body: Center(
             child: Text(
-              e.toString(),
+              'Fatal Error: ${e.toString()}',
               style: const TextStyle(color: Colors.white),
               textAlign: TextAlign.center,
             ),
@@ -148,18 +160,22 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp>
     with WidgetsBindingObserver, WindowListener {
+  final log = Logger('MyApp');
+
   @override
   void initState() {
+    log.info('Initializing MyApp state...');
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
 
-    // Add an explicit binding to keep the app alive
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        setState(() {}); // Force a rebuild to keep the app alive
+        log.info('First frame rendered');
+        setState(() {});
       }
     });
+    log.info('MyApp state initialized');
   }
 
   @override
@@ -172,23 +188,32 @@ class _MyAppState extends State<MyApp>
   // Add this window close handler
   @override
   Future<void> onWindowClose() async {
-    Logger('main').info('Window close requested');
+    log.info('Window close requested');
     await _cleanupAndExit();
   }
 
   Future<void> _cleanupAndExit() async {
-    Logger('main').info('Application shutting down...');
+    log.info('Starting application cleanup...');
     _preventExit = false;
 
     try {
+      log.info('Stopping server...');
       await ServerManager.stopServer();
-      await Future.delayed(
-          const Duration(seconds: 2)); // Add delay after server stop
+      log.info('Server stopped');
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      log.info('Disposing server manager...');
       await ServerManager.dispose();
+      log.info('Server manager disposed');
+
+      log.info('Destroying window...');
       await windowManager.destroy();
+      log.info('Window destroyed, exiting application');
+
       exit(0);
     } catch (e, stack) {
-      Logger('main').severe('Error during cleanup', e, stack);
+      log.severe('Error during cleanup', e, stack);
       exit(1);
     }
   }

@@ -104,7 +104,6 @@ class RelationshipProvider extends ChangeNotifier {
                 try {
                   return Relationship.fromJson(json);
                 } catch (e) {
-                  print('Error parsing relationship: $e');
                   return null;
                 }
               })
@@ -117,7 +116,6 @@ class RelationshipProvider extends ChangeNotifier {
         throw Exception(errorBody['detail'] ?? 'Failed to load relationships');
       }
     } catch (e) {
-      print('Error in getRelationships: $e');
       _error = 'An error occurred: $e';
     } finally {
       _isLoading = false;

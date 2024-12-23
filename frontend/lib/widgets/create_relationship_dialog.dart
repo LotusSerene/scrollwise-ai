@@ -11,7 +11,7 @@ class CreateRelationshipDialog extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _CreateRelationshipDialogState createState() =>
+  State<CreateRelationshipDialog> createState() =>
       _CreateRelationshipDialogState();
 }
 

@@ -7,7 +7,7 @@ class LocationDialog extends StatefulWidget {
   const LocationDialog({Key? key, this.location}) : super(key: key);
 
   @override
-  _LocationDialogState createState() => _LocationDialogState();
+  State<LocationDialog> createState() => _LocationDialogState();
 }
 
 class _LocationDialogState extends State<LocationDialog> {

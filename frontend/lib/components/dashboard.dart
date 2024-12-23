@@ -37,6 +37,9 @@ class _DashboardState extends State<Dashboard> {
   Future<void> _fetchData() async {
     if (!mounted) return;
 
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final appState = Provider.of<AppState>(context, listen: false);
+
     setState(() {
       _isLoading = true;
       _error = '';
@@ -44,7 +47,6 @@ class _DashboardState extends State<Dashboard> {
 
     try {
       final headers = await getAuthHeaders();
-      final appState = Provider.of<AppState>(context, listen: false);
 
       // Fetch chapters
       final chapterResponse = await http.get(
@@ -75,18 +77,19 @@ class _DashboardState extends State<Dashboard> {
         appState.setCodexItems(codexJsonResponse['codex_items']);
       }
 
-      if (mounted) {
-        widget.onProgressChanged(
-            appState.chapters.length, appState.codexItems.length, _wordCount);
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      widget.onProgressChanged(
+          appState.chapters.length, appState.codexItems.length, _wordCount);
+      setState(() => _isLoading = false);
     } catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = 'Error fetching data: $error';
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _error = 'Error fetching data: $error';
+        _isLoading = false;
+      });
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('Error: $error')),
+      );
     }
   }
 
@@ -116,11 +119,12 @@ class _DashboardState extends State<Dashboard> {
             ),
             TextButton(
               onPressed: () async {
+                final navigator = Navigator.of(context);
                 final targetWordCount =
                     int.tryParse(_targetWordCountController.text) ?? 0;
                 await Provider.of<AppState>(context, listen: false)
                     .updateTargetWordCount(targetWordCount);
-                Navigator.pop(context);
+                navigator.pop();
               },
               child: const Text('Save'),
             ),

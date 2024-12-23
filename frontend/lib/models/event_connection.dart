@@ -49,7 +49,6 @@ class EventConnection {
             json['updated_at'] ?? DateTime.now().toIso8601String()),
       );
     } catch (e) {
-      print('Error parsing EventConnection: $e'); // For debugging
       rethrow;
     }
   }

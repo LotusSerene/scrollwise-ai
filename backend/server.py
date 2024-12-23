@@ -2,7 +2,6 @@ import asyncio
 import io
 import json
 import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
@@ -45,31 +44,24 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # Configure logging
 def setup_logging():
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    
-    log_path = os.path.join(log_dir, 'server.log')
-    
-    # If server.log exists, rename it with timestamp
-    if os.path.exists(log_path):
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        new_log_path = os.path.join(log_dir, f'server_{timestamp}.log')
-        os.rename(log_path, new_log_path)
-    
-    # Configure logging with the new file
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_path, mode='a'),  # Add mode='a' for append
-            logging.StreamHandler(sys.stdout)  # Change to sys.stdout for console output
-        ]
-    )
-    
-    # Create and return the logger
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)  # Ensure logger level is set
-    return logger
+    try:
+        # Add console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter(
+            '%(levelname)s: %(message)s'  # Simpler format for console
+        ))
+        
+        # Configure root logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+        
+        # Test logging
+        logger.info("Logging system initialized")
+        return logger
+        
+    except Exception as e:
+        print(f"Failed to setup logging: {str(e)}")
+        raise
 
 # Initialize logging
 logger = setup_logging()
@@ -123,15 +115,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
 
-# CORS middleware
+# Get allowed origins from environment variable
+allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:8080').split(',')
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Add any other frontend origins
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,  # Cache preflight requests for 10 minutes
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -282,8 +274,6 @@ class SessionManager:
 
 # Initialize session manager
 session_manager = SessionManager()
-
-
 
 
 class AgentManagerStore:
@@ -671,7 +661,6 @@ async def sign_in(
             )
         
         try:
-            # Use db_instance.sign_in instead of direct Supabase auth
             auth_result = await db_instance.sign_in(
                 email=credentials["email"],
                 password=credentials["password"]
@@ -683,15 +672,7 @@ async def sign_in(
                     detail="Invalid credentials"
                 )
             
-            # Check approval status before creating session
-            is_approved = await db_instance.check_user_approval(auth_result['user'].id)
-            if not is_approved:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Your account is pending approval for beta testing. Please wait for admin approval."
-                )
-            
-            # Create session only if user is approved
+            # Remove approval check - all users can sign in
             session_id = await session_manager.create_session(auth_result['user'].id)
             
             return {
@@ -1453,7 +1434,7 @@ async def get_model_settings(current_user: User = Depends(get_current_active_use
 @settings_router.post("/model")
 async def save_model_settings(settings: ModelSettings, current_user: User = Depends(get_current_active_user)):
     try:
-        await db_instance.save_model_settings(current_user.id, settings.dict())
+        await db_instance.save_model_settings(current_user.id, settings.model_dump())
         return {"message": "Model settings saved successfully"}
     except Exception as e:
         logger.error(f"Error saving model settings: {str(e)}")
@@ -1491,7 +1472,7 @@ async def update_preset(preset_name: str, preset_update: PresetUpdate, project_i
             raise HTTPException(status_code=404, detail="Preset not found")
 
         # Update the preset data
-        updated_data = preset_update.data.dict()
+        updated_data = preset_update.model_dump()
         await db_instance.update_preset(preset_name, current_user.id, project_id, updated_data)
 
         return {"message": "Preset updated successfully", "name": preset_name, "data": updated_data}
@@ -1639,7 +1620,7 @@ async def delete_chat_history(project_id: str, current_user: User = Depends(get_
 async def save_chat_history(chat_history: ChatHistoryRequest, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         # Convert Pydantic models to dictionaries
-        chat_history_dicts = [item.dict() for item in chat_history.chatHistory]
+        chat_history_dicts = [item.model_dump() for item in chat_history.chatHistory]
         await db_instance.save_chat_history(current_user.id, project_id, chat_history_dicts)
         return {"message": "Chat history saved successfully"}
     except Exception as e:
@@ -2649,9 +2630,8 @@ async def cleanup_resources():
         logger.error(f"Error during cleanup: {str(e)}")
 
 def signal_handler(signum, frame):
-    """Handle various termination signals"""
-    signal_name = signal.Signals(signum).name
-    logger.info(f"Received signal {signal_name}")
+    """Handle termination signal (Ctrl+C)"""
+    logger.info("Received shutdown signal, initiating graceful shutdown...")
     
     try:
         # Run cleanup in the event loop
@@ -2661,23 +2641,15 @@ def signal_handler(signum, frame):
         else:
             loop.run_until_complete(cleanup_resources())
             
-        # Give processes a chance to cleanup (2 seconds)
+        # Brief delay to allow cleanup to complete
         loop.run_until_complete(asyncio.sleep(2))
     except Exception as e:
-        logger.error(f"Error in signal handler: {str(e)}")
+        logger.error(f"Error during shutdown: {str(e)}")
     finally:
-        # Force exit if cleanup takes too long
         sys.exit(0)
 
-# Register signal handlers with platform check
-signal.signal(signal.SIGINT, signal_handler)   # Handle Ctrl+C
-signal.signal(signal.SIGTERM, signal_handler)  # Handle termination request
 
-# Only register SIGHUP and SIGQUIT on non-Windows platforms
-if hasattr(signal, 'SIGHUP'):  # Check if SIGHUP exists
-    signal.signal(signal.SIGHUP, signal_handler)   # Handle terminal window closing
-if hasattr(signal, 'SIGQUIT'):  # Check if SIGQUIT exists
-    signal.signal(signal.SIGQUIT, signal_handler)  # Handle quit request
+signal.signal(signal.SIGINT, signal_handler)   # Handle Ctrl+C
 
 
 if __name__ == "__main__":

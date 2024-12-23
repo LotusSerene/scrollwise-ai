@@ -6,7 +6,9 @@ import '../utils/constants.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:http_parser/http_parser.dart';
-import '../utils/notifications.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('KnowledgeBase');
 
 class KnowledgeBase extends StatefulWidget {
   final String projectId;
@@ -105,7 +107,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           _error = 'Error fetching knowledge base content';
           _isLoading = false;
         });
-        AppNotification.show(context, 'Error fetching knowledge base content');
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Error fetching knowledge base content')));
+        }
       }
     } catch (error) {
       if (!_mounted) return;
@@ -113,8 +118,11 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         _error = error.toString();
         _isLoading = false;
       });
-      print('Error fetching knowledge base content: $error');
-      AppNotification.show(context, 'Error fetching knowledge base content');
+      _logger.warning('Error fetching knowledge base content: $error');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Error fetching knowledge base content')));
+      }
     }
   }
 
@@ -143,15 +151,24 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           _textController.clear();
         });
         _fetchKnowledgeBaseContent();
-        AppNotification.show(context, 'Text added to knowledge base');
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Text added to knowledge base')));
+        }
       } else {
         final errorMessage =
             jsonResponse['error'] ?? 'Error adding text to knowledge base';
-        AppNotification.show(context, errorMessage);
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(errorMessage)));
+        }
       }
     } catch (error) {
-      print('Error adding text to knowledge base: $error');
-      AppNotification.show(context, 'Error adding text to knowledge base');
+      _logger.warning('Error adding text to knowledge base: $error');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Error adding text to knowledge base')));
+      }
     }
   }
 
@@ -168,7 +185,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         final file = result.files.first;
 
         if (file.bytes == null) {
-          AppNotification.show(context, 'Error: Could not read file');
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Error: Could not read file')));
+          }
           return;
         }
 
@@ -180,8 +200,11 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         }
       }
     } catch (error) {
-      print('Error uploading file: $error');
-      AppNotification.show(context, 'Error uploading file');
+      _logger.warning('Error uploading file: $error');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error uploading file')));
+      }
     }
   }
 
@@ -190,7 +213,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       final content = utf8.decode(file.bytes!);
       await _sendToKnowledgeBase(content, file.name, 'text');
     } catch (e) {
-      AppNotification.show(context, 'Error: File must be a valid text file');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Error: File must be a valid text file')));
+      }
     }
   }
 
@@ -220,11 +246,17 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
             json.decode(utf8.decode(response.bodyBytes))['text'];
         await _sendToKnowledgeBase(extractedText, file.name, 'document');
       } else {
-        AppNotification.show(context, 'Error processing document');
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Error processing document')));
+        }
       }
     } catch (e) {
-      print('Error processing document: $e');
-      AppNotification.show(context, 'Error processing document');
+      _logger.warning('Error processing document: $e');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error processing document')));
+      }
     }
   }
 
@@ -248,9 +280,15 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
     final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      AppNotification.show(context, 'File uploaded successfully');
+      if (!_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File uploaded successfully')));
+      }
     } else {
-      AppNotification.show(context, 'Error adding to knowledge base');
+      if (!_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error adding to knowledge base')));
+      }
     }
   }
 
@@ -284,15 +322,24 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           _knowledgeBaseContent
               .removeWhere((item) => item['embedding_id'] == embeddingId);
         });
-        AppNotification.show(context, 'Item deleted from knowledge base');
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Item deleted from knowledge base')));
+        }
       } else {
         final errorMessage =
             jsonResponse['error'] ?? 'Error deleting item from knowledge base';
-        AppNotification.show(context, errorMessage);
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(errorMessage)));
+        }
       }
     } catch (error) {
-      print('Error deleting item from knowledge base: $error');
-      AppNotification.show(context, 'Error deleting item from knowledge base');
+      _logger.warning('Error deleting item from knowledge base: $error');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Error deleting item from knowledge base')));
+      }
     }
   }
 
@@ -318,11 +365,17 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       if (outputFile != null) {
         final file = File(outputFile);
         await file.writeAsString(markdown.toString());
-        AppNotification.show(context, 'Knowledge base exported successfully');
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Knowledge base exported successfully')));
+        }
       }
     } catch (error) {
-      print('Error exporting knowledge base: $error');
-      AppNotification.show(context, 'Error exporting knowledge base');
+      _logger.warning('Error exporting knowledge base: $error');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error exporting knowledge base')));
+      }
     }
   }
 

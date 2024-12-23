@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/notifications.dart';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import '../providers/preset_provider.dart';
@@ -119,10 +118,13 @@ class _CreateChapterState extends State<CreateChapter> {
 
   Future<void> _handleSavePreset() async {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
     final newPresetName = _newPresetNameController.text;
 
     if (newPresetName.isEmpty) {
-      AppNotification.show(context, 'Please enter a preset name');
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Please enter a preset name')),
+      );
       return;
     }
 
@@ -138,11 +140,16 @@ class _CreateChapterState extends State<CreateChapter> {
     try {
       await presetProvider.savePreset(
           newPresetName, presetData, widget.projectId);
-      AppNotification.show(context, 'Preset saved successfully');
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Preset saved successfully')),
+      );
       _newPresetNameController.clear();
     } catch (e) {
-      print('Error saving preset: $e');
-      AppNotification.show(context, 'Error saving preset: ${e.toString()}');
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('Error saving preset: ${e.toString()}')),
+      );
     }
   }
 
@@ -205,7 +212,10 @@ class _CreateChapterState extends State<CreateChapter> {
             await _fetchChapterContent(chapterIds[0]);
 
             appState.completeChapterGeneration();
-            AppNotification.show(context, 'Chapters generated successfully');
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Chapters generated successfully')),
+            );
           } else {
             throw Exception('No chapter IDs received from server');
           }
@@ -214,12 +224,17 @@ class _CreateChapterState extends State<CreateChapter> {
         }
       } catch (error) {
         appState.cancelChapterGeneration();
-        AppNotification.show(context, 'Error generating chapters: $error');
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating chapters: $error')),
+        );
       }
     }
   }
 
   Future<void> _fetchChapterContent(String chapterId) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
@@ -228,15 +243,20 @@ class _CreateChapterState extends State<CreateChapter> {
       );
 
       if (response.statusCode == 200) {
+        if (!mounted) return;
         final chapterData = json.decode(response.body);
         setState(() {
           _currentChapterContent = chapterData['content'];
         });
       } else {
-        AppNotification.show(context, 'Error fetching chapter content');
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Error fetching chapter content')),
+        );
       }
     } catch (error) {
-      AppNotification.show(context, 'Error fetching chapter content');
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Error fetching chapter content')),
+      );
     }
   }
 
@@ -252,6 +272,8 @@ class _CreateChapterState extends State<CreateChapter> {
 
   Future<void> _handleCancel() async {
     final appState = Provider.of<AppState>(context, listen: false);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       final response = await http.post(
         Uri.parse('$apiUrl/chapters/cancel?project_id=${widget.projectId}'),
@@ -260,13 +282,21 @@ class _CreateChapterState extends State<CreateChapter> {
 
       if (response.statusCode == 200) {
         appState.cancelChapterGeneration();
-        AppNotification.show(context, 'Chapter generation cancelled');
+        if (!context.mounted) return;
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Chapter generation cancelled')),
+        );
       } else {
-        AppNotification.show(context, 'Failed to cancel chapter generation');
+        if (!context.mounted) return;
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Failed to cancel chapter generation')),
+        );
       }
     } catch (error) {
-      print('Error cancelling chapter generation: $error');
-      AppNotification.show(context, 'Error cancelling chapter generation');
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Error cancelling chapter generation')),
+      );
     }
   }
 
@@ -289,12 +319,18 @@ class _CreateChapterState extends State<CreateChapter> {
 
   Future<void> _handleDeletePreset(String presetName) async {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
       await presetProvider.deletePreset(presetName, widget.projectId);
-      AppNotification.show(context, 'Preset deleted successfully');
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Preset deleted successfully')),
+      );
     } catch (error) {
-      AppNotification.show(
-          context, 'Error deleting preset: ${error.toString()}');
+      if (!context.mounted) return;
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('Error deleting preset: ${error.toString()}')),
+      );
     }
   }
 
@@ -426,8 +462,7 @@ class _CreateChapterState extends State<CreateChapter> {
               ),
               onPressed: () {
                 Navigator.pop(context);
-                presetProvider.deletePreset(
-                    presetProvider.selectedPreset!, widget.projectId);
+                _handleDeletePreset(presetProvider.selectedPreset!);
               },
             ),
           ],

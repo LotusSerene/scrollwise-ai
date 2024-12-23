@@ -3,6 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
 import '../utils/auth.dart';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('PresetProvider');
 
 class PresetProvider with ChangeNotifier {
   List<String> _presets = [];
@@ -34,7 +37,7 @@ class PresetProvider with ChangeNotifier {
         throw Exception('Failed to load presets');
       }
     } catch (error) {
-      print('Error fetching presets: $error');
+      _logger.severe('Error fetching presets: $error');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -64,7 +67,7 @@ class PresetProvider with ChangeNotifier {
         throw Exception('Failed to load preset');
       }
     } catch (error) {
-      print('Error fetching preset: $error');
+      _logger.severe('Error fetching preset: $error');
       rethrow;
     }
   }
@@ -103,7 +106,7 @@ class PresetProvider with ChangeNotifier {
         throw Exception('Failed to save preset: ${response.body}');
       }
     } catch (error) {
-      print('Error saving preset: $error');
+      _logger.severe('Error saving preset: $error');
       rethrow;
     }
   }
@@ -127,7 +130,7 @@ class PresetProvider with ChangeNotifier {
         throw Exception('Failed to delete preset');
       }
     } catch (error) {
-      print('Error deleting preset: $error');
+      _logger.severe('Error deleting preset: $error');
       rethrow;
     }
   }

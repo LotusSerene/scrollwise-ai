@@ -46,7 +46,6 @@ class LocationConnection {
             json['updated_at'] ?? DateTime.now().toIso8601String()),
       );
     } catch (e) {
-      print('Error parsing LocationConnection: $e');
       rethrow;
     }
   }
