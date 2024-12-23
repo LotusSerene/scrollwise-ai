@@ -26,7 +26,8 @@ class PresetProvider with ChangeNotifier {
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> presetList = json.decode(response.body);
+        final Map<String, dynamic> data = json.decode(response.body);
+        final List<dynamic> presetList = data['presets'];
         _presets =
             presetList.map((preset) => preset['name'] as String).toList();
       } else {
