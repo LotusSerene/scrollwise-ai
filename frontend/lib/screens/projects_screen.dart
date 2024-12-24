@@ -306,7 +306,7 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   Future<void> _createUniverse(String name) async {
     try {
       final response = await http.post(
-        Uri.parse('$apiUrl/universes'),
+        Uri.parse('$apiUrl/universes/'),
         headers: {
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
@@ -1041,8 +1041,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       if (response.statusCode == 200) {
         // Clear all local storage and session data
         await removeSessionId();
-        localStorage.clear();
-
         if (mounted) {
           // Navigate to login and clear navigation stack
           Navigator.of(context).pushNamedAndRemoveUntil(

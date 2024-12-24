@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../utils/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 final _logger = Logger('Login');
 
@@ -32,42 +33,48 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/auth/signin'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: json.encode({
-            'email': _emailController.text,
-            'password': _passwordController.text,
-          }),
+        final response = await Supabase.instance.client.auth.signInWithPassword(
+          email: _emailController.text,
+          password: _passwordController.text,
         );
 
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final accessToken = data['access_token'];
-          final sessionId = data['session_id'];
+        if (response.session != null) {
+          // Get session ID from backend using the correct endpoint and format
+          final serverResponse = await http.post(
+            Uri.parse('$apiUrl/auth/signin'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: json.encode({
+              'email': _emailController.text,
+              'password': _passwordController.text,
+            }),
+          );
 
-          if (accessToken == null) {
-            throw Exception('No access token received');
+          if (serverResponse.statusCode == 200) {
+            final data = json.decode(serverResponse.body);
+            final sessionId = data['session_id'];
+
+            // Store the session ID
+            await setSessionId(sessionId);
+
+            // Call onLogin callback with Supabase token
+            widget.onLogin(response.session!.accessToken);
+
+            if (mounted) {
+              Navigator.pushReplacementNamed(context, '/projects');
+            }
+          } else {
+            throw Exception('Failed to get session ID from server');
           }
-
-          // First store the session data
-          await setSessionId(sessionId);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('access_token', accessToken);
-
-          // Then call onLogin callback
-          widget.onLogin(accessToken);
-
-          // Finally navigate (if still mounted)
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, '/projects');
-          }
-        } else {
-          final error = json.decode(response.body);
-          throw Exception(error['detail'] ?? 'Error logging in');
+        }
+      } on AuthException catch (error) {
+        _logger.severe('Login error: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: ${error.message}')),
+          );
         }
       } catch (error) {
         _logger.severe('Login error: $error');
@@ -93,38 +100,35 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/auth/register'),
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({
-            'email': _emailController.text,
-            'password': _passwordController.text,
-          }),
+        final response = await Supabase.instance.client.auth.signUp(
+          email: _emailController.text,
+          password: _passwordController.text,
         );
 
-        if (response.statusCode == 201) {
-          final data = json.decode(response.body);
-          if (data['needs_verification'] == true) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text(
-                      'Registration successful! Please check your email to verify your account.')));
-            }
+        if (mounted) {
+          if (response.user != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Registration successful! Please check your email to verify your account.'),
+              ),
+            );
+            _emailController.clear();
+            _passwordController.clear();
           }
-          _emailController.clear();
-          _passwordController.clear();
-        } else {
-          final error = json.decode(response.body);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(error['detail'] ?? 'Registration failed')));
-          }
+        }
+      } on AuthException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message)),
+          );
         }
       } catch (error) {
         _logger.severe('Registration error: $error');
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(error.toString())));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.toString())),
+          );
         }
       } finally {
         if (mounted) {
@@ -246,9 +250,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Clear local session
       await removeSessionId();
-
-      // Clear any other stored data
-      localStorage.clear();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();

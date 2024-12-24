@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:http_parser/http_parser.dart';
 import 'package:logging/logging.dart';
+import 'dart:async';
 
 final _logger = Logger('KnowledgeBase');
 
@@ -93,26 +94,35 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         headers: await getAuthHeaders(),
       );
 
+      _logger.info('Fetch response status: ${response.statusCode}');
+      _logger.info('Fetch response body: ${response.body}');
+
       if (!_mounted) return;
 
       if (response.statusCode == 200) {
         final content = json.decode(utf8.decode(response.bodyBytes))['content'];
+        _logger.info('Fetched content length: ${content.length}');
+
         _safeSetState(() {
           _knowledgeBaseContent = content;
           _displayedContent = content.take(_itemsPerPage).toList();
           _isLoading = false;
         });
       } else {
+        _logger.warning(
+            'Error response: ${response.statusCode} - ${response.body}');
         _safeSetState(() {
           _error = 'Error fetching knowledge base content';
           _isLoading = false;
         });
         if (_mounted && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Error fetching knowledge base content')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  'Error fetching knowledge base content: ${response.statusCode}')));
         }
       }
     } catch (error) {
+      _logger.severe('Error in _fetchKnowledgeBaseContent: $error');
       if (!_mounted) return;
       _safeSetState(() {
         _error = error.toString();
@@ -178,117 +188,140 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         type: FileType.custom,
         allowedExtensions: ['txt', 'md', 'pdf', 'doc', 'docx'],
         allowMultiple: false,
-        withData: true,
+        withReadStream: true,
       );
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
+        _logger.info('Selected file: ${file.name}');
 
-        if (file.bytes == null) {
+        if (file.size == 0) {
+          _logger.severe('Error: Empty file ${file.name}');
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Error: Could not read file')));
+              SnackBar(content: Text('Error: Empty file ${file.name}')),
+            );
           }
           return;
         }
 
-        if (file.extension?.toLowerCase() == 'txt' ||
-            file.extension?.toLowerCase() == 'md') {
-          await _uploadTextFile(file);
-        } else {
-          await _uploadDocumentFile(file);
+        try {
+          if (file.extension?.toLowerCase() == 'txt' ||
+              file.extension?.toLowerCase() == 'md') {
+            final bytes = await file.readStream!
+                .transform(StreamTransformer<List<int>, List<int>>.fromHandlers(
+                    handleData: (data, sink) => sink.add(data)))
+                .fold<List<int>>(
+                    [], (previous, element) => previous..addAll(element));
+            final content = utf8.decode(bytes);
+            await _sendToKnowledgeBase(content, file.name, 'text');
+          } else {
+            final request = http.MultipartRequest(
+              'POST',
+              Uri.parse(
+                  '$apiUrl/documents/extract?project_id=${widget.projectId}'),
+            );
+
+            request.headers.addAll(await getAuthHeaders());
+            request.files.add(
+              http.MultipartFile(
+                'file',
+                file.readStream!,
+                file.size,
+                filename: file.name,
+                contentType:
+                    MediaType.parse(_getContentType(file.extension ?? '')),
+              ),
+            );
+
+            final streamedResponse = await request.send();
+            final response = await http.Response.fromStream(streamedResponse);
+
+            if (response.statusCode == 200 || response.statusCode == 201) {
+              final extractedText =
+                  json.decode(utf8.decode(response.bodyBytes))['text'];
+              await _sendToKnowledgeBase(extractedText, file.name, 'document');
+              await Future.delayed(const Duration(seconds: 1));
+              await _fetchKnowledgeBaseContent();
+            } else {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Error extracting document content')),
+                );
+              }
+            }
+          }
+        } catch (e) {
+          _logger.severe('Error processing file: $e');
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'Processing: ${file.name} - Please refresh to see changes')),
+            );
+          }
         }
       }
     } catch (error) {
-      _logger.warning('Error uploading file: $error');
+      _logger.severe('Error uploading file: $error');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error uploading file')));
-      }
-    }
-  }
-
-  Future<void> _uploadTextFile(PlatformFile file) async {
-    try {
-      final content = utf8.decode(file.bytes!);
-      await _sendToKnowledgeBase(content, file.name, 'text');
-    } catch (e) {
-      if (_mounted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Error: File must be a valid text file')));
-      }
-    }
-  }
-
-  Future<void> _uploadDocumentFile(PlatformFile file) async {
-    try {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$apiUrl/documents/extract?project_id=${widget.projectId}'),
-      );
-
-      request.headers.addAll(await getAuthHeaders());
-
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'file',
-          file.bytes!,
-          filename: file.name,
-          contentType: MediaType.parse(_getContentType(file.extension ?? '')),
-        ),
-      );
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final extractedText =
-            json.decode(utf8.decode(response.bodyBytes))['text'];
-        await _sendToKnowledgeBase(extractedText, file.name, 'document');
-      } else {
-        if (_mounted && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Error processing document')));
-        }
-      }
-    } catch (e) {
-      _logger.warning('Error processing document: $e');
-      if (_mounted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error processing document')));
+          const SnackBar(
+              content: Text(
+                  'Error uploading file - Please check if upload succeeded')),
+        );
       }
     }
   }
 
   Future<void> _sendToKnowledgeBase(
       String content, String filename, String type) async {
-    final formData = http.MultipartRequest(
-      'POST',
-      Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'),
-    );
+    try {
+      _logger.info('Processing: $filename ($type)');
 
-    formData.headers.addAll(await getAuthHeaders());
-    formData.fields['documents'] = content;
-    formData.fields['project_id'] = widget.projectId;
-    formData.fields['metadata_str'] = json.encode({
-      'type': type,
-      'filename': filename,
-      'project_id': widget.projectId,
-    });
+      final response = await http.post(
+        Uri.parse('$apiUrl/knowledge-base/'),
+        headers: {
+          ...await getAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: {
+          'documents': content,
+          'metadata_str': json.encode({
+            'type': type,
+            'filename': filename,
+            'project_id': widget.projectId,
+          }),
+          'project_id': widget.projectId,
+        },
+      );
 
-    final streamedResponse = await formData.send();
-    final response = await http.Response.fromStream(streamedResponse);
-
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      if (!_mounted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('File uploaded successfully')));
+      final jsonResponse = json.decode(response.body);
+      if (response.statusCode == 200 && !jsonResponse.containsKey('error')) {
+        setState(() {
+          _textController.clear();
+        });
+        _fetchKnowledgeBaseContent();
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('File uploaded successfully')));
+        }
+      } else {
+        final errorMessage =
+            jsonResponse['error'] ?? 'Error adding to knowledge base';
+        if (_mounted && mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(errorMessage)));
+        }
       }
-    } else {
-      if (!_mounted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error adding to knowledge base')));
+    } catch (e) {
+      _logger.severe('Error uploading file: $e');
+      if (_mounted && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
+      rethrow;
     }
   }
 
@@ -440,7 +473,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
               tooltip: 'Refresh content',
             ),
             IconButton(
-              icon: const Icon(Icons.upload_file),
+              icon: const Icon(Icons.download_for_offline),
               onPressed: _exportKnowledgeBase,
               tooltip: 'Export knowledge base',
             ),

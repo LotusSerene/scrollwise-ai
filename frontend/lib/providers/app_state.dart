@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../utils/auth.dart';
 import '../utils/constants.dart';
 import 'package:logging/logging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 final _logger = Logger('AppState');
 
@@ -56,6 +57,15 @@ class AppState extends ChangeNotifier {
   };
 
   GenerationState? getGenerationState(String type) => _generationStates[type];
+
+  Future<void> checkAuthState() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final sessionId = await getSessionId();
+
+    _isLoggedIn = session != null && sessionId != null;
+    _token = session?.accessToken;
+    notifyListeners();
+  }
 
   void setLoggedIn(bool value) {
     _isLoggedIn = value;

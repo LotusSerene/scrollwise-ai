@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
 from sqlalchemy import select, and_
+import time
 
 
-import json
 import os
 import uuid
 from typing import Optional, List, Dict, Any
@@ -20,7 +20,6 @@ from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, ValidationError, EmailStr
 
 
@@ -38,9 +37,6 @@ import sys
 import signal
 import psutil
 
-
-#OAuth2
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # Configure logging
 def setup_logging():
@@ -113,7 +109,7 @@ async def lifespan(app: FastAPI):
             await db_instance.dispose()
             logger.info("Cleanup complete")
 
-app = FastAPI(title="Novel AI API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Novel AI API", version="1.0.3", lifespan=lifespan)
 
 # Get allowed origins from environment variable
 allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:8080').split(',')
@@ -251,26 +247,55 @@ class BackstoryExtractionRequest(BaseModel):
 class SessionManager:
     def __init__(self):
         self.sessions = {}
+        self._load_sessions()  # Load sessions on startup
+        
+    def _load_sessions(self):
+        try:
+            with open('sessions.json', 'r') as f:
+                self.sessions = json.load(f)
+        except FileNotFoundError:
+            self.sessions = {}
+            
+    def _save_sessions(self):
+        with open('sessions.json', 'w') as f:
+            json.dump(self.sessions, f)
         
     async def create_session(self, user_id: str) -> str:
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {
             'user_id': user_id,
-            'created_at': datetime.now(timezone.utc),
-            'last_activity': datetime.now(timezone.utc)
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'last_activity': datetime.now(timezone.utc).isoformat()
         }
+        self._save_sessions()
         return session_id
         
     async def validate_session(self, session_id: str) -> Optional[str]:
         session = self.sessions.get(session_id)
         if session:
+            # Convert stored ISO format string back to datetime
+            last_activity = datetime.fromisoformat(session['last_activity'])
+            if (datetime.now(timezone.utc) - last_activity).total_seconds() > MAX_INACTIVITY:
+                await self.remove_session(session_id)
+                return None
+                
             # Update last activity
-            session['last_activity'] = datetime.now(timezone.utc)
+            session['last_activity'] = datetime.now(timezone.utc).isoformat()
+            self._save_sessions()
             return session['user_id']
         return None
         
     async def remove_session(self, session_id: str):
         self.sessions.pop(session_id, None)
+        self._save_sessions()
+
+    async def extend_session(self, session_id: str) -> bool:
+        session = self.sessions.get(session_id)
+        if session:
+            session['last_activity'] = datetime.now(timezone.utc).isoformat()
+            self._save_sessions()
+            return True
+        return False
 
 # Initialize session manager
 session_manager = SessionManager()
@@ -308,10 +333,19 @@ agent_manager_store = AgentManagerStore(api_key_manager)
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    session_id: str = Header(None, alias="X-Session-ID")
+    session_id: str = Header(None, alias="X-Session-ID"),
+    authorization: str = Header(None)
 ):
     try:
+        if not authorization or not session_id:
+            raise HTTPException(
+                status_code=401, 
+                detail="Missing authentication credentials"
+            )
+
+        # Extract token from Authorization header
+        token = authorization.replace("Bearer ", "")
+        
         # Get user from Supabase token
         try:
             user_response = db_instance.supabase.auth.get_user(token)
@@ -331,18 +365,24 @@ async def get_current_user(
         # Check if user exists in local database
         local_user = await db_instance.get_user_by_email(user_response.user.email)
         if not local_user:
-            # Create local user if they don't exist
+            # Only create new user if they don't exist
             local_user = {
                 "id": user_response.user.id,
                 "email": user_response.user.email,
             }
-            await db_instance._create_local_user(local_user)
+            try:
+                await db_instance._create_local_user(local_user)
+                local_user = await db_instance.get_user_by_email(user_response.user.email)
+            except Exception as e:
+                # If creation fails (e.g. due to race condition), try getting the user again
+                local_user = await db_instance.get_user_by_email(user_response.user.email)
+                if not local_user:
+                    raise e
             
-        # Validate session if session_id exists
-        if session_id:
-            session_user_id = await session_manager.validate_session(session_id)
-            if not session_user_id or session_user_id != user_response.user.id:
-                raise HTTPException(status_code=401, detail="Invalid session")
+        # Validate session
+        session_user_id = await session_manager.validate_session(session_id)
+        if not session_user_id or session_user_id != user_response.user.id:
+            raise HTTPException(status_code=401, detail="Invalid session")
         
         return user_response.user
 
@@ -575,31 +615,6 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
 
 
 # Auth routes
-@auth_router.post("/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    try:
-        # Authenticate with Supabase
-        auth_response = await db_instance.supabase.auth.sign_in_with_password({
-            "email": form_data.username,
-            "password": form_data.password
-        })
-        
-        if not auth_response.user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        
-        # Create local session
-        session_id = await session_manager.create_session(auth_response.user.id)
-        
-        # No need to create our own JWT, just use Supabase's token
-        return {
-            "access_token": auth_response.session.access_token,
-            "token_type": "bearer",
-            "session_id": session_id
-        }
-    except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        raise HTTPException(status_code=401, detail="Login failed")
-
 @auth_router.post("/register", status_code=201, response_model=dict)
 async def register(user: UserCreate):
     try:
@@ -629,20 +644,18 @@ async def register(user: UserCreate):
 
 @app.post("/auth/extend-session")
 async def extend_session(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_user),
     session_id: str = Header(None, alias="X-Session-ID")
 ):
     try:
         if not session_id:
             raise HTTPException(status_code=400, detail="No session ID provided")
 
-        # Get current session
-        session = session_manager.sessions.get(session_id)
-        if not session:
+        # Extend the session
+        success = await session_manager.extend_session(session_id)
+        if not success:
             raise HTTPException(status_code=401, detail="Invalid session")
 
-        # Update last activity
-        session['last_activity'] = datetime.now(timezone.utc)
         return {"message": "Session extended", "session_id": session_id}
 
     except Exception as e:
@@ -2503,65 +2516,93 @@ async def get_location_connections(
         raise HTTPException(status_code=500, detail="Internal server error")
     
 
+SHUTDOWN_TIMEOUT = 30  # Configurable timeout in seconds
+
 @app.post("/shutdown")
-async def shutdown_endpoint(current_user: User = Depends(get_current_active_user)):
+async def shutdown():
     try:
-        logger.info("Shutdown request received from user: %s", current_user.id)
+        logger.info("Graceful shutdown initiated")
+        io_loop = asyncio.get_event_loop()
         
-        # 1. Save any pending data
-        try:
-            # Save any pending chat histories
-            for project_id in agent_manager_store._managers.keys():
-                async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
-                    chat_history = await agent_manager.get_chat_history()
-                    if chat_history:
-                        await db_instance.save_chat_history(current_user.id, project_id, chat_history)
-        except Exception as e:
-            logger.error(f"Error saving pending data: {str(e)}")
-
-        # 2. Close all active sessions
-        active_sessions = list(session_manager.sessions.keys())
-        for sid in active_sessions:
-            await session_manager.remove_session(sid)
-            logger.info(f"Closed session: {sid}")
-
-        # 3. Close vector stores and agent managers
-        async with agent_manager_store._lock:
-            for manager in agent_manager_store._managers.values():
-                if hasattr(manager, 'vector_store'):
-                    manager.vector_store.close()
-                await manager.close()
-            agent_manager_store._managers.clear()
-
-        # 4. Close database connections
-        await db_instance.dispose()
-
-        # 5. Terminate child processes
-        current_process = psutil.Process()
-        children = current_process.children(recursive=True)
-        for child in children:
+        async def cleanup():
             try:
-                child.terminate()
-                child.wait(timeout=3)  # Wait up to 3 seconds for each process
-            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                # 1. Stop accepting new connections first
+                logger.info("Stopping server from accepting new connections")
+                app.state.keep_alive = False
+                
+                # 2. Save pending data with timeout
                 try:
-                    child.kill()  # Force kill if termination fails
-                except psutil.NoSuchProcess:
-                    pass
+                    async def save_pending_data():
+                        for manager in agent_manager_store._managers.values():
+                            chat_history = await manager.get_chat_history()
+                            if chat_history:
+                                await db_instance.save_chat_history(
+                                    manager.user_id, 
+                                    manager.project_id, 
+                                    chat_history
+                                )
+                    
+                    await asyncio.wait_for(save_pending_data(), timeout=10)
+                except asyncio.TimeoutError:
+                    logger.error("Timeout while saving pending data")
 
-        # 6. Flush logs
-        for handler in logger.handlers:
-            handler.flush()
+                # 3. Wait for active requests to complete
+                start_time = time.monotonic()  # Use monotonic time for duration calculations
+                while time.monotonic() - start_time < SHUTDOWN_TIMEOUT and len(asyncio.all_tasks()) > 1:
+                    logger.info(f"Waiting for {len(asyncio.all_tasks())-1} active tasks to complete")
+                    await asyncio.sleep(1)
 
-        # 7. Signal the server to stop
-        stop_server()  # Your existing shutdown function
+                # 4. Cleanup resources
+                async with agent_manager_store._lock:
+                    for manager in agent_manager_store._managers.values():
+                        if hasattr(manager, 'vector_store'):
+                            manager.vector_store.close()
+                        await manager.close()
+                    agent_manager_store._managers.clear()
+
+                # 5. Close database connections
+                await db_instance.dispose()
+
+                # 6. Terminate child processes gracefully
+                current_process = psutil.Process()
+                children = current_process.children(recursive=True)
+                for child in children:
+                    try:
+                        child.terminate()
+                        await asyncio.sleep(0.1)
+                        if child.is_running():
+                            child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+
+                # 7. Flush logs
+                for handler in logger.handlers:
+                    handler.flush()
+
+                # 8. Stop the event loop
+                logger.info("Stopping event loop")
+                io_loop.stop()
+
+            except Exception as e:
+                logger.error(f"Error during cleanup: {str(e)}")
+                raise
+
+        # Schedule cleanup on next event loop iteration
+        io_loop.create_task(cleanup())
         
-        return {"message": "Server shutdown initiated successfully"}
+        return JSONResponse(
+            content={
+                "message": "Shutdown initiated", 
+                "timeout": SHUTDOWN_TIMEOUT
+            },
+            status_code=202
+        )
+
     except Exception as e:
-        logger.error(f"Error during shutdown: {str(e)}")
+        logger.error(f"Error initiating shutdown: {str(e)}")
         raise HTTPException(
-            status_code=500, 
-            detail=f"Shutdown failed: {str(e)}"
+            status_code=500,
+            detail=f"Shutdown initiation failed: {str(e)}"
         )
 
 
@@ -2629,28 +2670,14 @@ async def cleanup_resources():
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}")
 
-def signal_handler(signum, frame):
-    """Handle termination signal (Ctrl+C)"""
-    logger.info("Received shutdown signal, initiating graceful shutdown...")
-    
-    try:
-        # Run cleanup in the event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(cleanup_resources())
-        else:
-            loop.run_until_complete(cleanup_resources())
-            
-        # Brief delay to allow cleanup to complete
-        loop.run_until_complete(asyncio.sleep(2))
-    except Exception as e:
-        logger.error(f"Error during shutdown: {str(e)}")
-    finally:
-        sys.exit(0)
+def signal_handler(sig, frame):
+    """Handle termination signals"""
+    logger.info(f"Received signal {sig}, initiating graceful shutdown")
+    asyncio.create_task(shutdown())
 
-
-signal.signal(signal.SIGINT, signal_handler)   # Handle Ctrl+C
-
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 if __name__ == "__main__":
    try:

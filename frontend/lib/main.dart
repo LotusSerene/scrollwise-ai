@@ -11,12 +11,11 @@ import 'screens/editor_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/codex_screen.dart';
 import 'screens/validity_screen.dart';
+import 'utils/auth.dart';
 import 'screens/knowledge_base_screen.dart';
 import 'screens/query_screen.dart';
 import 'screens/chapters_screen.dart';
-import 'utils/auth.dart';
 import 'utils/theme.dart';
-import 'package:flutter/services.dart';
 import 'providers/preset_provider.dart';
 import 'providers/relationship_provider.dart';
 import 'screens/timeline_screen.dart';
@@ -24,7 +23,6 @@ import 'screens/landing_screen.dart';
 import 'utils/server_manager.dart';
 import 'package:logging/logging.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:protocol_handler/protocol_handler.dart';
 import 'utils/config_handler.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -35,108 +33,121 @@ Future<void> main() async {
   final log = Logger('main');
   log.info('Application starting...');
 
+  // Start the app with a loading screen immediately
+  runApp(
+    const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Initializing...'),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
   try {
     log.info('Initializing Flutter bindings...');
     WidgetsFlutterBinding.ensureInitialized();
 
-    // Initialize window manager
     if (Platform.isWindows) {
-      log.info('Initializing window manager...');
+      log.info('Setting up window manager...');
       await windowManager.ensureInitialized();
-      windowManager.setPreventClose(true);
-      log.info('Window manager initialized');
+      await windowManager.waitUntilReadyToShow();
+      await windowManager.setTitle('ScrollWise AI');
+      await windowManager.setPreventClose(true);
+      await windowManager.show();
     }
 
-    log.info('Initializing logging system...');
+    log.info('Starting core services...');
     await ServerManager.initializeLogging();
 
-    // Prevent the app from closing
-    if (Platform.isWindows) {
-      // Override the exit behavior
-      ProcessSignal.sigint.watch().listen((signal) {
-        // Prevent default exit behavior
-        if (_preventExit) return;
-      });
-
-      ProcessSignal.sigterm.watch().listen((signal) {
-        // Prevent default exit behavior
-        if (_preventExit) return;
-      });
-    }
-
-    try {
-      log.info('Starting server...');
-      await ServerManager.startServer();
-      log.info('Server started successfully');
-
-      log.info('Initializing Supabase...');
-      await supabase.Supabase.initialize(
+    // Initialize services concurrently
+    await Future.wait([
+      ServerManager.startServer().timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          log.warning('Server start timed out, continuing...');
+          throw TimeoutException('Server start timed out');
+        },
+      ),
+      supabase.Supabase.initialize(
         url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
         anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
-      );
-      log.info('Supabase initialized');
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          log.warning('Supabase initialization failed');
+          throw TimeoutException('Supabase initialization failed');
+        },
+      ),
+    ]);
 
-      log.info('Initializing auth state...');
-      await initializeAuthState();
-      log.info('Auth state initialized');
+    log.info('Launching main application...');
 
-      // Force the window to stay open
-      if (Platform.isWindows) {
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-
-        // Keep the event loop alive
-        Timer.periodic(const Duration(milliseconds: 100), (timer) {
-          if (!_preventExit) {
-            timer.cancel();
-            return;
-          }
-          WidgetsBinding.instance.scheduleFrame();
-        });
-      }
-
-      log.info('Registering protocol handler...');
-      final protocolHandler = ProtocolHandler.instance;
-      await protocolHandler.register('scrollwise');
-      log.info('Protocol handler registered');
-
-      log.info('Starting Flutter application...');
-      runApp(
-        MultiProvider(
-          providers: [
-            ChangeNotifierProvider(create: (_) => AppState()),
-            ChangeNotifierProvider(create: (_) => RelationshipProvider()),
-            ChangeNotifierProvider(create: (context) => PresetProvider()),
-          ],
-          child: const MyApp(),
-        ),
-      );
-      log.info('Application started successfully');
-    } catch (e, stackTrace) {
-      log.severe('Error during server/app initialization', e, stackTrace);
-      rethrow;
-    }
-  } catch (e, stackTrace) {
-    log.severe('Fatal error during application startup', e, stackTrace);
-    _preventExit = false;
+    // Launch the actual app
     runApp(
-      MaterialApp(
-        home: Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: Text(
-              'Fatal Error: ${e.toString()}',
-              style: const TextStyle(color: Colors.white),
-              textAlign: TextAlign.center,
-            ),
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => AppState()),
+          ChangeNotifierProvider(create: (_) => RelationshipProvider()),
+          ChangeNotifierProvider(create: (context) => PresetProvider()),
+        ],
+        child: const MyApp(),
+      ),
+    );
+
+    // Initialize auth state after UI is running
+    Future.delayed(const Duration(seconds: 1), () async {
+      try {
+        final appState = navigatorKey.currentContext != null
+            ? Provider.of<AppState>(navigatorKey.currentContext!, listen: false)
+            : null;
+        await appState?.checkAuthState();
+      } catch (e) {
+        log.warning('Auth initialization error: $e');
+      }
+    });
+
+    log.info('Application started successfully');
+  } catch (e, stackTrace) {
+    log.severe('Fatal error during startup', e, stackTrace);
+    _showErrorScreen('Startup Error: ${e.toString()}');
+  }
+}
+
+// Helper function to show error screen
+void _showErrorScreen(String errorMessage) {
+  runApp(
+    MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 64,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                errorMessage,
+                style: const TextStyle(color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 // Add this class to handle Windows-specific bindings
@@ -164,18 +175,21 @@ class _MyAppState extends State<MyApp>
 
   @override
   void initState() {
-    log.info('Initializing MyApp state...');
     super.initState();
+    log.info('Initializing MyApp state...');
     WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        log.info('First frame rendered');
-        setState(() {});
-      }
-    });
-    log.info('MyApp state initialized');
+    // Initialize auth state when app starts
+    _initializeAuth();
+  }
+
+  Future<void> _initializeAuth() async {
+    try {
+      await initializeAuthState();
+    } catch (e) {
+      log.severe('Error initializing auth state: $e');
+    }
   }
 
   @override
@@ -189,23 +203,60 @@ class _MyAppState extends State<MyApp>
   @override
   Future<void> onWindowClose() async {
     log.info('Window close requested');
-    await _cleanupAndExit();
+    if (_preventExit) {
+      await _cleanupAndExit();
+    }
   }
 
   Future<void> _cleanupAndExit() async {
     log.info('Starting application cleanup...');
     _preventExit = false;
 
+    // Show shutdown screen
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                const Text(
+                  'Shutting down...',
+                  style: TextStyle(color: Colors.white, fontSize: 18),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Please wait while we clean up',
+                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
     try {
       log.info('Stopping server...');
-      await ServerManager.stopServer();
+      await ServerManager.stopServer().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          log.warning('Server stop timed out, forcing shutdown...');
+          ServerManager.forceStop();
+        },
+      );
       log.info('Server stopped');
 
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 3));
 
       log.info('Disposing server manager...');
-      await ServerManager.dispose();
+      await ServerManager.disposeResources();
       log.info('Server manager disposed');
+
+      await Future.delayed(const Duration(seconds: 1));
 
       log.info('Destroying window...');
       await windowManager.destroy();
@@ -233,13 +284,15 @@ class _MyAppState extends State<MyApp>
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
-      initialRoute: '/',
       navigatorKey: navigatorKey,
-      navigatorObservers: [
-        _ServerLifecycleObserver(),
-      ],
+      home: Consumer<AppState>(
+        builder: (context, appState, _) {
+          return appState.isLoggedIn
+              ? const ProjectsScreen()
+              : const LandingScreen();
+        },
+      ),
       routes: {
-        '/': (context) => const AuthWrapper(),
         '/landing': (context) => const LandingScreen(),
         '/projects': (context) => const ProjectsScreen(),
         '/home': (context) => const HomeScreen(),
@@ -265,55 +318,6 @@ class _MyAppState extends State<MyApp>
         '/timeline': (context) => TimelineScreen(
             projectId: ModalRoute.of(context)!.settings.arguments as String),
       },
-      builder: (context, child) {
-        // Add keyboard event handler wrapper
-        return KeyboardListener(
-          focusNode: FocusNode(),
-          onKeyEvent: (KeyEvent event) {
-            // Handle any problematic key events here
-            if (event.logicalKey == LogicalKeyboardKey.altLeft) {
-              // Prevent Alt key from triggering system behaviors
-              return;
-            }
-          },
-          child: child ?? const SizedBox(),
-        );
-      },
     );
-  }
-}
-
-class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: isLoggedIn(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
-        } else if (snapshot.data == true) {
-          return const ProjectsScreen();
-        } else {
-          return const LandingScreen();
-        }
-      },
-    );
-  }
-}
-
-// Add this class to handle app lifecycle
-class _ServerLifecycleObserver extends NavigatorObserver {}
-
-// Add handler for verification
-void handleVerificationUrl(Uri uri) {
-  if (uri.host == 'verify') {
-    final token = uri.queryParameters['token'];
-    if (token != null) {
-      // Navigate to verification screen or handle token
-      navigatorKey.currentState?.pushNamed('/login', arguments: token);
-    }
   }
 }

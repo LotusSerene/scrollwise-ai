@@ -161,3 +161,13 @@
 ## 1.0.2-beta
 
 - Fix some issues I came across
+
+## 1.0.3-beta
+
+- Better logging and error handling
+- Fixed presets not saving correctly
+- Fixed Universes not creating correctly
+- Remove approval check and waitlisting
+- Update frontend to use scaffoldMessenger instead of AppNotification
+- Better session management
+- Fix uploading documents to knowledge base and editor

@@ -3,10 +3,18 @@ import 'package:path/path.dart' as path;
 import 'dart:async';
 import 'package:logging/logging.dart';
 import 'config_handler.dart';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
-class ServerManager {
+class ServerManager extends ChangeNotifier {
+  static final ServerManager _instance = ServerManager._internal();
+  static ServerManager get instance => _instance;
+
+  ServerManager._internal();
+
   static final _logger = Logger('ServerManager');
   static IOSink? _logFile;
+  static IOSink? _serverLogFile;
   static Process? _serverProcess;
   static bool _isRunning = false;
   static int serverPort = 8080;
@@ -44,11 +52,33 @@ class ServerManager {
       }
 
       final clientLogPath = path.join(logsDir, 'client.log');
-      _logger.info('Log file path: $clientLogPath');
+      final serverLogPath = path.join(logsDir, 'server.log');
+      _logger.info('Log file paths: $clientLogPath, $serverLogPath');
+
+      // Handle existing client log
+      final clientLogFile = File(clientLogPath);
+      if (await clientLogFile.exists()) {
+        final lastModified = await clientLogFile.lastModified();
+        final timestamp = lastModified.toIso8601String().replaceAll(':', '-');
+        final newPath = path.join(logsDir, 'client_$timestamp.log');
+        await clientLogFile.rename(newPath);
+        _logger.info('Renamed existing client log file to: $newPath');
+      }
+
+      // Handle existing server log
+      final serverLogFile = File(serverLogPath);
+      if (await serverLogFile.exists()) {
+        final lastModified = await serverLogFile.lastModified();
+        final timestamp = lastModified.toIso8601String().replaceAll(':', '-');
+        final newPath = path.join(logsDir, 'server_$timestamp.log');
+        await serverLogFile.rename(newPath);
+        _logger.info('Renamed existing server log file to: $newPath');
+      }
 
       try {
         _logFile = File(clientLogPath).openWrite(mode: FileMode.append);
-        _logger.info('Log file opened successfully');
+        _serverLogFile = File(serverLogPath).openWrite(mode: FileMode.append);
+        _logger.info('Log files opened successfully');
 
         // Configure root logger to capture ALL logs
         Logger.root.level = Level.ALL;
@@ -73,7 +103,7 @@ class ServerManager {
 
         _logger.info('Logging initialization completed');
       } catch (e) {
-        _logger.severe('Error opening log file: $e');
+        _logger.severe('Error opening log files: $e');
       }
     } catch (e, stack) {
       _logger.severe('Fatal error during logging initialization: $e');
@@ -183,65 +213,102 @@ class ServerManager {
       return;
     }
 
+    HttpClient? client;
     try {
-      _isShuttingDown = true;
-      _keepAlive = false;
-      _logger.info('Stopping server...');
-
       if (_serverProcess != null) {
-        await _forceKillServer();
+        client = HttpClient();
+        try {
+          _logger.info('Sending shutdown request to server...');
+          final request = await client
+              .post('localhost', serverPort, '/shutdown')
+              .timeout(const Duration(seconds: 5));
+
+          final response = await request.close();
+          final responseBody = await response.transform(utf8.decoder).join();
+          final responseData = json.decode(responseBody);
+
+          final serverTimeout = responseData['timeout'] ?? 30;
+          _logger.info('Server shutdown timeout: $serverTimeout seconds');
+
+          if (response.statusCode == 202) {
+            _logger.info('Server acknowledged shutdown request');
+
+            // Wait for server to complete shutdown
+            final deadline =
+                DateTime.now().add(Duration(seconds: serverTimeout));
+            while (DateTime.now().isBefore(deadline)) {
+              if (_serverProcess == null ||
+                  !await _isProcessRunning(_serverProcess!.pid)) {
+                _logger.info('Server process terminated gracefully');
+                break;
+              }
+              await Future.delayed(const Duration(seconds: 1));
+            }
+          } else {
+            _logger.warning(
+                'Unexpected shutdown response: ${response.statusCode}');
+          }
+        } on TimeoutException {
+          _logger.warning('Shutdown request timed out');
+        } catch (e) {
+          _logger.warning('Failed to send shutdown request: $e');
+        }
+
+        // If server is still running after graceful shutdown attempt
+        if (_serverProcess != null &&
+            await _isProcessRunning(_serverProcess!.pid)) {
+          _logger
+              .warning('Server still running after graceful shutdown period');
+          await _forceKillServer();
+        }
+
         _serverProcess = null;
       }
 
       _isRunning = false;
+
+      // Cleanup any remaining resources
+      await disposeResources();
     } catch (e, stack) {
-      _logger.severe('Error stopping server', e, stack);
+      _logger.severe('Error during server shutdown', e, stack);
     } finally {
-      _isShuttingDown = false;
+      client?.close();
+      _logger.info('Setting shutdown state to false');
     }
   }
 
-  // Add this helper method for force killing
   static Future<void> _forceKillServer() async {
-    if (!await _isServerResponding()) {
-      _logger.info('Server is unresponsive, proceeding with force kill');
+    _logger.warning('Initiating force kill of server process...');
+    try {
       if (Platform.isWindows) {
-        try {
-          // Try graceful shutdown first
-          _serverProcess?.kill();
-          await Future.delayed(const Duration(seconds: 2));
+        // First try graceful termination
+        await Process.run('taskkill', ['/PID', '${_serverProcess!.pid}']);
+        await Future.delayed(const Duration(seconds: 2));
 
-          // Check if process is still running before force kill
-          if (_serverProcess != null &&
-              await _isProcessRunning(_serverProcess!.pid)) {
-            final result = await Process.run(
-              'taskkill',
-              ['/F', '/T', '/PID', '${_serverProcess!.pid}'],
-              runInShell: true,
-            );
-
-            if (result.exitCode != 0) {
-              _logger.warning(
-                  'Failed to kill by PID, attempting to kill server.exe');
-              await Process.run(
-                'taskkill',
-                ['/F', '/IM', 'server.exe'],
-                runInShell: true,
-              );
-            }
-          }
-        } catch (e) {
-          _logger.severe('Failed to kill server process: $e');
-          _serverProcess?.kill(ProcessSignal.sigkill);
+        // If still running, force kill tree
+        if (await _isProcessRunning(_serverProcess!.pid)) {
+          await Process.run(
+              'taskkill', ['/F', '/T', '/PID', '${_serverProcess!.pid}']);
         }
-      } else {
-        _serverProcess?.kill(ProcessSignal.sigkill);
-      }
 
-      _serverProcess = null;
-      _isRunning = false;
-    } else {
-      _logger.info('Server is still responding, skipping force kill');
+        // Cleanup any orphaned processes as last resort
+        await Process.run('taskkill', ['/F', '/IM', 'server.exe'],
+            runInShell: true);
+      } else {
+        // On Unix systems, try SIGTERM first
+        _serverProcess?.kill(ProcessSignal.sigterm);
+        await Future.delayed(const Duration(seconds: 2));
+
+        // If still running, try SIGKILL
+        if (await _isProcessRunning(_serverProcess!.pid)) {
+          _serverProcess?.kill(ProcessSignal.sigkill);
+
+          // Kill any child processes
+          await Process.run('pkill', ['-KILL', '-P', '${_serverProcess!.pid}']);
+        }
+      }
+    } catch (e) {
+      _logger.severe('Failed to force kill server: $e');
     }
   }
 
@@ -361,9 +428,11 @@ class ServerManager {
     }
   }
 
-  static Future<void> dispose() async {
+  static Future<void> disposeResources() async {
     await _logFile?.flush();
     await _logFile?.close();
+    await _serverLogFile?.flush();
+    await _serverLogFile?.close();
   }
 
   static Future<String> getInstallPath() async {
@@ -393,5 +462,24 @@ class ServerManager {
     final server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
     server.close();
     return true;
+  }
+
+  static void forceStop() {
+    _logger.warning('Force stopping server process...');
+    try {
+      if (_serverProcess != null) {
+        if (Platform.isWindows) {
+          Process.runSync(
+              'taskkill', ['/F', '/T', '/PID', '${_serverProcess!.pid}']);
+        } else {
+          _serverProcess!.kill(ProcessSignal.sigkill);
+        }
+        _serverProcess = null;
+      }
+      _isRunning = false;
+      _keepAlive = false;
+    } catch (e) {
+      _logger.severe('Error during force stop: $e');
+    }
   }
 }

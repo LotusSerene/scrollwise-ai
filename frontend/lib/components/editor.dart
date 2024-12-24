@@ -10,6 +10,7 @@ import '../utils/text_utils.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:logging/logging.dart';
+import 'dart:async';
 
 final _logger = Logger('Editor');
 
@@ -359,7 +360,7 @@ class _EditorState extends State<Editor> {
         type: FileType.custom,
         allowedExtensions: ['txt', 'md', 'pdf', 'doc', 'docx'],
         allowMultiple: true,
-        withData: true,
+        withReadStream: true,
       );
 
       if (!mounted) return;
@@ -367,57 +368,88 @@ class _EditorState extends State<Editor> {
       if (result != null) {
         for (var file in result.files) {
           if (!mounted) break;
-          if (file.bytes == null) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Error: Could not read file ${file.name}')));
+
+          if (file.size == 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error: Empty file ${file.name}')),
+            );
             continue;
           }
 
-          String content;
-          final title = file.name
-              .replaceAll(RegExp(r'\.[^/.]+$'), ''); // Remove extension
-
-          // Handle text files directly
-          if (file.extension?.toLowerCase() == 'txt' ||
-              file.extension?.toLowerCase() == 'md') {
-            content = utf8.decode(file.bytes!);
-            await _createChapterFromContent(title, content);
-          }
-          // Handle other document types
-          else {
-            // Create multipart request for document processing
-            final request = http.MultipartRequest(
-              'POST',
-              Uri.parse(
-                  '$apiUrl/documents/extract?project_id=${widget.projectId}'),
-            );
-
-            request.headers.addAll(await getAuthHeaders());
-            request.files.add(
-              http.MultipartFile.fromBytes(
-                'file',
-                file.bytes!,
-                filename: file.name,
-                contentType:
-                    MediaType.parse(_getContentType(file.extension ?? '')),
-              ),
-            );
-
-            final streamedResponse = await request.send();
-            final response = await http.Response.fromStream(streamedResponse);
-
-            if (response.statusCode == 200) {
-              content = json.decode(utf8.decode(response.bodyBytes))['text'];
-              await _createChapterFromContent(title, content);
+          try {
+            if (file.extension?.toLowerCase() == 'txt' ||
+                file.extension?.toLowerCase() == 'md') {
+              final bytes = await file.readStream!
+                  .transform(
+                      StreamTransformer<List<int>, List<int>>.fromHandlers(
+                          handleData: (data, sink) => sink.add(data)))
+                  .fold<List<int>>(
+                      [], (previous, element) => previous..addAll(element));
+              final content = utf8.decode(bytes);
+              await _createChapterFromContent(
+                  file.name.replaceAll(RegExp(r'\.[^/.]+$'), ''), content);
             } else {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error processing: ${file.name}')));
-              continue;
+              final request = http.MultipartRequest(
+                'POST',
+                Uri.parse(
+                    '$apiUrl/documents/extract?project_id=${widget.projectId}'),
+              );
+
+              request.headers.addAll(await getAuthHeaders());
+
+              request.files.add(
+                http.MultipartFile(
+                  'file',
+                  file.readStream!,
+                  file.size,
+                  filename: file.name,
+                  contentType:
+                      MediaType.parse(_getContentType(file.extension ?? '')),
+                ),
+              );
+
+              final response = await request.send().timeout(
+                const Duration(minutes: 5),
+                onTimeout: () {
+                  throw TimeoutException('Upload timed out');
+                },
+              );
+
+              final responseData = await response.stream.toBytes();
+              final responseString = utf8.decode(responseData);
+
+              if (response.statusCode == 200 || response.statusCode == 201) {
+                final content = json.decode(responseString)['text'];
+                await _createChapterFromContent(
+                  file.name.replaceAll(RegExp(r'\.[^/.]+$'), ''),
+                  content,
+                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Successfully imported: ${file.name}')),
+                  );
+                }
+                _logger.info('Successfully imported: ${file.name}');
+                await _fetchChapters();
+              } else {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error processing: ${file.name}')),
+                );
+              }
             }
+          } catch (e) {
+            _logger.severe('Error processing file ${file.name}: $e');
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content:
+                      Text('Error processing: ${file.name} - ${e.toString()}')),
+            );
           }
         }
-        // Refresh chapter list
+
         if (!mounted) return;
         await Provider.of<AppState>(context, listen: false)
             .fetchChapters(widget.projectId);
@@ -426,36 +458,64 @@ class _EditorState extends State<Editor> {
       if (!mounted) return;
       _logger.severe('Error importing documents: $error');
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error importing documents')));
+        SnackBar(
+            content: Text('Error importing documents: ${error.toString()}')),
+      );
     }
   }
 
   Future<void> _createChapterFromContent(String title, String content) async {
+    final client = http.Client();
     try {
-      final response = await http.post(
-        Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-        headers: await getAuthHeaders(),
-        body: json.encode({
+      var uri = Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}');
+      var request = http.Request('POST', uri);
+      request.headers.addAll(await getAuthHeaders());
+      request.body = json.encode({
+        'title': title,
+        'content': content,
+        'project_id': widget.projectId,
+      });
+
+      var streamedResponse = await client.send(request);
+
+      // Follow redirect if needed
+      while (streamedResponse.statusCode == 307 ||
+          streamedResponse.statusCode == 302) {
+        final location = streamedResponse.headers['location'];
+        if (location == null) break;
+
+        uri = uri.resolve(location);
+        request = http.Request('POST', uri);
+        request.headers.addAll(await getAuthHeaders());
+        request.body = json.encode({
           'title': title,
           'content': content,
           'project_id': widget.projectId,
-        }),
-      );
+        });
 
-      if (response.statusCode == 200) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Imported: $title')));
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error importing: $title')));
+        streamedResponse = await client.send(request);
       }
-    } catch (error) {
-      _logger.severe('Error creating chapter: $error');
+
+      final response = await http.Response.fromStream(streamedResponse);
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error creating chapter: $title')));
+
+      if (response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 307) {
+        final responseData = json.decode(utf8.decode(response.bodyBytes));
+        if (!responseData.containsKey('error')) {
+          Provider.of<AppState>(context, listen: false)
+              .addChapter(responseData['chapter'] ?? responseData);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Successfully imported: $title')),
+          );
+        } else {
+          throw Exception(responseData['error']);
+        }
+      }
+    } finally {
+      client.close();
     }
   }
 
