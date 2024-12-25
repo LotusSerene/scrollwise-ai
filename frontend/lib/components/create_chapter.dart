@@ -10,11 +10,13 @@ import '../providers/app_state.dart';
 class CreateChapter extends StatefulWidget {
   final String projectId;
   final bool readOnly;
+  final bool showAppBar;
 
   const CreateChapter({
     Key? key,
     required this.projectId,
     this.readOnly = false,
+    this.showAppBar = true,
   }) : super(key: key);
 
   @override
@@ -482,7 +484,7 @@ class _CreateChapterState extends State<CreateChapter> {
         children: [
           ListTile(
             title: Text(
-              'Generated Chapter ${_displayedChapterIndex + 1}',
+              'Generated Chapter',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             trailing: Row(
@@ -520,6 +522,35 @@ class _CreateChapterState extends State<CreateChapter> {
     );
   }
 
+  Future<bool> _onWillPop() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    if (appState.chapterCreationState['isGenerating']) {
+      final shouldLeave = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Generation in Progress'),
+          content: const Text(
+              'Chapter generation is still in progress. Are you sure you want to leave?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Stay'),
+            ),
+            TextButton(
+              onPressed: () {
+                appState.cancelChapterGeneration();
+                Navigator.of(context).pop(true);
+              },
+              child: const Text('Leave'),
+            ),
+          ],
+        ),
+      );
+      return shouldLeave ?? false;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -527,7 +558,7 @@ class _CreateChapterState extends State<CreateChapter> {
         final generationState = appState.chapterCreationState;
         _isGenerating = generationState['isGenerating'];
 
-        return Container(
+        Widget content = Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: const Color(0xFF212529),
@@ -805,6 +836,49 @@ class _CreateChapterState extends State<CreateChapter> {
             },
           ),
         );
+
+        if (widget.showAppBar) {
+          return PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, result) {
+              if (!didPop) {
+                _onWillPop().then((shouldPop) {
+                  if (shouldPop && context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+                });
+              }
+            },
+            child: Scaffold(
+              appBar: AppBar(
+                elevation: 0,
+                title: Row(
+                  children: [
+                    Icon(Icons.create_new_folder,
+                        color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 12),
+                    const Text('Create New Chapter'),
+                  ],
+                ),
+              ),
+              body: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Theme.of(context).colorScheme.surface,
+                      Theme.of(context).colorScheme.surface.withOpacity(0.8),
+                    ],
+                  ),
+                ),
+                child: content,
+              ),
+            ),
+          );
+        }
+
+        return content;
       },
     );
   }

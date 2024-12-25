@@ -91,10 +91,10 @@ class _CharacterRelationshipsScreenState
           onCreateRelationship: (character1Id, character2Id, relationshipType) {
             Provider.of<RelationshipProvider>(context, listen: false)
                 .createRelationship(
-              character1Id,
-              character2Id,
-              relationshipType,
-              widget.projectId,
+              character1Id: character1Id,
+              relatedCharacterId: character2Id,
+              relationshipType: relationshipType,
+              projectId: widget.projectId,
             );
           },
         );

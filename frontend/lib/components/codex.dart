@@ -171,6 +171,8 @@ class _CodexState extends State<Codex> {
 
       try {
         final headers = await getAuthHeaders();
+        headers['Content-Type'] = 'application/json';
+
         final response = await http.put(
           Uri.parse(
               '$apiUrl/codex-items/${item['id']}?project_id=${widget.projectId}'),
@@ -191,8 +193,8 @@ class _CodexState extends State<Codex> {
           navigator.pop(); // Close the dialog
           _fetchCodexItems(); // Refresh the codex items
         } else {
-          final responseBody = json.decode(response.body);
-          final error = responseBody['detail'] ?? 'Error updating codex item';
+          final responseData = json.decode(response.body);
+          final error = responseData['detail'] ?? 'Error updating codex item';
           scaffoldMessenger.showSnackBar(
             SnackBar(
                 content:
@@ -419,6 +421,8 @@ class _CodexState extends State<Codex> {
 
     try {
       final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
       final body = json.encode({
         'name': _nameController.text,
         'description': _descriptionController.text,
@@ -446,8 +450,8 @@ class _CodexState extends State<Codex> {
         );
         _fetchCodexItems(); // Refresh the list
       } else {
-        final error =
-            json.decode(response.body)['error'] ?? 'Error adding codex item';
+        final responseData = json.decode(response.body);
+        final error = responseData['detail'] ?? 'Error adding codex item';
         scaffoldMessenger.showSnackBar(
           SnackBar(content: Text(error)),
         );

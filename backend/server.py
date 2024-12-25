@@ -251,10 +251,17 @@ class SessionManager:
         
     def _load_sessions(self):
         try:
-            with open('sessions.json', 'r') as f:
-                self.sessions = json.load(f)
-        except FileNotFoundError:
-            self.sessions = {}
+            if os.path.exists(self.sessions_file) and os.path.getsize(self.sessions_file) > 0:
+                with open(self.sessions_file, 'r') as f:
+                    return json.load(f)
+            return {}  # Return empty dict if file doesn't exist or is empty
+        except json.JSONDecodeError:
+            # If the file is corrupted, return empty dict and log error
+            logger.error("Sessions file is corrupted, starting with empty sessions")
+            return {}
+        except Exception as e:
+            logger.error(f"Error loading sessions: {str(e)}")
+            return {}
             
     def _save_sessions(self):
         with open('sessions.json', 'w') as f:
@@ -2260,15 +2267,17 @@ async def update_event(
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": event_id, "item_type": "event"},
                 "update",
-                new_content=event_data['description'],
-                new_metadata={
+                event_data['description'],
+                {
+                    "item_id": event_id,
                     "title": event_data['title'],
-                    "type": "event",
+                    "item_type": "event",
                     "date": event_data['date'],
                     "character_id": event_data.get('character_id'),
                     "location_id": event_data.get('location_id')
                 }
             )
+            
         return {"message": "Event updated successfully"}
     except Exception as e:
         logger.error(f"Error updating event: {str(e)}")
@@ -2449,7 +2458,6 @@ async def update_location(
             location_id=location_id,
             name=location_data['name'],
             description=location_data['description'],
-            coordinates=location_data.get('coordinates'),
             project_id=project_id,
             user_id=current_user.id
         )
@@ -2459,18 +2467,19 @@ async def update_location(
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": location_id, "item_type": "location"},
                 "update",
-                new_content=f"{location_data['name']}: {location_data['description']}",
-                new_metadata={
+                location_data['description'],
+                {
+                    "item_id": location_id,
                     "name": location_data['name'],
-                    "type": "location",
-                    "coordinates": location_data.get('coordinates')
+                    "item_type": "location"
                 }
             )
+            
         return {"message": "Location updated successfully"}
     except Exception as e:
         logger.error(f"Error updating location: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @location_router.delete("/{location_id}")
 async def delete_location(
     location_id: str,

@@ -51,33 +51,35 @@ class RelationshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> createRelationship(String characterId, String relatedCharacterId,
-      String relationshipType, String projectId,
-      {String? description} // Add description parameter
-      ) async {
+  Future<void> createRelationship({
+    required String character1Id,
+    required String relatedCharacterId,
+    required String relationshipType,
+    required String projectId,
+    String? description,
+  }) async {
     try {
       final headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse('$apiUrl/relationships'),
+        Uri.parse('$apiUrl/relationships/'),
         headers: headers,
         body: json.encode({
-          'character_id': characterId,
+          'character_id': character1Id,
           'related_character_id': relatedCharacterId,
           'relationship_type': relationshipType,
           'project_id': projectId,
-          'description': description, // Include description in request
+          if (description != null) 'description': description,
         }),
       );
 
-      if (response.statusCode == 200) {
-        await getRelationships(projectId);
-      } else {
+      if (response.statusCode != 200) {
         throw Exception('Failed to create relationship');
       }
+
+      // Refresh relationships after creating
+      await getRelationships(projectId);
     } catch (e) {
-      _error = 'An error occurred: $e';
-      notifyListeners();
+      rethrow;
     }
   }
 

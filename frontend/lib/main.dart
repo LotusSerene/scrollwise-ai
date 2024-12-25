@@ -1,29 +1,38 @@
-import 'package:flutter/material.dart';
-import 'dart:io';
+// Dart imports
 import 'dart:async';
+import 'dart:io';
+
+// Flutter imports
+import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+import 'package:window_manager/window_manager.dart';
+
+// Providers
 import 'providers/app_state.dart';
-import 'screens/home_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/login_screen.dart';
-import 'screens/editor_screen.dart';
-import 'screens/projects_screen.dart';
-import 'screens/codex_screen.dart';
-import 'screens/validity_screen.dart';
-import 'utils/auth.dart';
-import 'screens/knowledge_base_screen.dart';
-import 'screens/query_screen.dart';
-import 'screens/chapters_screen.dart';
-import 'utils/theme.dart';
 import 'providers/preset_provider.dart';
 import 'providers/relationship_provider.dart';
-import 'screens/timeline_screen.dart';
+
+// Screens
+import 'screens/chapters_screen.dart';
+import 'screens/codex_screen.dart';
+import 'screens/editor_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/knowledge_base_screen.dart';
 import 'screens/landing_screen.dart';
-import 'utils/server_manager.dart';
-import 'package:logging/logging.dart';
-import 'package:window_manager/window_manager.dart';
+import 'screens/login_screen.dart';
+import 'screens/projects_screen.dart';
+import 'screens/query_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/timeline_screen.dart';
+import 'screens/validity_screen.dart';
+
+// Utils
+import 'utils/auth.dart';
 import 'utils/config_handler.dart';
+import 'utils/server_manager.dart';
+import 'utils/theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 

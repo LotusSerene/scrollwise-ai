@@ -181,27 +181,31 @@ class ServerManager extends ChangeNotifier {
   }
 
   static void _keepServerAlive() {
-    Timer.periodic(const Duration(seconds: 5), (timer) async {
+    Timer.periodic(const Duration(seconds: 60), (timer) async {
       if (!_keepAlive) {
         timer.cancel();
         return;
       }
 
       if (_serverProcess != null) {
-        _logger.info('Server heartbeat check - PID: ${_serverProcess!.pid}');
-        final isResponding = await _isServerResponding();
-        if (!isResponding) {
-          _logger.warning('Server connection lost, attempting restart');
-          await stopServer();
-          await Future.delayed(const Duration(seconds: 2));
-          try {
-            await startServer();
-            _logger.info('Server process restarted');
-          } catch (e) {
-            _logger.severe('Failed to restart server process', e);
+        int failedChecks = 0;
+
+        // Multiple check attempts before taking action
+        for (int i = 0; i < 5; i++) {
+          if (!await _isServerResponding()) {
+            failedChecks++;
+            await Future.delayed(const Duration(seconds: 10));
+          } else {
+            // Server responded, reset counter and continue monitoring
+            return;
           }
-        } else {
-          _logger.info('Server health check successful');
+        }
+
+        // Only restart if all checks failed
+        if (failedChecks == 5) {
+          _logger.warning('Server unresponsive after multiple checks');
+          await stopServer();
+          await startServer();
         }
       }
     });
@@ -389,23 +393,19 @@ class ServerManager extends ChangeNotifier {
     try {
       final request = await client.get('localhost', serverPort, '/health');
       final response = await request.close().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () {
-          _logger.warning('Health check timed out');
-          throw TimeoutException('Health check timed out');
-        },
-      );
+            const Duration(seconds: 10),
+          );
 
-      // Drain response to free resources
-      await response.drain<void>();
-
-      // Consider 401/403 as "responding" since it means the server is running
-      if (response.statusCode == 401 || response.statusCode == 403) {
-        _logger.info('Server is running but returned ${response.statusCode}');
+      if (response.statusCode == 200) {
+        return true;
+      } else if (response.statusCode == 503 || response.statusCode == 429) {
+        // Consider server "busy" but alive if we get these status codes
+        _logger.info('Server is busy but running');
         return true;
       }
 
-      return response.statusCode == 200;
+      _logger.warning('Unexpected status code: ${response.statusCode}');
+      return false;
     } on SocketException catch (e) {
       // Handle specific connection issues
       if (e.osError?.errorCode == 61 || e.osError?.errorCode == 10061) {
@@ -415,10 +415,10 @@ class ServerManager extends ChangeNotifier {
         _logger.warning('Socket error during health check: ${e.message}');
       }
       return false;
-    } on HttpException catch (e) {
-      // Handle HTTP protocol errors
-      _logger.warning('HTTP error during health check: $e');
-      return false;
+    } on TimeoutException {
+      // Consider server "busy" if request times out
+      _logger.info('Health check timed out - server may be busy');
+      return true; // Changed to return true on timeout
     } catch (e) {
       // Handle unexpected errors without assuming server is down
       _logger.severe('Unexpected error during health check: $e');

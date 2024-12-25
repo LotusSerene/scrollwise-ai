@@ -179,7 +179,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         );
 
         if (response.statusCode == 200) {
-          await _loadEvents();
+          await _loadData();
           _showSuccess('Event updated successfully');
         }
       } catch (e) {
@@ -207,7 +207,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         );
 
         if (response.statusCode == 200) {
-          await _loadLocations();
+          await _loadData();
           _showSuccess('Location updated successfully');
         }
       } catch (e) {
