@@ -60,14 +60,14 @@ class RelationshipProvider extends ChangeNotifier {
   }) async {
     try {
       final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse('$apiUrl/relationships/'),
+        Uri.parse('$apiUrl/relationships/?project_id=$projectId'),
         headers: headers,
         body: json.encode({
           'character_id': character1Id,
           'related_character_id': relatedCharacterId,
           'relationship_type': relationshipType,
-          'project_id': projectId,
           if (description != null) 'description': description,
         }),
       );

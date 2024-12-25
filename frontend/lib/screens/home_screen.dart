@@ -128,11 +128,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
-                onPressed: () => appState.refreshProjectData(),
-              ),
-              IconButton(
                 icon: const Icon(Icons.exit_to_app),
                 tooltip: 'Back to Projects',
                 onPressed: () =>

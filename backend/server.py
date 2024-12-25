@@ -12,11 +12,10 @@ import time
 
 import os
 import uuid
-from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from models import CodexItemType, WorldbuildingSubtype
 from database import User, Chapter, Project, CodexItem
-from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header
+from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
@@ -1174,7 +1173,7 @@ async def delete_backstory(
         logger.error(f"Error deleting backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@codex_item_router.post("/")
+@codex_item_router.post("")
 async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
     try:
         item_id = await db_instance.create_codex_item(
@@ -1730,34 +1729,37 @@ async def delete_validity_check(check_id: str, project_id: str, current_user: Us
 
 @relationship_router.post("/")
 async def create_relationship(
-    character_id: str,
-    project_id: str,
-    related_character_id: str,
-    relationship_type: str,
-    description: Optional[str] = None,
+    project_id: str = Query(...),  # Make project_id a query parameter
+    data: Dict[str, Any] = Body(...),  # Accept request body as a dictionary
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Validate required fields
+        required_fields = ['character_id', 'related_character_id', 'relationship_type']
+        for field in required_fields:
+            if field not in data:
+                raise HTTPException(status_code=422, detail=f"Missing required field: {field}")
+
         # Create in database
         relationship_id = await db_instance.create_character_relationship(
-            character_id, 
-            related_character_id, 
-            relationship_type, 
-            project_id,
-            description
+            character_id=data['character_id'],
+            related_character_id=data['related_character_id'],
+            relationship_type=data['relationship_type'],
+            project_id=project_id,
+            description=data.get('description')  # Optional field
         )
         
         # Add to knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             await agent_manager.add_to_knowledge_base(
                 "relationship",
-                description or relationship_type,
+                data.get('description', '') or data['relationship_type'],
                 {
                     "id": relationship_id,
-                    "character_id": character_id,
-                    "related_character_id": related_character_id,
+                    "character_id": data['character_id'],
+                    "related_character_id": data['related_character_id'],
                     "type": "relationship",
-                    "relationship_type": relationship_type
+                    "relationship_type": data['relationship_type']
                 }
             )
             
@@ -1818,8 +1820,15 @@ async def delete_relationship(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
-        # Delete from database - reorder parameters to match method signature
-        await db_instance.delete_character_relationship(relationship_id, current_user.id, project_id)
+        # Delete from database - update parameter order to match the database method
+        success = await db_instance.delete_character_relationship(
+            relationship_id,
+            project_id,  # Add project_id parameter
+            current_user.id
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Relationship not found")
         
         # Delete from knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
@@ -2267,14 +2276,13 @@ async def update_event(
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": event_id, "item_type": "event"},
                 "update",
-                event_data['description'],
-                {
-                    "item_id": event_id,
+                new_content=event_data['description'],
+                new_metadata={
                     "title": event_data['title'],
-                    "item_type": "event",
                     "date": event_data['date'],
                     "character_id": event_data.get('character_id'),
-                    "location_id": event_data.get('location_id')
+                    "location_id": event_data.get('location_id'),
+                    "type": "event"
                 }
             )
             
@@ -2467,11 +2475,11 @@ async def update_location(
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": location_id, "item_type": "location"},
                 "update",
-                location_data['description'],
-                {
-                    "item_id": location_id,
+                new_content=f"{location_data['name']}: {location_data['description']}",
+                new_metadata={
                     "name": location_data['name'],
-                    "item_type": "location"
+                    "type": "location",
+                    "coordinates": location_data.get('coordinates')
                 }
             )
             

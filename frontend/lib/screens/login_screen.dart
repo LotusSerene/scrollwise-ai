@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final _logger = Logger('Login');
 
@@ -520,7 +521,40 @@ class _LoginScreenState extends State<LoginScreen> {
           icon: Icons.help_outline,
           label: 'Need Help?',
           onPressed: () {
-            // Add help functionality
+            showDialog(
+              context: context,
+              builder: (BuildContext context) => AlertDialog(
+                title: const Text('Need Help?'),
+                content: const Text(
+                  'Join our Discord server or post an issue on GitHub for assistance.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      final Uri url = Uri.parse('https://discord.gg/QHkAMkss');
+                      if (!await launchUrl(url)) {
+                        throw Exception('Could not launch $url');
+                      }
+                    },
+                    child: const Text('Join Discord'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      final Uri url = Uri.parse(
+                          'https://github.com/LotusSerene/scrollwise-ai');
+                      if (!await launchUrl(url)) {
+                        throw Exception('Could not launch $url');
+                      }
+                    },
+                    child: const Text('GitHub Issues'),
+                  ),
+                ],
+              ),
+            );
           },
         ),
         const SizedBox(width: 24),

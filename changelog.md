@@ -171,3 +171,6 @@
 - Update frontend to use scaffoldMessenger instead of AppNotification
 - Better session management
 - Fix uploading documents to knowledge base and editor
+- Better server health check
+- Remove unused screens
+- Fix locations, relationships, and events not working properly

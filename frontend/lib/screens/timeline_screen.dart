@@ -293,6 +293,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _showCreateDialog() async {
     if (_tabController.index == 0) {
+      // Events tab
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (BuildContext context) => const EventDialog(),
@@ -306,15 +307,16 @@ class _TimelineScreenState extends State<TimelineScreen>
             headers: headers,
             body: json.encode(result),
           );
-          if (response.statusCode == 201) {
-            await _loadEvents(); // This will refresh the events list
+          if (response.statusCode == 201 || response.statusCode == 200) {
             _showSuccess('Event created successfully');
+            await _loadData(); // Load all data instead of just events
           }
         } catch (e) {
           _showError('Error creating event: $e');
         }
       }
     } else {
+      // Locations tab
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (BuildContext context) => const LocationDialog(),
@@ -328,9 +330,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             headers: headers,
             body: json.encode(result),
           );
-          if (response.statusCode == 201) {
-            await _loadLocations(); // This will refresh the locations list
+          if (response.statusCode == 201 || response.statusCode == 200) {
             _showSuccess('Location created successfully');
+            await _loadData(); // Load all data instead of just locations
           }
         } catch (e) {
           _showError('Error creating location: $e');
@@ -669,14 +671,21 @@ class _TimelineScreenState extends State<TimelineScreen>
         SpeedDialChild(
           child: const Icon(Icons.event),
           label: 'Add Event',
-          onTap: () => _showCreateDialog(),
+          onTap: () {
+            _tabController.animateTo(0);
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _showCreateDialog();
+            });
+          },
         ),
         SpeedDialChild(
           child: const Icon(Icons.place),
           label: 'Add Location',
           onTap: () {
             _tabController.animateTo(1);
-            _showCreateDialog();
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _showCreateDialog();
+            });
           },
         ),
         SpeedDialChild(

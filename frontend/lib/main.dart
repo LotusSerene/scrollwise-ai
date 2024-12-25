@@ -76,26 +76,32 @@ Future<void> main() async {
     log.info('Starting core services...');
     await ServerManager.initializeLogging();
 
-    // Initialize services concurrently
-    await Future.wait([
-      ServerManager.startServer().timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          log.warning('Server start timed out, continuing...');
-          throw TimeoutException('Server start timed out');
-        },
-      ),
-      supabase.Supabase.initialize(
-        url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
-        anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          log.warning('Supabase initialization failed');
-          throw TimeoutException('Supabase initialization failed');
-        },
-      ),
-    ]);
+    // Modify the initialization block to handle errors better
+    try {
+      await Future.wait([
+        ServerManager.startServer().timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            log.warning('Server start timed out, continuing...');
+            throw TimeoutException('Server start timed out');
+          },
+        ),
+        supabase.Supabase.initialize(
+          url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
+          anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
+        ).timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            log.warning('Supabase initialization failed');
+            throw TimeoutException('Supabase initialization failed');
+          },
+        ),
+      ]);
+    } catch (e) {
+      log.severe('Service initialization failed: $e');
+      _preventExit = false; // Allow exit when there's a startup error
+      rethrow;
+    }
 
     log.info('Launching main application...');
 
@@ -107,7 +113,7 @@ Future<void> main() async {
           ChangeNotifierProvider(create: (_) => RelationshipProvider()),
           ChangeNotifierProvider(create: (context) => PresetProvider()),
         ],
-        child: const MyApp(),
+        child: const ScrollWiseApp(),
       ),
     );
 
@@ -126,11 +132,12 @@ Future<void> main() async {
     log.info('Application started successfully');
   } catch (e, stackTrace) {
     log.severe('Fatal error during startup', e, stackTrace);
+    _preventExit = false; // Allow exit when there's a startup error
     _showErrorScreen('Startup Error: ${e.toString()}');
   }
 }
 
-// Helper function to show error screen
+// Modify the error screen to include an exit button
 void _showErrorScreen(String errorMessage) {
   runApp(
     MaterialApp(
@@ -150,6 +157,14 @@ void _showErrorScreen(String errorMessage) {
                 errorMessage,
                 style: const TextStyle(color: Colors.white),
                 textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () async {
+                  await windowManager.destroy();
+                  exit(1);
+                },
+                child: const Text('Exit Application'),
               ),
             ],
           ),
@@ -171,21 +186,21 @@ class WindowsBindingHandler {
   }
 }
 
-class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+class ScrollWiseApp extends StatefulWidget {
+  const ScrollWiseApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  State<ScrollWiseApp> createState() => _ScrollWiseAppState();
 }
 
-class _MyAppState extends State<MyApp>
+class _ScrollWiseAppState extends State<ScrollWiseApp>
     with WidgetsBindingObserver, WindowListener {
-  final log = Logger('MyApp');
+  final log = Logger('ScrollWiseApp');
 
   @override
   void initState() {
     super.initState();
-    log.info('Initializing MyApp state...');
+    log.info('Initializing ScrollWiseApp state...');
     WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
 

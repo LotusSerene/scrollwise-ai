@@ -28,21 +28,10 @@ class _CharacterRelationshipsScreenState
     extends State<CharacterRelationshipsScreen> {
   List<Map<String, dynamic>> characters = [];
   Set<String> selectedCharacters = {};
-  late AppState _appState;
 
   @override
   void initState() {
     super.initState();
-    _appState = Provider.of<AppState>(context, listen: false);
-
-    // Initialize with saved state if it exists
-    final savedState = _appState.getGenerationState('character_relationships');
-    if (savedState != null) {
-      setState(() {
-        selectedCharacters = Set<String>.from(
-            savedState.lastGeneratedItem?['selectedCharacters'] ?? {});
-      });
-    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final relationshipProvider =

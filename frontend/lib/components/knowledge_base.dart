@@ -94,14 +94,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         headers: await getAuthHeaders(),
       );
 
-      _logger.info('Fetch response status: ${response.statusCode}');
-      _logger.info('Fetch response body: ${response.body}');
-
       if (!_mounted) return;
 
       if (response.statusCode == 200) {
         final content = json.decode(utf8.decode(response.bodyBytes))['content'];
-        _logger.info('Fetched content length: ${content.length}');
 
         _safeSetState(() {
           _knowledgeBaseContent = content;
@@ -193,7 +189,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
-        _logger.info('Selected file: ${file.name}');
 
         if (file.size == 0) {
           _logger.severe('Error: Empty file ${file.name}');

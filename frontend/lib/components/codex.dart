@@ -430,31 +430,46 @@ class _CodexState extends State<Codex> {
         'subtype': _selectedSubtype == 'all' ? null : _selectedSubtype,
       });
 
-      final response = await http.post(
-        Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
-        headers: headers,
-        body: body,
-      );
+      // Use the http client with automatic redirect handling
+      final client = http.Client();
+      try {
+        final response = await client
+            .post(
+              Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
+              headers: headers,
+              body: body,
+            )
+            .timeout(const Duration(seconds: 30)); // Add timeout just in case
 
-      if (!context.mounted) return;
-      if (response.statusCode == 200) {
-        _nameController.clear();
-        _descriptionController.clear();
-        setState(() {
-          _selectedType = 'lore';
-          _selectedSubtype = 'all';
-        });
-        navigator.pop(); // Close the dialog
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Codex item added successfully')),
-        );
-        _fetchCodexItems(); // Refresh the list
-      } else {
-        final responseData = json.decode(response.body);
-        final error = responseData['detail'] ?? 'Error adding codex item';
-        scaffoldMessenger.showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        if (!context.mounted) return;
+        if (response.statusCode == 200) {
+          _nameController.clear();
+          _descriptionController.clear();
+          setState(() {
+            _selectedType = 'lore';
+            _selectedSubtype = 'all';
+          });
+          navigator.pop();
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Codex item added successfully')),
+          );
+          _fetchCodexItems();
+        } else {
+          String errorMessage;
+          try {
+            final responseData = json.decode(response.body);
+            errorMessage = responseData['detail'] ?? 'Unknown error occurred';
+          } catch (e) {
+            errorMessage = response.body.isNotEmpty
+                ? response.body
+                : 'Error adding codex item (Status: ${response.statusCode})';
+          }
+          scaffoldMessenger.showSnackBar(
+            SnackBar(content: Text(errorMessage)),
+          );
+        }
+      } finally {
+        client.close();
       }
     } catch (e) {
       if (!context.mounted) return;

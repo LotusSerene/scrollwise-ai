@@ -56,8 +56,6 @@ class AppState extends ChangeNotifier {
     'character_relationships': GenerationState(type: 'character_relationships'),
   };
 
-  GenerationState? getGenerationState(String type) => _generationStates[type];
-
   Future<void> checkAuthState() async {
     final session = Supabase.instance.client.auth.currentSession;
     final sessionId = await getSessionId();
@@ -471,11 +469,6 @@ class AppState extends ChangeNotifier {
 
   Map<String, dynamic> get characterRelationshipsState =>
       _characterRelationshipsState;
-
-  void updateCharacterRelationshipsField(String field, dynamic value) {
-    _characterRelationshipsState[field] = value;
-    notifyListeners();
-  }
 
   void resetCharacterRelationshipsState() {
     _characterRelationshipsState = {
