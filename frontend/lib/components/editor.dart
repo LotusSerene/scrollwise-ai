@@ -273,6 +273,7 @@ class _EditorState extends State<Editor> {
 
     final chapterId =
         _selectedChapter != null ? _selectedChapter['id'] : const Uuid().v4();
+    final client = http.Client();
 
     try {
       final requestBody = {
@@ -281,67 +282,88 @@ class _EditorState extends State<Editor> {
         'project_id': widget.projectId,
       };
 
-      http.Response response;
-      if (_selectedChapter != null) {
-        // Update existing chapter
-        response = await http.put(
-          Uri.parse(
-              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
-          headers: headers,
-          body: json.encode(requestBody),
-        );
-      } else {
-        // Create new chapter
-        response = await http.post(
-          Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-          headers: headers,
-          body: utf8.encode(json.encode(requestBody)),
-        );
+      // Create the initial request
+      var uri = _selectedChapter != null
+          ? Uri.parse(
+              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}')
+          : Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}');
+
+      var request =
+          http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
+      request.headers.addAll(headers);
+      request.body = json.encode(requestBody);
+
+      var streamedResponse = await client.send(request);
+
+      // Follow redirect if needed
+      while (streamedResponse.statusCode == 307 ||
+          streamedResponse.statusCode == 302) {
+        final location = streamedResponse.headers['location'];
+        if (location == null) break;
+
+        uri = uri.resolve(location);
+        request = http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
+        request.headers.addAll(headers);
+        request.body = json.encode(requestBody);
+
+        streamedResponse = await client.send(request);
       }
+
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (!mounted) return;
 
-      final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-      if ((response.statusCode == 200 || response.statusCode == 201) &&
-          !jsonResponse.containsKey('error')) {
-        final updatedChapter = {
-          'id': chapterId,
-          ...requestBody,
-        };
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (response.body.isNotEmpty) {
+          final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+          if (!jsonResponse.containsKey('error')) {
+            final updatedChapter = {
+              'id': chapterId,
+              ...requestBody,
+            };
 
-        final appState = Provider.of<AppState>(context, listen: false);
-        if (_selectedChapter != null) {
-          appState.updateChapter(updatedChapter);
+            final appState = Provider.of<AppState>(context, listen: false);
+            if (_selectedChapter != null) {
+              appState.updateChapter(updatedChapter);
+            } else {
+              appState.addChapter(updatedChapter);
+            }
+
+            setState(() {
+              _error = null;
+              _selectedChapter = updatedChapter;
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _selectedChapter != null
+                      ? 'Chapter updated successfully'
+                      : 'Chapter created successfully',
+                ),
+              ),
+            );
+            await _fetchChapters();
+          } else {
+            final errorMessage =
+                jsonResponse['error'] ?? 'Error saving chapter';
+            throw Exception(errorMessage);
+          }
         } else {
-          appState.addChapter(updatedChapter);
-        }
-
-        if (!mounted) return;
-
-        setState(() {
-          _error = null;
-          _selectedChapter = updatedChapter;
-        });
-
-        if (!mounted) return;
-
-        if (response.statusCode == 200) {
+          // If response is successful but empty, we can consider it a success
           ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Chapter updated successfully')));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Chapter created successfully')));
+            SnackBar(
+              content: Text(
+                _selectedChapter != null
+                    ? 'Chapter updated successfully'
+                    : 'Chapter created successfully',
+              ),
+            ),
+          );
+          await _fetchChapters();
         }
-        await _fetchChapters();
       } else {
-        if (!mounted) return;
-
-        final errorMessage = jsonResponse['error'] ?? 'Error saving chapter';
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(errorMessage)));
-        setState(() {
-          _error = errorMessage;
-        });
+        throw Exception('Server returned status code: ${response.statusCode}');
       }
     } catch (error) {
       if (!mounted) return;
@@ -349,6 +371,11 @@ class _EditorState extends State<Editor> {
       setState(() {
         _error = 'Error saving chapter. Please try again later.';
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving chapter: ${error.toString()}')),
+      );
+    } finally {
+      client.close();
     }
   }
 

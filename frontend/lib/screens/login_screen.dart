@@ -101,21 +101,39 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
+        // First sign up with Supabase
         final response = await Supabase.instance.client.auth.signUp(
           email: _emailController.text,
           password: _passwordController.text,
         );
 
-        if (mounted) {
-          if (response.user != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                    'Registration successful! Please check your email to verify your account.'),
-              ),
-            );
-            _emailController.clear();
-            _passwordController.clear();
+        if (response.user != null) {
+          // Then register with our backend
+          final serverResponse = await http.post(
+            Uri.parse('$apiUrl/auth/signup'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: json.encode({
+              'email': _emailController.text,
+              'password': _passwordController.text,
+              'supabase_id': response.user!.id, // Pass the Supabase user ID
+            }),
+          );
+
+          if (serverResponse.statusCode == 201) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Registration successful!'),
+                ),
+              );
+              _emailController.clear();
+              _passwordController.clear();
+            }
+          } else {
+            throw Exception('Failed to register with backend');
           }
         }
       } on AuthException catch (error) {

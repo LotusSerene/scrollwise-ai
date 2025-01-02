@@ -11,7 +11,10 @@ import uuid
 from typing import Optional, List, Dict, Any
 from models import CodexItemType
 from supabase import create_client, Client
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -409,9 +412,6 @@ class LocationConnection(BaseConnection):
         })
         return result
 
-class ConnectionService:
-    def __init__(self, logger):
-        self.logger = logger
 
     async def get_connections(self, model_class, project_id: str, user_id: str) -> List[Dict[str, Any]]:
         try:
@@ -452,7 +452,7 @@ class ConnectionService:
             return result
             
         except Exception as e:
-            self.logger.error(f"Error getting connections: {str(e)}")
+            logger.error(f"Error getting connections: {str(e)}")
             raise
 
 class KnowledgeBaseItem(Base):
@@ -463,41 +463,55 @@ class KnowledgeBaseItem(Base):
 
 class Database:
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        try:
+            # Initialize credentials
+            supabase_url = os.getenv('SUPABASE_URL')
+            supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+            self.supabase: Client = create_client(supabase_url, supabase_key)
         
-        # Initialize credentials
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        self.supabase: Client = create_client(supabase_url, supabase_key)
-    
-        
-        # Initialize async SQLAlchemy engine
-        self.engine = create_async_engine(
-            "sqlite+aiosqlite:///local.db",
-            echo=False
-        )
-        
-        # Create async session maker
-        self.Session = async_sessionmaker(
-            self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False
-        )
+            # Initialize async SQLAlchemy engine without pooling parameters
+            self.engine = create_async_engine(
+                "sqlite+aiosqlite:///local.db",
+                echo=False,
+                pool_pre_ping=True,
+                pool_recycle=3600  # Recycle connections after 1 hour
+            )
+            
+            # Create async session maker
+            self.Session = async_sessionmaker(
+                self.engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autoflush=False
+            )
+        except Exception as e:
+            logger.error("Error initializing Database", exc_info=True)
+            raise
+
+    async def __aenter__(self):
+        """Support for async context manager."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Ensure proper cleanup when using as context manager."""
+        await self.dispose()
+
+    async def dispose(self):
+        """Dispose of the engine and close all connections."""
+        if hasattr(self, 'engine'):
+            await self.engine.dispose()
+            logger.info("Database connections disposed")
 
     async def initialize(self):
         """Initialize the database connection and create all tables."""
         try:
             async with self.engine.begin() as conn:
-                # Drop all tables if they exist (optional, remove in production)
-                #await conn.run_sync(Base.metadata.drop_all)
-                
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
                 
-            self.logger.info("Database initialized successfully")
+            logger.info("Database initialized successfully")
         except Exception as e:
-            self.logger.error(f"Error initializing database: {str(e)}")
+            logger.error("Error initializing database", exc_info=True)
             raise
 
     async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
@@ -508,7 +522,7 @@ class Database:
                 projects = result.scalars().all()
                 return [project.to_dict() for project in projects]
         except Exception as e:
-            self.logger.error(f"Error getting projects: {str(e)}")
+            logger.error("Error getting projects", exc_info=True)
             raise
 
     async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
@@ -519,46 +533,48 @@ class Database:
                 universes = result.scalars().all()
                 return [universe.to_dict() for universe in universes]
         except Exception as e:
-            self.logger.error(f"Error getting universes: {str(e)}")
+            logger.error(f"Error getting universes: {str(e)}")
             raise
 
-    async def sign_up(self, email: str, password: str) -> Dict[str, Any]:
+    async def sign_up(self, email: str, password: str, supabase_id: str) -> Dict[str, Any]:
         try:
-            # First check if user already exists locally
             async with self.Session() as session:
+                # Check if user already exists
                 query = select(User).where(User.email == email)
                 result = await session.execute(query)
                 existing_user = result.scalars().first()
+                
                 if existing_user:
-                    raise Exception("User with this email already exists")
-
-            # If no existing user, proceed with Supabase signup
-            auth_response = self.supabase.auth.sign_up({
-                "email": email,
-                "password": password
-            })
-            if not auth_response.user:
-                raise Exception("No user data in signup response")
-
-            # Create local user record
-            local_user = {
-                "id": str(uuid.uuid4()),
-                "email": email,
-            }
-            await self._create_local_user(local_user) 
-            
-            return local_user
-
+                    # If user exists but has different supabase_id, update it
+                    if existing_user.id != supabase_id:
+                        existing_user.id = supabase_id
+                        existing_user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        await session.commit()
+                    
+                    return {
+                        "id": existing_user.id,
+                        "email": existing_user.email
+                    }
+                
+                # Create new user if doesn't exist
+                new_user = User(
+                    id=supabase_id,
+                    email=email,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                session.add(new_user)
+                await session.commit()
+                
+                return {
+                    "id": new_user.id,
+                    "email": new_user.email
+                }
+                
         except Exception as e:
-            self.logger.error(f"Error in sign up: {str(e)}")
+            logger.error(f"Database sign up error: {str(e)}")
             raise
-
-    async def _create_local_user(self, local_user: Dict[str, Any]):
-        async with self.Session() as session:
-            session.add(User(**local_user))
-            await session.commit()
-            return local_user['id']
-        
+            
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         try:
@@ -576,7 +592,7 @@ class Database:
             }
             
         except Exception as e:
-            self.logger.error(f"Database sign in error: {str(e)}")
+            logger.error(f"Database sign in error: {str(e)}")
             raise
         
 
@@ -592,7 +608,7 @@ class Database:
                 
             return True
         except Exception as e:
-            self.logger.error(f"Error in sign out: {str(e)}")
+            logger.error(f"Error in sign out: {str(e)}")
             raise
 
     async def get_user_by_email(self, email: str):
@@ -612,7 +628,7 @@ class Database:
                     }
                 return None
         except Exception as e:
-            self.logger.error(f"Error getting user: {str(e)}")
+            logger.error(f"Error getting user: {str(e)}")
             return None
 
     async def get_all_chapters(self, user_id: str, project_id: str):
@@ -623,7 +639,7 @@ class Database:
                 chapters = result.scalars().all()
                 return [chapter.to_dict() for chapter in chapters]
         except Exception as e:
-            self.logger.error(f"Error fetching all chapters: {str(e)}")
+            logger.error(f"Error fetching all chapters: {str(e)}")
             raise
 
     async def create_chapter(
@@ -659,7 +675,7 @@ class Database:
                 return chapter.to_dict()
                     
         except Exception as e:
-            self.logger.error(f"Error creating chapter: {str(e)}")
+            logger.error(f"Error creating chapter: {str(e)}")
             raise
 
     async def update_chapter(self, chapter_id, title, content, user_id, project_id):
@@ -676,7 +692,7 @@ class Database:
                 else:
                     raise Exception("Chapter not found")
         except Exception as e:
-            self.logger.error(f"Error updating chapter: {str(e)}")
+            logger.error(f"Error updating chapter: {str(e)}")
             raise
 
     async def delete_chapter(self, chapter_id, user_id, project_id):
@@ -687,7 +703,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting chapter: {str(e)}")
+            logger.error(f"Error deleting chapter: {str(e)}")
             raise
 
     async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
@@ -701,7 +717,7 @@ class Database:
                 else:
                     raise Exception("Chapter not found")
         except Exception as e:
-            self.logger.error(f"Error getting chapter: {str(e)}")
+            logger.error(f"Error getting chapter: {str(e)}")
             raise
 
     async def get_all_validity_checks(self, user_id: str, project_id: str):
@@ -712,7 +728,7 @@ class Database:
                 validity_checks = result.scalars().all()
                 return [check.to_dict() for check in validity_checks]
         except Exception as e:
-            self.logger.error(f"Error getting all validity checks: {str(e)}")
+            logger.error(f"Error getting all validity checks: {str(e)}")
             raise
 
     async def delete_validity_check(self, check_id, user_id, project_id):
@@ -723,7 +739,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting validity check: {str(e)}")
+            logger.error(f"Error deleting validity check: {str(e)}")
             raise
 
     async def create_codex_item(self, name: str, description: str, type: str, subtype: Optional[str], user_id: str, project_id: str) -> str:
@@ -745,7 +761,7 @@ class Database:
                 await session.commit()
                 return codex_item.id
         except Exception as e:
-            self.logger.error(f"Error creating codex item: {str(e)}")
+            logger.error(f"Error creating codex item: {str(e)}")
             raise
 
     async def get_all_codex_items(self, user_id: str, project_id: str):
@@ -756,7 +772,7 @@ class Database:
                 codex_items = result.scalars().all()
                 return [item.to_dict() for item in codex_items]
         except Exception as e:
-            self.logger.error(f"Error getting all codex items: {str(e)}")
+            logger.error(f"Error getting all codex items: {str(e)}")
             raise
 
     async def update_codex_item(self, item_id: str, name: str, description: str, type: str, subtype: str, user_id: str, project_id: str):
@@ -776,7 +792,7 @@ class Database:
                 else:
                     raise Exception("Codex item not found")
         except Exception as e:
-            self.logger.error(f"Error updating codex item: {str(e)}")
+            logger.error(f"Error updating codex item: {str(e)}")
             raise
 
     async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
@@ -787,7 +803,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting codex item: {str(e)}")
+            logger.error(f"Error deleting codex item: {str(e)}")
             raise
 
     async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
@@ -801,7 +817,7 @@ class Database:
                 else:
                     raise Exception("Codex item not found")
         except Exception as e:
-            self.logger.error(f"Error getting codex item by ID: {str(e)}")
+            logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
 
         
@@ -824,7 +840,7 @@ class Database:
                 else:
                     raise Exception("User not found")
         except Exception as e:
-            self.logger.error(f"Error saving model settings: {str(e)}")
+            logger.error(f"Error saving model settings: {str(e)}")
             raise
 
     async def get_model_settings(self, user_id):
@@ -850,7 +866,7 @@ class Database:
                     'temperature': 0.7
                 }
         except Exception as e:
-            self.logger.error(f"Error getting model settings: {str(e)}")
+            logger.error(f"Error getting model settings: {str(e)}")
             raise
 
     async def create_location(self, name: str, description: str, coordinates: Optional[str], user_id: str, project_id: str) -> str:
@@ -870,7 +886,7 @@ class Database:
                 await session.commit()
                 return location.id
         except Exception as e:
-            self.logger.error(f"Error creating location: {str(e)}")
+            logger.error(f"Error creating location: {str(e)}")
             raise
 
     async def delete_location(self, location_id: str, project_id: str, user_id: str) -> bool:
@@ -897,7 +913,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting location: {str(e)}")
+            logger.error(f"Error deleting location: {str(e)}")
             raise
 
     async def mark_chapter_processed(self, chapter_id: str, user_id: str, process_type: str):
@@ -923,13 +939,13 @@ class Database:
                         chapter.processed_types = chapter.processed_types + [process_type]
                         chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         await session.commit()
-                        self.logger.debug(f"Marked chapter {chapter_id} as processed for {process_type}")
+                        logger.debug(f"Marked chapter {chapter_id} as processed for {process_type}")
                         return True
                 
                 return False
                         
         except Exception as e:
-            self.logger.error(f"Error marking chapter as processed: {str(e)}")
+            logger.error(f"Error marking chapter as processed: {str(e)}")
             raise
 
 
@@ -944,7 +960,7 @@ class Database:
                     return process_type in processed_types
                 return False
         except Exception as e:
-            self.logger.error(f"Error checking chapter processed status: {str(e)}")
+            logger.error(f"Error checking chapter processed status: {str(e)}")
             raise
 
 
@@ -956,7 +972,7 @@ class Database:
                 event = result.scalars().first()
                 return event.to_dict() if event else None
         except Exception as e:
-            self.logger.error(f"Error getting event by ID: {str(e)}")
+            logger.error(f"Error getting event by ID: {str(e)}")
             raise
 
     async def get_location_by_id(self, location_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
@@ -967,7 +983,7 @@ class Database:
                 location = result.scalars().first()
                 return location.to_dict() if location else None
         except Exception as e:
-            self.logger.error(f"Error getting location by ID: {str(e)}")
+            logger.error(f"Error getting location by ID: {str(e)}")
             raise
 
     async def update_codex_item_embedding_id(self, item_id: str, embedding_id: str) -> bool:
@@ -984,7 +1000,7 @@ class Database:
                 else:
                     raise Exception("Codex item not found")
         except Exception as e:
-            self.logger.error(f"Error updating codex item embedding_id: {str(e)}")
+            logger.error(f"Error updating codex item embedding_id: {str(e)}")
             raise
 
 
@@ -1005,7 +1021,7 @@ class Database:
                 await session.commit()
                 return project.id
         except Exception as e:
-            self.logger.error(f"Error creating project: {str(e)}")
+            logger.error(f"Error creating project: {str(e)}")
             raise
 
 
@@ -1017,7 +1033,7 @@ class Database:
                 projects = result.scalars().all()
                 return [project.to_dict() for project in projects]
         except Exception as e:
-            self.logger.error(f"Error getting projects by universe: {str(e)}")
+            logger.error(f"Error getting projects by universe: {str(e)}")
             raise
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
@@ -1028,7 +1044,7 @@ class Database:
                 project = result.scalars().first()
                 return project.to_dict() if project else None
         except Exception as e:
-            self.logger.error(f"Error getting project: {str(e)}")
+            logger.error(f"Error getting project: {str(e)}")
             raise
 
     async def update_project(self, project_id: str, name: Optional[str], description: Optional[str], user_id: str, universe_id: Optional[str] = None, target_word_count: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -1052,7 +1068,7 @@ class Database:
                 else:
                     raise Exception("Project not found")
         except Exception as e:
-            self.logger.error(f"Error updating project: {str(e)}")
+            logger.error(f"Error updating project: {str(e)}")
             raise
 
     async def update_project_universe(self, project_id: str, universe_id: Optional[str], user_id: str) -> Optional[Dict[str, Any]]:
@@ -1069,7 +1085,7 @@ class Database:
                 else:
                     raise Exception("Project not found")
         except Exception as e:
-            self.logger.error(f"Error updating project universe: {str(e)}")
+            logger.error(f"Error updating project universe: {str(e)}")
             raise
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
@@ -1080,7 +1096,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting project: {str(e)}")
+            logger.error(f"Error deleting project: {str(e)}")
             raise
 
 
@@ -1100,7 +1116,7 @@ class Database:
                 await session.commit()
                 return universe.id
         except Exception as e:
-            self.logger.error(f"Error creating universe: {str(e)}")
+            logger.error(f"Error creating universe: {str(e)}")
             raise ValueError(str(e))
 
     async def get_universe(self, universe_id: str, user_id: str) -> Optional[Dict[str, Any]]:
@@ -1111,7 +1127,7 @@ class Database:
                 universe = result.scalars().first()
                 return universe.to_dict() if universe else None
         except Exception as e:
-            self.logger.error(f"Error getting universe: {str(e)}")
+            logger.error(f"Error getting universe: {str(e)}")
             raise
 
 
@@ -1129,7 +1145,7 @@ class Database:
                 else:
                     raise Exception("Universe not found")
         except Exception as e:
-            self.logger.error(f"Error updating universe: {str(e)}")
+            logger.error(f"Error updating universe: {str(e)}")
             raise
 
 
@@ -1141,7 +1157,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting universe: {str(e)}")
+            logger.error(f"Error deleting universe: {str(e)}")
             raise
 
     async def get_universe_codex(self, universe_id: str, user_id: str) -> List[Dict[str, Any]]:
@@ -1156,7 +1172,7 @@ class Database:
                 codex_items = result.scalars().all()
                 return [item.to_dict() for item in codex_items]
         except Exception as e:
-            self.logger.error(f"Error getting universe codex: {str(e)}")
+            logger.error(f"Error getting universe codex: {str(e)}")
             raise
 
     async def get_universe_knowledge_base(self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
@@ -1206,7 +1222,7 @@ class Database:
 
             return knowledge_base
         except Exception as e:
-            self.logger.error(f"Error getting universe knowledge base: {str(e)}")
+            logger.error(f"Error getting universe knowledge base: {str(e)}")
             raise
 
 
@@ -1232,7 +1248,7 @@ class Database:
                     return characters[0].to_dict() if characters else None
                 return [character.to_dict() for character in characters]
         except Exception as e:
-            self.logger.error(f"Error getting characters: {str(e)}")
+            logger.error(f"Error getting characters: {str(e)}")
             raise
 
     async def get_events(self, project_id: str, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -1245,7 +1261,7 @@ class Database:
                 events = result.scalars().all()
                 return [event.to_dict() for event in events]
         except Exception as e:
-            self.logger.error(f"Error getting events: {str(e)}")
+            logger.error(f"Error getting events: {str(e)}")
             raise
 
     async def get_locations(self, user_id: str, project_id: str, k: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -1258,7 +1274,7 @@ class Database:
                 locations = result.scalars().all()
                 return [location.to_dict() for location in locations]
         except Exception as e:
-            self.logger.error(f"Error getting locations: {str(e)}")
+            logger.error(f"Error getting locations: {str(e)}")
             raise
 
 
@@ -1281,7 +1297,7 @@ class Database:
                     latest_chapter.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     await session.commit()
         except Exception as e:
-            self.logger.error(f"Error marking latest chapter as processed: {str(e)}")
+            logger.error(f"Error marking latest chapter as processed: {str(e)}")
             raise
 
     async def is_chapter_processed(self, chapter_id: str, process_type: str) -> bool:
@@ -1295,7 +1311,7 @@ class Database:
                     return process_type in processed_types
                 return False
         except Exception as e:
-            self.logger.error(f"Error checking chapter processed status: {str(e)}")
+            logger.error(f"Error checking chapter processed status: {str(e)}")
             raise
 
     async def save_validity_check(self, chapter_id: str, chapter_title: str, is_valid: bool, overall_score: int, general_feedback: str, style_guide_adherence_score: int, style_guide_adherence_explanation: str, continuity_score: int, continuity_explanation: str, areas_for_improvement: List[str], user_id: str, project_id: str):
@@ -1321,7 +1337,7 @@ class Database:
                 await session.commit()
                 return validity_check.id
         except Exception as e:
-            self.logger.error(f"Error saving validity check: {str(e)}")
+            logger.error(f"Error saving validity check: {str(e)}")
             raise
 
     async def get_validity_check(self, chapter_id: str, user_id: str) -> Optional[Dict[str, Any]]:
@@ -1334,7 +1350,7 @@ class Database:
                     return validity_check.to_dict()
                 raise Exception("Validity check not found")
         except Exception as e:
-            self.logger.error(f"Error getting validity check: {str(e)}")
+            logger.error(f"Error getting validity check: {str(e)}")
             raise
 
     async def save_chat_history(self, user_id: str, project_id: str, messages: List[Dict[str, Any]]):
@@ -1361,7 +1377,7 @@ class Database:
                 
                 await session.commit()
         except Exception as e:
-            self.logger.error(f"Error saving chat history: {str(e)}")
+            logger.error(f"Error saving chat history: {str(e)}")
             raise
 
     async def get_chat_history(self, user_id: str, project_id: str):
@@ -1374,7 +1390,7 @@ class Database:
                     return json.loads(chat_history)
                 return []
         except Exception as e:
-            self.logger.error(f"Error getting chat history: {str(e)}")
+            logger.error(f"Error getting chat history: {str(e)}")
             raise
 
 
@@ -1387,7 +1403,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting chat history: {str(e)}")
+            logger.error(f"Error deleting chat history: {str(e)}")
             raise
 
 
@@ -1414,10 +1430,10 @@ class Database:
                 await session.commit()
                 return new_preset.id
         except ValueError as ve:
-            self.logger.error(f"Error creating preset: {str(ve)}")
+            logger.error(f"Error creating preset: {str(ve)}")
             raise
         except Exception as e:
-            self.logger.error(f"Error creating preset: {str(e)}")
+            logger.error(f"Error creating preset: {str(e)}")
             raise
 
     async def get_presets(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
@@ -1428,7 +1444,7 @@ class Database:
                 presets = result.scalars().all()
                 return [{"id": preset.id, "name": preset.name, "data": preset.data} for preset in presets]
         except Exception as e:
-            self.logger.error(f"Error getting presets: {str(e)}")
+            logger.error(f"Error getting presets: {str(e)}")
             raise
 
 
@@ -1440,7 +1456,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting preset: {str(e)}")
+            logger.error(f"Error deleting preset: {str(e)}")
             raise
 
 
@@ -1454,7 +1470,7 @@ class Database:
                     return {"id": preset.id, "name": preset.name, "data": preset.data}
                 return None
         except Exception as e:
-            self.logger.error(f"Error getting preset by name: {str(e)}")
+            logger.error(f"Error getting preset by name: {str(e)}")
             return None
 
 
@@ -1472,7 +1488,7 @@ class Database:
                 else:
                     raise Exception("Chapter not found")
         except Exception as e:
-            self.logger.error(f"Error updating chapter embedding_id: {str(e)}")
+            logger.error(f"Error updating chapter embedding_id: {str(e)}")
             raise
 
     async def delete_character_relationship(self, relationship_id: str, user_id: str, project_id: str) -> bool:
@@ -1487,7 +1503,7 @@ class Database:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting character relationship: {str(e)}")
+            logger.error(f"Error deleting character relationship: {str(e)}")
             raise
 
 
@@ -1510,7 +1526,7 @@ class Database:
                 await session.commit()
                 return analysis.id
         except Exception as e:
-            self.logger.error(f"Error saving relationship analysis: {str(e)}")
+            logger.error(f"Error saving relationship analysis: {str(e)}")
             raise
 
     async def get_character_relationships(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
@@ -1545,7 +1561,7 @@ class Database:
                     })
                 return result
         except Exception as e:
-            self.logger.error(f"Error getting character relationships: {str(e)}")
+            logger.error(f"Error getting character relationships: {str(e)}")
             raise
 
 
@@ -1564,7 +1580,7 @@ class Database:
                 character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 await session.commit()
         except Exception as e:
-            self.logger.error(f"Error updating character backstory: {str(e)}")
+            logger.error(f"Error updating character backstory: {str(e)}")
             raise
 
     async def delete_character_backstory(self, character_id: str, user_id: str, project_id: str):
@@ -1582,7 +1598,7 @@ class Database:
                 character.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 await session.commit()
         except Exception as e:
-            self.logger.error(f"Error deleting character backstory: {str(e)}")
+            logger.error(f"Error deleting character backstory: {str(e)}")
             raise
 
     async def get_chapter_count(self, project_id: str, user_id: str) -> int:
@@ -1592,7 +1608,7 @@ class Database:
                 result = await session.execute(query)
                 return result.scalar_one()
         except Exception as e:
-            self.logger.error(f"Error getting chapter count: {str(e)}")
+            logger.error(f"Error getting chapter count: {str(e)}")
             raise
 
     async def create_event(self, title: str, description: str, date: datetime, project_id: str, user_id: str, character_id: Optional[str] = None, location_id: Optional[str] = None) -> str:
@@ -1614,7 +1630,7 @@ class Database:
                 await session.commit()
                 return event.id
         except Exception as e:
-            self.logger.error(f"Error creating event: {str(e)}")
+            logger.error(f"Error creating event: {str(e)}")
             raise
 
     async def save_character_backstory(self, character_id: str, content: str, user_id: str, project_id: str):
@@ -1637,7 +1653,7 @@ class Database:
                 return character.to_dict()
                 
         except Exception as e:
-            self.logger.error(f"Error saving character backstory: {str(e)}")
+            logger.error(f"Error saving character backstory: {str(e)}")
             raise
 
     async def get_character_backstories(self, character_id: str) -> List[Dict[str, Any]]:
@@ -1648,7 +1664,7 @@ class Database:
                 backstories = result.scalars().all()
                 return [backstory.to_dict() for backstory in backstories]
         except Exception as e:
-            self.logger.error(f"Error getting character backstories: {str(e)}")
+            logger.error(f"Error getting character backstories: {str(e)}")
             raise
 
     async def get_latest_unprocessed_chapter_content(self, project_id: str, user_id: str, process_type: str):
@@ -1674,7 +1690,7 @@ class Database:
                 return unprocessed_chapters
                 
         except Exception as e:
-            self.logger.error(f"Error getting unprocessed chapter content: {str(e)}")
+            logger.error(f"Error getting unprocessed chapter content: {str(e)}")
             raise
 
     async def create_character_relationship(self, character_id: str, related_character_id: str, relationship_type: str, project_id: str, 
@@ -1692,11 +1708,11 @@ description: Optional[str] = None) -> str:
                 char2 = char2_result.scalars().first()
                 
                 if not char1:
-                    self.logger.error(f"Character with ID {character_id} not found in the codex")
+                    logger.error(f"Character with ID {character_id} not found in the codex")
                     raise ValueError("Character not found")
                     
                 if not char2:
-                    self.logger.error(f"Character with ID {related_character_id} not found in the codex")
+                    logger.error(f"Character with ID {related_character_id} not found in the codex")
                     raise ValueError("Related character not found")
                 
                 relationship = CharacterRelationship(
@@ -1713,7 +1729,7 @@ description: Optional[str] = None) -> str:
                 return relationship.id
                 
         except Exception as e:
-            self.logger.error(f"Error creating character relationship: {str(e)}")
+            logger.error(f"Error creating character relationship: {str(e)}")
             raise
 
 
@@ -1737,7 +1753,7 @@ description: Optional[str] = None) -> str:
                 else:
                     raise Exception("Event not found")
         except Exception as e:
-            self.logger.error(f"Error updating event: {str(e)}")
+            logger.error(f"Error updating event: {str(e)}")
             raise
 
     async def get_event_by_title(self, title: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
@@ -1748,7 +1764,7 @@ description: Optional[str] = None) -> str:
                 event = result.scalars().first()
                 return event.to_dict() if event else None
         except Exception as e:
-            self.logger.error(f"Error getting event by title: {str(e)}")
+            logger.error(f"Error getting event by title: {str(e)}")
             raise
 
     async def update_location(self, location_id: str, location_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1766,7 +1782,7 @@ description: Optional[str] = None) -> str:
                 else:
                     raise Exception("Location not found")
         except Exception as e:
-            self.logger.error(f"Error updating location: {str(e)}")
+            logger.error(f"Error updating location: {str(e)}")
             raise
 
     
@@ -1788,7 +1804,7 @@ description: Optional[str] = None) -> str:
                 else:
                     raise Exception("Character relationship not found")
         except Exception as e:
-            self.logger.error(f"Error updating character relationship: {str(e)}")
+            logger.error(f"Error updating character relationship: {str(e)}")
             raise
 
 
@@ -1801,7 +1817,7 @@ description: Optional[str] = None) -> str:
                 location = result.scalars().first()
                 return location.to_dict() if location else None
         except Exception as e:
-            self.logger.error(f"Error getting location by name: {str(e)}")
+            logger.error(f"Error getting location by name: {str(e)}")
             raise
 
 
@@ -1845,7 +1861,7 @@ description: Optional[str] = None) -> str:
                 return connection.id
                 
         except Exception as e:
-            self.logger.error(f"Error creating location connection: {str(e)}")
+            logger.error(f"Error creating location connection: {str(e)}")
             raise
         
     async def create_event_connection(
@@ -1876,7 +1892,7 @@ description: Optional[str] = None) -> str:
                 await session.commit()
                 return connection.id
         except Exception as e:
-            self.logger.error(f"Error creating event connection: {str(e)}")
+            logger.error(f"Error creating event connection: {str(e)}")
             raise
 
     async def get_location_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
@@ -1890,7 +1906,7 @@ description: Optional[str] = None) -> str:
                 connections = result.scalars().all()
                 return [conn.to_dict() for conn in connections]
         except Exception as e:
-            self.logger.error(f"Error getting location connections: {str(e)}")
+            logger.error(f"Error getting location connections: {str(e)}")
             raise
 
     async def get_event_connections(self, project_id: str, user_id: str) -> List[Dict[str, Any]]:
@@ -1904,7 +1920,7 @@ description: Optional[str] = None) -> str:
                 connections = result.scalars().all()
                 return [conn.to_dict() for conn in connections]
         except Exception as e:
-            self.logger.error(f"Error getting event connections: {str(e)}")
+            logger.error(f"Error getting event connections: {str(e)}")
             raise
     
     async def update_location_connection(
@@ -1933,7 +1949,7 @@ description: Optional[str] = None) -> str:
                 else:
                     raise Exception("Location connection not found")
         except Exception as e:
-            self.logger.error(f"Error updating location connection: {str(e)}")
+            logger.error(f"Error updating location connection: {str(e)}")
             raise
 
     async def update_event_connection(
@@ -1964,7 +1980,7 @@ description: Optional[str] = None) -> str:
                 else:
                     raise Exception("Event connection not found")
         except Exception as e:
-            self.logger.error(f"Error updating event connection: {str(e)}")
+            logger.error(f"Error updating event connection: {str(e)}")
             raise
 
     async def delete_location_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
@@ -1979,7 +1995,7 @@ description: Optional[str] = None) -> str:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting location connection: {str(e)}")
+            logger.error(f"Error deleting location connection: {str(e)}")
             raise
 
     async def delete_event_connection(self, connection_id: str, user_id: str, project_id: str) -> bool:
@@ -1994,7 +2010,7 @@ description: Optional[str] = None) -> str:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting event connection: {str(e)}")
+            logger.error(f"Error deleting event connection: {str(e)}")
             raise
 
 
@@ -2010,7 +2026,7 @@ description: Optional[str] = None) -> str:
                 await session.commit()
                 return result.rowcount > 0
         except Exception as e:
-            self.logger.error(f"Error deleting event: {str(e)}")
+            logger.error(f"Error deleting event: {str(e)}")
             raise
 
 

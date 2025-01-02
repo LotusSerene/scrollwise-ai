@@ -174,3 +174,7 @@
 - Better server health check
 - Remove unused screens
 - Fix locations, relationships, and events not working properly
+
+## 1.0.4-beta
+
+- Fixed users not being able to log in

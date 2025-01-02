@@ -7,19 +7,20 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from asyncio import Lock
 from sqlalchemy import select, and_
-import time
 
 
 import os
 import uuid
 from contextlib import asynccontextmanager
 from models import CodexItemType, WorldbuildingSubtype
-from database import User, Chapter, Project, CodexItem
+from database import User, Chapter, Project, CodexItem, Database
 from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from pydantic import BaseModel, Field, ValidationError, EmailStr
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 
 from agent_manager import AgentManager, PROCESS_TYPES
@@ -36,36 +37,72 @@ import sys
 import signal
 import psutil
 
-
-# Configure logging
 def setup_logging():
+    """Configure logging to save to a log file and output to console"""
     try:
-        # Add console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter(
-            '%(levelname)s: %(message)s'  # Simpler format for console
-        ))
-        
-        # Configure root logger
+        # Get log directory from environment variable set by ServerManager
+        log_dir = os.getenv('LOG_DIR')
+        if not log_dir:
+            raise ValueError("LOG_DIR environment variable not set")
+
+        # Create logs directory if it doesn't exist
+        log_dir = Path(log_dir)
+        log_dir.mkdir(exist_ok=True)
+
+        # Configure the log file path
+        log_file = log_dir / "server.log"
+
+        # If log file exists, rename it with last modified date
+        if log_file.exists():
+            last_modified = datetime.fromtimestamp(log_file.stat().st_mtime)
+            date_str = last_modified.strftime('%Y%m%d_%H%M%S')
+            archived_name = f"server_{date_str}.log"
+            log_file.rename(log_dir / archived_name)
+
+        # Create a logger
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
-        
-        # Test logging
-        logger.info("Logging system initialized")
+
+        # Create handlers
+        # RotatingFileHandler with max size of 10MB and keep 5 backup files
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        console_handler = logging.StreamHandler()
+
+        # Create formatters and add it to handlers
+        log_format = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(log_format)
+        console_handler.setFormatter(log_format)
+
+        # Add handlers to the logger
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+
+        logger.info("Logging setup completed")
         return logger
-        
+
     except Exception as e:
-        print(f"Failed to setup logging: {str(e)}")
+        print(f"Error setting up logging: {str(e)}")
         raise
 
 # Initialize logging
 logger = setup_logging()
+
+# Add these global variables
+shutdown_event = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
+    cleanup_task = None
     
     try:
         # Initialize database
@@ -74,41 +111,76 @@ async def lifespan(app: FastAPI):
         
         # Start session cleanup task
         async def cleanup_sessions():
-            while True:
-                current_time = datetime.now(timezone.utc)
-                expired_sessions = [
-                    sid for sid, session in session_manager.sessions.items()
-                    if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
-                ]
-                for sid in expired_sessions:
-                    await session_manager.remove_session(sid)
-                await asyncio.sleep(300)  # Run every 5 minutes
+            try:
+                while getattr(app.state, "keep_alive", True):
+                    current_time = datetime.now(timezone.utc)
+                    expired_sessions = [
+                        sid for sid, session in session_manager.sessions.items()
+                        if (current_time - session['last_activity']).total_seconds() > MAX_INACTIVITY
+                    ]
+                    for sid in expired_sessions:
+                        await session_manager.remove_session(sid)
+                    await asyncio.sleep(300)  # Run every 5 minutes
+            except asyncio.CancelledError:
+                logger.info("Session cleanup task cancelled")
+            except Exception as e:
+                logger.error(f"Error in cleanup task: {str(e)}")
         
         cleanup_task = asyncio.create_task(cleanup_sessions())
         
-        # Set keep_alive flag directly
-        setattr(app.state, "keep_alive", True)
-        
         yield
+        
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
         raise
     finally:
-        # Check keep_alive flag directly
-        if not getattr(app.state, "keep_alive", True):
-            logger.info("Shutting down server...")
-            cleanup_task.cancel()
-            tasks = []
+        logger.info("Graceful shutdown initiated")
+        logger.info("Starting cleanup process...")
+        
+        # Set keep_alive to False to stop the cleanup loop
+        setattr(app.state, "keep_alive", False)
+        
+        try:
+            # Cancel cleanup task if it exists and wait for it to complete
+            if cleanup_task and not cleanup_task.done():
+                cleanup_task.cancel()
+                try:
+                    # Use asyncio.wait instead of wait_for
+                    await asyncio.wait([cleanup_task], timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Cleanup task timed out")
+                except asyncio.CancelledError:
+                    pass
+            
+            # Clean up agent managers
             async with agent_manager_store._lock:
+                tasks = []
                 for manager in agent_manager_store._managers.values():
                     if hasattr(manager, 'vector_store'):
                         manager.vector_store.close()
                     tasks.append(manager.close())
-            await asyncio.gather(*tasks)
+                
+                if tasks:
+                    # Use wait with timeout instead of gather
+                    done, pending = await asyncio.wait(tasks, timeout=10.0)
+                    for task in pending:
+                        task.cancel()
+            
+            # Clean up database
             await db_instance.dispose()
+            
+            logger.info("Cleanup completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
+        finally:
             logger.info("Cleanup complete")
+            # Give a small delay for final cleanup
+            await asyncio.sleep(0.5)
+    # Shutdown
+    shutdown_event.set()
 
-app = FastAPI(title="Novel AI API", version="1.0.3", lifespan=lifespan)
+app = FastAPI(title="Scrollwise AI", version="1.0.4", lifespan=lifespan)
 
 # Get allowed origins from environment variable
 allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:8080').split(',')
@@ -143,11 +215,8 @@ async def cleanup_sessions():
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    supabase_id: str
 
-class UserResponse(BaseModel):
-    id: str
-    email: str
 
     class Config:
         from_attributes = True
@@ -246,32 +315,52 @@ class BackstoryExtractionRequest(BaseModel):
 class SessionManager:
     def __init__(self):
         self.sessions = {}
-        self._load_sessions()  # Load sessions on startup
+        self.sessions_file = 'sessions.json'  # Add this line to define the file path
+        self._load_sessions()
         
     def _load_sessions(self):
         try:
             if os.path.exists(self.sessions_file) and os.path.getsize(self.sessions_file) > 0:
                 with open(self.sessions_file, 'r') as f:
-                    return json.load(f)
-            return {}  # Return empty dict if file doesn't exist or is empty
-        except json.JSONDecodeError:
-            # If the file is corrupted, return empty dict and log error
-            logger.error("Sessions file is corrupted, starting with empty sessions")
-            return {}
+                    loaded_sessions = json.load(f)
+                    # Convert ISO format strings back to datetime objects
+                    self.sessions = {
+                        sid: {
+                            'user_id': session['user_id'],
+                            'created_at': datetime.fromisoformat(session['created_at']),
+                            'last_activity': datetime.fromisoformat(session['last_activity'])
+                        }
+                        for sid, session in loaded_sessions.items()
+                    }
+            else:
+                self.sessions = {}
         except Exception as e:
             logger.error(f"Error loading sessions: {str(e)}")
-            return {}
+            self.sessions = {}
             
     def _save_sessions(self):
-        with open('sessions.json', 'w') as f:
-            json.dump(self.sessions, f)
+        try:
+            # Convert datetime objects to ISO format strings for JSON serialization
+            sessions_to_save = {
+                sid: {
+                    'user_id': session['user_id'],
+                    'created_at': session['created_at'].isoformat(),
+                    'last_activity': session['last_activity'].isoformat()
+                }
+                for sid, session in self.sessions.items()
+            }
+            with open(self.sessions_file, 'w') as f:
+                json.dump(sessions_to_save, f)
+        except Exception as e:
+            logger.error(f"Error saving sessions: {str(e)}")
         
     async def create_session(self, user_id: str) -> str:
         session_id = str(uuid.uuid4())
+        current_time = datetime.now(timezone.utc)  # Ensure UTC timezone
         self.sessions[session_id] = {
             'user_id': user_id,
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'last_activity': datetime.now(timezone.utc).isoformat()
+            'created_at': current_time,  # Store as datetime object
+            'last_activity': current_time  # Store as datetime object
         }
         self._save_sessions()
         return session_id
@@ -279,14 +368,17 @@ class SessionManager:
     async def validate_session(self, session_id: str) -> Optional[str]:
         session = self.sessions.get(session_id)
         if session:
-            # Convert stored ISO format string back to datetime
-            last_activity = datetime.fromisoformat(session['last_activity'])
+            # Convert stored datetime to UTC if not already
+            last_activity = session['last_activity']
+            if not last_activity.tzinfo:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+                
             if (datetime.now(timezone.utc) - last_activity).total_seconds() > MAX_INACTIVITY:
                 await self.remove_session(session_id)
                 return None
                 
-            # Update last activity
-            session['last_activity'] = datetime.now(timezone.utc).isoformat()
+            # Update last activity with timezone-aware datetime
+            session['last_activity'] = datetime.now(timezone.utc)
             self._save_sessions()
             return session['user_id']
         return None
@@ -298,7 +390,7 @@ class SessionManager:
     async def extend_session(self, session_id: str) -> bool:
         session = self.sessions.get(session_id)
         if session:
-            session['last_activity'] = datetime.now(timezone.utc).isoformat()
+            session['last_activity'] = datetime.now(timezone.utc)
             self._save_sessions()
             return True
         return False
@@ -372,13 +464,14 @@ async def get_current_user(
         local_user = await db_instance.get_user_by_email(user_response.user.email)
         if not local_user:
             # Only create new user if they don't exist
-            local_user = {
-                "id": user_response.user.id,
-                "email": user_response.user.email,
-            }
             try:
-                await db_instance._create_local_user(local_user)
-                local_user = await db_instance.get_user_by_email(user_response.user.email)
+                local_user = await db_instance.sign_up(
+                    email=user_response.user.email,
+                    supabase_id=user_response.user.id,
+                    password=None  # We don't need password here as user is already authenticated
+                )
+                if not local_user:
+                    raise Exception("Failed to create local user")
             except Exception as e:
                 # If creation fails (e.g. due to race condition), try getting the user again
                 local_user = await db_instance.get_user_by_email(user_response.user.email)
@@ -621,31 +714,36 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
 
 
 # Auth routes
-@auth_router.post("/register", status_code=201, response_model=dict)
+@auth_router.post("/signup", status_code=201, response_model=dict)
 async def register(user: UserCreate):
     try:
+        logger.info(f"Starting registration for email: {user.email}")
+        
         # Check if user already exists in local DB
         existing_user = await db_instance.get_user_by_email(user.email)
         if existing_user:
+            logger.warning(f"Email already registered: {user.email}")
             raise HTTPException(status_code=400, detail="Email already registered")
 
         # Register using database method
-        user_id = await db_instance.sign_up(
+        user_response = await db_instance.sign_up(
             email=user.email,
-            password=user.password
+            password=user.password,
+            supabase_id=user.supabase_id
         )
         
-        if not user_id:
+        if not user_response:
+            logger.error("Registration failed: No user response")
             raise HTTPException(status_code=400, detail="Registration failed")
             
+        logger.info(f"Registration successful for user ID: {user_response['id']}")
         return {
             "message": "User registered successfully", 
-            "user_id": user_id,
-            "needs_verification": True
+            "user_id": user_response["id"]
         }
     except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))    
+        logger.error(f"Registration error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")    
 
 
 @app.post("/auth/extend-session")
@@ -1071,8 +1169,11 @@ async def get_characters(project_id: str, current_user: User = Depends(get_curre
         logger.error(f"Error fetching characters: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@codex_item_router.get("/")
-async def get_codex_items(project_id: str, current_user: User = Depends(get_current_active_user)):
+@codex_item_router.get("/", response_model=Dict[str, List[Dict[str, Any]]])
+async def get_codex_items(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
     try:
         codex_items = await db_instance.get_all_codex_items(current_user.id, project_id)
         return {"codex_items": codex_items}
@@ -1173,22 +1274,26 @@ async def delete_backstory(
         logger.error(f"Error deleting backstory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@codex_item_router.post("")
-async def create_codex_item(codex_item: CodexItemCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
+@codex_item_router.post("/", response_model=Dict[str, Any])  # Update response model
+async def create_codex_item(
+    codex_item: CodexItemCreate, 
+    project_id: str = Query(...),  # Add as query parameter
+    current_user: User = Depends(get_current_active_user)
+):
     try:
         item_id = await db_instance.create_codex_item(
-                codex_item.name,
-                codex_item.description,
-                codex_item.type,
-                codex_item.subtype,
-                current_user.id,
-                project_id
-            )
+            codex_item.name,
+            codex_item.description,
+            codex_item.type,
+            codex_item.subtype,
+            current_user.id,
+            project_id
+        )
 
         # Add to knowledge base
         async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
             embedding_id = await agent_manager.add_to_knowledge_base(
-                codex_item.type,  # Use the actual type from the codex item
+                codex_item.type,
                 codex_item.description,
                 {
                     "name": codex_item.name,
@@ -1201,7 +1306,11 @@ async def create_codex_item(codex_item: CodexItemCreate, project_id: str, curren
         # Update the codex_item with the embedding_id
         await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
-        return {"message": "Codex item created successfully", "id": item_id, "embedding_id": embedding_id}
+        return {
+            "message": "Codex item created successfully", 
+            "id": item_id, 
+            "embedding_id": embedding_id
+        }
     except Exception as e:
         logger.error(f"Error creating codex item: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1677,10 +1786,21 @@ async def add_security_headers(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     try:
+        start_time = datetime.now()
         response = await call_next(request)
+        process_time = datetime.now() - start_time
+        
+        # Log the request details
+        logger.info(
+            f"[{request.method}] {request.url.path} - "
+            f"Client: {request.client.host if request.client else 'Unknown'} - "
+            f"Status: {response.status_code} - "
+            f"Process Time: {process_time.total_seconds():.3f}s"
+        )
+        
         return response
     except Exception as e:
-        logger.error(f"Unhandled exception: {str(e)}")
+        logger.error(f"Unhandled exception in {request.url.path}: {str(e)}")
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 @app.get("/health")
@@ -2533,95 +2653,59 @@ async def get_location_connections(
         raise HTTPException(status_code=500, detail="Internal server error")
     
 
-SHUTDOWN_TIMEOUT = 30  # Configurable timeout in seconds
 
 @app.post("/shutdown")
 async def shutdown():
+    """Gracefully shutdown the server"""
+    logger.info("Shutdown request received")
+    
+    # Set timeout for cleanup operations
+    timeout = 30
+    
+    # Create task for graceful shutdown
+    asyncio.create_task(graceful_shutdown())
+    
+    return JSONResponse(
+        status_code=202,
+        content={
+            "message": "Shutdown initiated",
+            "timeout": timeout
+        }
+    )
+
+async def graceful_shutdown():
+    """Perform graceful shutdown operations"""
     try:
-        logger.info("Graceful shutdown initiated")
-        io_loop = asyncio.get_event_loop()
+        logger.info("Starting graceful shutdown...")
         
-        async def cleanup():
-            try:
-                # 1. Stop accepting new connections first
-                logger.info("Stopping server from accepting new connections")
-                app.state.keep_alive = False
-                
-                # 2. Save pending data with timeout
-                try:
-                    async def save_pending_data():
-                        for manager in agent_manager_store._managers.values():
-                            chat_history = await manager.get_chat_history()
-                            if chat_history:
-                                await db_instance.save_chat_history(
-                                    manager.user_id, 
-                                    manager.project_id, 
-                                    chat_history
-                                )
-                    
-                    await asyncio.wait_for(save_pending_data(), timeout=10)
-                except asyncio.TimeoutError:
-                    logger.error("Timeout while saving pending data")
-
-                # 3. Wait for active requests to complete
-                start_time = time.monotonic()  # Use monotonic time for duration calculations
-                while time.monotonic() - start_time < SHUTDOWN_TIMEOUT and len(asyncio.all_tasks()) > 1:
-                    logger.info(f"Waiting for {len(asyncio.all_tasks())-1} active tasks to complete")
-                    await asyncio.sleep(1)
-
-                # 4. Cleanup resources
-                async with agent_manager_store._lock:
-                    for manager in agent_manager_store._managers.values():
-                        if hasattr(manager, 'vector_store'):
-                            manager.vector_store.close()
-                        await manager.close()
-                    agent_manager_store._managers.clear()
-
-                # 5. Close database connections
-                await db_instance.dispose()
-
-                # 6. Terminate child processes gracefully
-                current_process = psutil.Process()
-                children = current_process.children(recursive=True)
-                for child in children:
-                    try:
-                        child.terminate()
-                        await asyncio.sleep(0.1)
-                        if child.is_running():
-                            child.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-
-                # 7. Flush logs
-                for handler in logger.handlers:
-                    handler.flush()
-
-                # 8. Stop the event loop
-                logger.info("Stopping event loop")
-                io_loop.stop()
-
-            except Exception as e:
-                logger.error(f"Error during cleanup: {str(e)}")
-                raise
-
-        # Schedule cleanup on next event loop iteration
-        io_loop.create_task(cleanup())
+        # Close all active sessions
+        for session_id in list(session_manager.sessions.keys()):
+            await session_manager.remove_session(session_id)
+            
+        # Close all agent managers
+        for manager in agent_manager_store._managers.values():
+            await manager.close()
+            
+        # Close database connections
+        await db_instance.close()
         
-        return JSONResponse(
-            content={
-                "message": "Shutdown initiated", 
-                "timeout": SHUTDOWN_TIMEOUT
-            },
-            status_code=202
-        )
-
+        # Set shutdown event
+        shutdown_event.set()
+        
+        logger.info("Graceful shutdown completed")
+        
     except Exception as e:
-        logger.error(f"Error initiating shutdown: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Shutdown initiation failed: {str(e)}"
-        )
+        logger.error(f"Error during graceful shutdown: {str(e)}")
+    finally:
+        # Stop the server
+        os._exit(0)
 
+# Add signal handlers
+def handle_sigterm(signum, frame):
+    logger.info("SIGTERM received")
+    asyncio.create_task(graceful_shutdown())
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 # Add the router to the app
 app.include_router(auth_router)
@@ -2637,55 +2721,6 @@ app.include_router(codex_router)
 app.include_router(relationship_router)
 app.include_router(project_router)
 
-def is_port_in_use(port: int) -> bool:
-    for conn in psutil.net_connections():
-        if conn.laddr.port == port:
-            return True
-    return False
-
-def stop_server():
-    # Cleanup and shutdown logic
-    logger.info("Stopping server...")
-    for process in psutil.process_iter():
-        try:
-            if "uvicorn" in process.name().lower():
-                process.terminate()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-async def cleanup_resources():
-    """Cleanup function to handle graceful shutdown"""
-    logger.info("Starting cleanup process...")
-    try:
-        # Cleanup sessions
-        for sid in list(session_manager.sessions.keys()):
-            await session_manager.remove_session(sid)
-        
-        # Cleanup agent managers
-        tasks = []
-        async with agent_manager_store._lock:
-            for manager in agent_manager_store._managers.values():
-                if hasattr(manager, 'vector_store'):
-                    manager.vector_store.close()
-                tasks.append(manager.close())
-        if tasks:
-            await asyncio.gather(*tasks)
-            
-        # Cleanup database connections
-        await db_instance.dispose()
-        
-        # Kill any remaining subprocesses
-        current_process = psutil.Process()
-        children = current_process.children(recursive=True)
-        for child in children:
-            try:
-                child.terminate()
-            except psutil.NoSuchProcess:
-                pass
-        
-        logger.info("Cleanup completed successfully")
-    except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
 
 def signal_handler(sig, frame):
     """Handle termination signals"""
@@ -2703,7 +2738,7 @@ if __name__ == "__main__":
            app,
            host="localhost",
            port=8080,
-           log_level="debug",  # Change to debug for more info
+           log_level="debug",
            reload=False,
            workers=1,
            access_log=True

@@ -3,7 +3,6 @@ import 'package:path/path.dart' as path;
 import 'dart:async';
 import 'package:logging/logging.dart';
 import 'config_handler.dart';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 class ServerManager extends ChangeNotifier {
@@ -14,7 +13,6 @@ class ServerManager extends ChangeNotifier {
 
   static final _logger = Logger('ServerManager');
   static IOSink? _logFile;
-  static IOSink? _serverLogFile;
   static Process? _serverProcess;
   static bool _isRunning = false;
   static int serverPort = 8080;
@@ -52,8 +50,7 @@ class ServerManager extends ChangeNotifier {
       }
 
       final clientLogPath = path.join(logsDir, 'client.log');
-      final serverLogPath = path.join(logsDir, 'server.log');
-      _logger.info('Log file paths: $clientLogPath, $serverLogPath');
+      _logger.info('Log file path: $clientLogPath');
 
       // Handle existing client log
       final clientLogFile = File(clientLogPath);
@@ -65,20 +62,9 @@ class ServerManager extends ChangeNotifier {
         _logger.info('Renamed existing client log file to: $newPath');
       }
 
-      // Handle existing server log
-      final serverLogFile = File(serverLogPath);
-      if (await serverLogFile.exists()) {
-        final lastModified = await serverLogFile.lastModified();
-        final timestamp = lastModified.toIso8601String().replaceAll(':', '-');
-        final newPath = path.join(logsDir, 'server_$timestamp.log');
-        await serverLogFile.rename(newPath);
-        _logger.info('Renamed existing server log file to: $newPath');
-      }
-
       try {
         _logFile = File(clientLogPath).openWrite(mode: FileMode.append);
-        _serverLogFile = File(serverLogPath).openWrite(mode: FileMode.append);
-        _logger.info('Log files opened successfully');
+        _logger.info('Log file opened successfully');
 
         // Configure root logger to capture ALL logs
         Logger.root.level = Level.ALL;
@@ -103,7 +89,7 @@ class ServerManager extends ChangeNotifier {
 
         _logger.info('Logging initialization completed');
       } catch (e) {
-        _logger.severe('Error opening log files: $e');
+        _logger.severe('Error opening log file: $e');
       }
     } catch (e, stack) {
       _logger.severe('Fatal error during logging initialization: $e');
@@ -149,22 +135,28 @@ class ServerManager extends ChangeNotifier {
       );
       _logger.info('Server process started with PID: ${_serverProcess!.pid}');
 
-      final serverLogPath = path.join(logDir, 'server.log');
-      _serverProcess!.stdout.listen((data) {
-        final message = String.fromCharCodes(data).trim();
-        File(serverLogPath).writeAsString(
-          '[${DateTime.now().toIso8601String()}] INFO: $message\n',
-          mode: FileMode.append,
-        );
-      });
+      // Process streams without logging to client.log
+      _serverProcess!.stdout.listen(
+        (data) {
+          // Just process the stream without logging
+          String.fromCharCodes(data).trim();
+        },
+        onError: (error) {
+          _logger.severe('Error reading stdout: $error');
+        },
+        cancelOnError: false,
+      );
 
-      _serverProcess!.stderr.listen((data) {
-        final message = String.fromCharCodes(data).trim();
-        File(serverLogPath).writeAsString(
-          '[${DateTime.now().toIso8601String()}] ERROR: $message\n',
-          mode: FileMode.append,
-        );
-      });
+      _serverProcess!.stderr.listen(
+        (data) {
+          // Just process the stream without logging
+          String.fromCharCodes(data).trim();
+        },
+        onError: (error) {
+          _logger.severe('Error reading stderr: $error');
+        },
+        cancelOnError: false,
+      );
 
       _isRunning = true;
       _keepAlive = true;
@@ -217,10 +209,13 @@ class ServerManager extends ChangeNotifier {
       return;
     }
 
+    _isShuttingDown = true;
     HttpClient? client;
+
     try {
       if (_serverProcess != null) {
         client = HttpClient();
+
         try {
           _logger.info('Sending shutdown request to server...');
           final request = await client
@@ -228,56 +223,41 @@ class ServerManager extends ChangeNotifier {
               .timeout(const Duration(seconds: 5));
 
           final response = await request.close();
-          final responseBody = await response.transform(utf8.decoder).join();
-          final responseData = json.decode(responseBody);
-
-          final serverTimeout = responseData['timeout'] ?? 30;
-          _logger.info('Server shutdown timeout: $serverTimeout seconds');
+          await response.drain<void>(); // Ensure response is fully read
 
           if (response.statusCode == 202) {
             _logger.info('Server acknowledged shutdown request');
 
-            // Wait for server to complete shutdown
-            final deadline =
-                DateTime.now().add(Duration(seconds: serverTimeout));
+            // Wait for process to terminate naturally
+            final deadline = DateTime.now().add(const Duration(seconds: 35));
             while (DateTime.now().isBefore(deadline)) {
-              if (_serverProcess == null ||
-                  !await _isProcessRunning(_serverProcess!.pid)) {
+              if (!await _isProcessRunning(_serverProcess!.pid)) {
                 _logger.info('Server process terminated gracefully');
+                _serverProcess = null;
                 break;
               }
               await Future.delayed(const Duration(seconds: 1));
             }
-          } else {
-            _logger.warning(
-                'Unexpected shutdown response: ${response.statusCode}');
           }
-        } on TimeoutException {
-          _logger.warning('Shutdown request timed out');
         } catch (e) {
-          _logger.warning('Failed to send shutdown request: $e');
+          _logger.warning('Error sending shutdown request: $e');
         }
 
-        // If server is still running after graceful shutdown attempt
-        if (_serverProcess != null &&
-            await _isProcessRunning(_serverProcess!.pid)) {
+        // Force kill if still running
+        if (_serverProcess != null) {
           _logger
               .warning('Server still running after graceful shutdown period');
           await _forceKillServer();
         }
-
-        _serverProcess = null;
       }
-
-      _isRunning = false;
-
-      // Cleanup any remaining resources
-      await disposeResources();
     } catch (e, stack) {
       _logger.severe('Error during server shutdown', e, stack);
     } finally {
       client?.close();
-      _logger.info('Setting shutdown state to false');
+      _serverProcess = null;
+      _isRunning = false;
+      _isShuttingDown = false;
+      await disposeResources();
     }
   }
 
@@ -431,8 +411,6 @@ class ServerManager extends ChangeNotifier {
   static Future<void> disposeResources() async {
     await _logFile?.flush();
     await _logFile?.close();
-    await _serverLogFile?.flush();
-    await _serverLogFile?.close();
   }
 
   static Future<String> getInstallPath() async {

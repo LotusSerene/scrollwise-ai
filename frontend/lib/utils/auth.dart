@@ -138,40 +138,39 @@ Future<void> initializeAuthState() async {
       },
     );
 
-    if (session != null) {
-      // Validate session with backend
+    // Add validation of session with backend before setting state
+    if (session != null && sessionId != null) {
       try {
         final response = await http.post(
           Uri.parse('$apiUrl/auth/extend-session'),
           headers: {
             'Authorization': 'Bearer ${session.accessToken}',
-            if (sessionId != null) 'X-Session-ID': sessionId,
+            'X-Session-ID': sessionId,
           },
-        );
+        ).timeout(const Duration(seconds: 5));
 
         if (response.statusCode != 200) {
-          throw Exception('Failed to validate session');
+          _logger.warning(
+              'Session validation failed with status: ${response.statusCode}');
+          await signOut();
+          return;
         }
       } catch (e) {
         _logger.warning('Session validation failed: $e');
         await signOut();
         return;
       }
-
-      // Update AppState only if session is valid
-      if (navigatorKey.currentContext != null) {
-        final appState = provider_pkg.Provider.of<AppState>(
-          navigatorKey.currentContext!,
-          listen: false,
-        );
-        appState.setLoggedIn(true);
-        appState.setToken(session.accessToken);
-      }
-      return;
     }
 
-    // Handle not logged in state
-    await signOut();
+    // Update AppState only if session is valid
+    if (navigatorKey.currentContext != null) {
+      final appState = provider_pkg.Provider.of<AppState>(
+        navigatorKey.currentContext!,
+        listen: false,
+      );
+      appState.setLoggedIn(session != null && sessionId != null);
+      appState.setToken(session?.accessToken);
+    }
   } catch (e) {
     _logger.severe('Error initializing auth state: $e');
     await signOut();
