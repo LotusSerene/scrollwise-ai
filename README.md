@@ -26,6 +26,33 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 ### Cross-Platform
 - Available for Windows only (Cross-platform coming soon)
 
+
+## Some Previews
+<details>
+  <summary>Project Management</summary>
+  
+  ![1](https://github.com/user-attachments/assets/0587edbb-2c0a-4ff7-9594-58329606422e)
+</details>
+<details>
+  <summary>Codex Entries</summary>
+  
+  ![2](https://github.com/user-attachments/assets/a263fed7-80af-4ecb-9df4-3d8da0f37fa8)
+</details>
+
+<details>
+  <summary>Codex Generation</summary>
+  
+![3](https://github.com/user-attachments/assets/a6e330d2-51d6-41bb-9aad-8f07622c92fc)
+  
+</details>
+
+<details>
+  <summary>Login</summary>
+  
+![4](https://github.com/user-attachments/assets/c48cfa05-23cd-47f1-8278-817d3649918c)
+  
+</details>
+
 ## 🚀 Getting Started
 
 ### Prerequisites
