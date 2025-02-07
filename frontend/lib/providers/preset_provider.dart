@@ -18,13 +18,13 @@ class PresetProvider with ChangeNotifier {
   Map<String, dynamic>? get currentPreset => _currentPreset;
   bool get isLoading => _isLoading;
 
-  Future<void> fetchPresets(String projectId) async {
+  Future<void> fetchPresets() async {
     _isLoading = true;
     notifyListeners();
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/presets?project_id=$projectId'),
+        Uri.parse('$apiUrl/presets'),
         headers: await getAuthHeaders(),
       );
 
@@ -34,17 +34,18 @@ class PresetProvider with ChangeNotifier {
         _presets =
             presetList.map((preset) => preset['name'] as String).toList();
       } else {
-        throw Exception('Failed to load presets');
+        throw Exception('Failed to load presets: ${response.statusCode}');
       }
     } catch (error) {
       _logger.severe('Error fetching presets: $error');
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<void> loadPreset(String presetName, String projectId) async {
+  Future<void> loadPreset(String presetName) async {
     if (presetName == "select a preset") {
       _selectedPreset = null;
       _currentPreset = null;
@@ -53,8 +54,7 @@ class PresetProvider with ChangeNotifier {
     }
     try {
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=$projectId'),
+        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
         headers: await getAuthHeaders(),
       );
 
@@ -64,32 +64,19 @@ class PresetProvider with ChangeNotifier {
         _currentPreset = preset['data'];
         notifyListeners();
       } else {
-        throw Exception('Failed to load preset');
+        throw Exception('Failed to load preset: ${response.statusCode}');
       }
     } catch (error) {
-      _logger.severe('Error fetching preset: $error');
+      _logger.severe('Error loading preset: $error');
       rethrow;
     }
   }
 
-  void clearSelectedPreset() {
-    _selectedPreset = null;
-    _currentPreset = {
-      'numChapters': 1,
-      'plot': '',
-      'writingStyle': '',
-      'styleGuide': '',
-      'minWordCount': 1000,
-      'additionalInstructions': '',
-    };
-    notifyListeners();
-  }
-
-  Future<void> savePreset(String presetName, Map<String, dynamic> presetData,
-      String projectId) async {
+  Future<void> savePreset(
+      String presetName, Map<String, dynamic> presetData) async {
     try {
       final response = await http.post(
-        Uri.parse('$apiUrl/presets?project_id=$projectId'),
+        Uri.parse('$apiUrl/presets'),
         headers: {
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
@@ -101,9 +88,10 @@ class PresetProvider with ChangeNotifier {
       );
 
       if (response.statusCode == 200) {
-        await fetchPresets(projectId);
+        await fetchPresets();
       } else {
-        throw Exception('Failed to save preset: ${response.body}');
+        throw Exception(
+            'Failed to save preset: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       _logger.severe('Error saving preset: $error');
@@ -111,11 +99,10 @@ class PresetProvider with ChangeNotifier {
     }
   }
 
-  Future<void> deletePreset(String presetName, String projectId) async {
+  Future<void> deletePreset(String presetName) async {
     try {
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=$projectId'),
+        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
         headers: await getAuthHeaders(),
       );
 
@@ -125,9 +112,11 @@ class PresetProvider with ChangeNotifier {
           _selectedPreset = null;
           _currentPreset = null;
         }
+        await fetchPresets(); // Refresh the list after deletion
         notifyListeners();
       } else {
-        throw Exception('Failed to delete preset');
+        throw Exception(
+            'Failed to delete preset: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       _logger.severe('Error deleting preset: $error');
