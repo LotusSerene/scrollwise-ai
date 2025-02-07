@@ -180,7 +180,14 @@ async def lifespan(app: FastAPI):
     # Shutdown
     shutdown_event.set()
 
-app = FastAPI(title="Scrollwise AI", version="1.0.4", lifespan=lifespan)
+app = FastAPI(
+    title="Scrollwise AI", 
+    version="1.0.4", 
+    lifespan=lifespan,
+    default_response_class=JSONResponse,
+    # Ensure responses are UTF-8
+    default_encoding="utf-8"
+)
 
 # Get allowed origins from environment variable
 allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:8080').split(',')
@@ -1573,9 +1580,10 @@ async def save_model_settings(settings: ModelSettings, current_user: User = Depe
 
 
 @preset_router.post("")
-async def create_preset(preset: PresetCreate, project_id: str, current_user: User = Depends(get_current_active_user)):
+async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
     try:
-        preset_id = await db_instance.create_preset(current_user.id, project_id, preset.name, preset.data)
+        # Remove project_id from create_preset call
+        preset_id = await db_instance.create_preset(current_user.id, None, preset.name, preset.data)
         return {"id": preset_id, "name": preset.name, "data": preset.data}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -1584,34 +1592,35 @@ async def create_preset(preset: PresetCreate, project_id: str, current_user: Use
         raise HTTPException(status_code=500, detail=str(e))
 
 @preset_router.get("")
-async def get_presets(project_id: str, current_user: User = Depends(get_current_active_user)):
+async def get_presets(current_user: User = Depends(get_current_active_user)):
     try:
-        presets = await db_instance.get_presets(current_user.id, project_id)
-        return {"presets": presets}  # Return presets in an object
+        # Remove project_id parameter
+        presets = await db_instance.get_presets(current_user.id, None)
+        return {"presets": presets}
     except Exception as e:
         logger.error(f"Error getting presets: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@preset_router.put("/{preset_name}")  # Update route
-async def update_preset(preset_name: str, preset_update: PresetUpdate, project_id: str, current_user: User = Depends(get_current_active_user)):
+@preset_router.put("/{preset_name}")
+async def update_preset(preset_name: str, preset_update: PresetUpdate, current_user: User = Depends(get_current_active_user)):
     try:
-        existing_preset = await db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
+        # Remove project_id from get_preset_by_name and update_preset calls
+        existing_preset = await db_instance.get_preset_by_name(preset_name, current_user.id, None)
         if not existing_preset:
             raise HTTPException(status_code=404, detail="Preset not found")
 
-        # Update the preset data
         updated_data = preset_update.model_dump()
-        await db_instance.update_preset(preset_name, current_user.id, project_id, updated_data)
-
+        await db_instance.update_preset(preset_name, current_user.id, None, updated_data)
         return {"message": "Preset updated successfully", "name": preset_name, "data": updated_data}
     except Exception as e:
         logger.error(f"Error updating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @preset_router.get("/{preset_name}")
-async def get_preset(preset_name: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
     try:
-        preset = await db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
+        # Remove project_id from get_preset_by_name call
+        preset = await db_instance.get_preset_by_name(preset_name, current_user.id, None)
         if not preset:
             raise HTTPException(status_code=404, detail="Preset not found")
         return preset
@@ -1620,9 +1629,10 @@ async def get_preset(preset_name: str, project_id: str, current_user: User = Dep
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @preset_router.delete("/{preset_name}")
-async def delete_preset(preset_name: str, project_id: str, current_user: User = Depends(get_current_active_user)):
+async def delete_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
     try:
-        deleted = await db_instance.delete_preset(preset_name, current_user.id, project_id)
+        # Remove project_id from delete_preset call
+        deleted = await db_instance.delete_preset(preset_name, current_user.id, None)
         if deleted:
             return {"message": "Preset deleted successfully"}
         else:
@@ -2686,8 +2696,8 @@ async def graceful_shutdown():
         for manager in agent_manager_store._managers.values():
             await manager.close()
             
-        # Close database connections
-        await db_instance.close()
+        # Close database connections - Fix: Use dispose() instead of close()
+        await db_instance.dispose()
         
         # Set shutdown event
         shutdown_event.set()
@@ -2731,20 +2741,31 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
+# Add JSON response configuration middleware
+@app.middleware("http")
+async def configure_json_responses(request: Request, call_next):
+    response = await call_next(request)
+    if isinstance(response, JSONResponse):
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
+# Update the uvicorn configuration
 if __name__ == "__main__":
-   try:
-       import uvicorn
-       config = uvicorn.Config(
-           app,
-           host="localhost",
-           port=8080,
-           log_level="debug",
-           reload=False,
-           workers=1,
-           access_log=True
-       )
-       server = uvicorn.Server(config)
-       server.run()
-   except Exception as e:
-       logger.error(f"Fatal error: {str(e)}", exc_info=True)
-       sys.exit(1)
+    try:
+        import uvicorn
+        config = uvicorn.Config(
+            app,
+            host="localhost",
+            port=8080,
+            log_level="debug",
+            reload=False,
+            workers=1,
+            access_log=True,
+            encoding="utf-8",  # Add explicit UTF-8 encoding
+            http={'header_size_limit': 32768}  # Increase header size limit if needed
+        )
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}", exc_info=True)
+        sys.exit(1)

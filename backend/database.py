@@ -469,12 +469,14 @@ class Database:
             supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
             self.supabase: Client = create_client(supabase_url, supabase_key)
         
-            # Initialize async SQLAlchemy engine without pooling parameters
+            # Initialize async SQLAlchemy engine with UTF-8 encoding
             self.engine = create_async_engine(
-                "sqlite+aiosqlite:///local.db",
+                "sqlite+aiosqlite:///local.db?charset=utf8mb4",
                 echo=False,
                 pool_pre_ping=True,
-                pool_recycle=3600  # Recycle connections after 1 hour
+                pool_recycle=3600,  # Recycle connections after 1 hour
+                connect_args={"check_same_thread": False},
+                encoding='utf8'
             )
             
             # Create async session maker
