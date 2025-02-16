@@ -2761,8 +2761,7 @@ if __name__ == "__main__":
             reload=False,
             workers=1,
             access_log=True,
-            encoding="utf-8",  # Add explicit UTF-8 encoding
-            http={'header_size_limit': 32768}  # Increase header size limit if needed
+            h11_max_incomplete_event_size=32768  # Correct parameter name
         )
         server = uvicorn.Server(config)
         server.run()
