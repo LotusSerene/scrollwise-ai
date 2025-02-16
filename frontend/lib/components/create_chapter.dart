@@ -83,8 +83,8 @@ class _CreateChapterState extends State<CreateChapter> {
     _presetProvider.addListener(_onPresetChanged);
 
     // Fetch presets when the widget is initialized
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _presetProvider.fetchPresets(widget.projectId);
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      _presetProvider.fetchPresets();
     });
   }
 
@@ -140,8 +140,7 @@ class _CreateChapterState extends State<CreateChapter> {
     };
 
     try {
-      await presetProvider.savePreset(
-          newPresetName, presetData, widget.projectId);
+      await presetProvider.savePreset(newPresetName, presetData);
       if (!context.mounted) return;
       scaffoldMessenger.showSnackBar(
         const SnackBar(content: Text('Preset saved successfully')),
@@ -305,7 +304,7 @@ class _CreateChapterState extends State<CreateChapter> {
   void _handlePresetChange(String? newValue) {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
     if (newValue == null) {
-      presetProvider.clearSelectedPreset();
+      presetProvider.loadPreset("select a preset");
       setState(() {
         _numChapters = 1;
         _plotController.text = '';
@@ -315,7 +314,7 @@ class _CreateChapterState extends State<CreateChapter> {
         _additionalInstructionsController.text = '';
       });
     } else {
-      presetProvider.loadPreset(newValue, widget.projectId);
+      presetProvider.loadPreset(newValue);
     }
   }
 
@@ -323,7 +322,7 @@ class _CreateChapterState extends State<CreateChapter> {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
-      await presetProvider.deletePreset(presetName, widget.projectId);
+      await presetProvider.deletePreset(presetName);
       if (!context.mounted) return;
       scaffoldMessenger.showSnackBar(
         const SnackBar(content: Text('Preset deleted successfully')),
