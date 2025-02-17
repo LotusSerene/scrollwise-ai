@@ -386,6 +386,16 @@ class AgentManager:
             if not chapter_content:
                 raise ValueError("No chapter content was generated")
 
+            # Check and extend chapter if needed
+            expected_word_count = instructions.get('wordCount', 0)
+            if expected_word_count > 0:
+                chapter_content = await self.check_and_extend_chapter(
+                    chapter_content,
+                    instructions,
+                    context,
+                    expected_word_count
+                )
+
             # Generate title
             chapter_title = await self.generate_title(chapter_content, chapter_number)
 

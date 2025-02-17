@@ -34,6 +34,7 @@ class VectorStore:
         self.api_key = api_key
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
+        self.llm = None
         
         try:
             self.embeddings = GoogleGenerativeAIEmbeddings(
@@ -323,6 +324,10 @@ class VectorStore:
         except Exception as e:
             self.logger.error(f"Error getting embedding ID: {str(e)}")
             return None
+
+    def set_llm(self, llm):
+        """Set the LLM instance for this vector store."""
+        self.llm = llm
 
 
 
