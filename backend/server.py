@@ -902,80 +902,77 @@ async def generate_chapters(
             for i in range(body['numChapters']):
                 chapter_number = chapter_count + i + 1
                 
-                chapter_content = ""
-                async for chunk in agent_manager.generate_chapter_stream(
+                # Generate the chapter without streaming
+                result = await agent_manager.generate_chapter(
                     chapter_number=chapter_number,
                     plot=body['plot'],
                     writing_style=body['writingStyle'],
                     instructions=instructions
-                ):
-                    if isinstance(chunk, dict) and 'content' in chunk:
-                        chapter_content += chunk['content']
+                )
 
-                    if isinstance(chunk, dict) and 'type' in chunk and chunk['type'] == 'complete':
-                        # Create the chapter
-                        new_chapter = await db_instance.create_chapter(
-                            title=chunk.get('chapter_title', f"Chapter {chapter_number}"),
-                            content=chapter_content,
-                            project_id=project_id,
-                            user_id=current_user.id
-                        )
-                        generated_chapters.append(new_chapter)
+                # Create the chapter
+                new_chapter = await db_instance.create_chapter(
+                    title=result.get('chapter_title', f"Chapter {chapter_number}"),
+                    content=result['content'],
+                    project_id=project_id,
+                    user_id=current_user.id
+                )
+                generated_chapters.append(new_chapter)
 
-                        # Add the chapter to the knowledge base
-                        embedding_id = await agent_manager.add_to_knowledge_base(
-                            "chapter",
-                            chapter_content,
-                            {
-                                "title": chunk.get('chapter_title', f"Chapter {chapter_number}"),
-                                "id": new_chapter['id'],
-                                "type": "chapter",
-                                "chapter_number": chapter_number
-                            }
-                        )
+                # Add the chapter to the knowledge base
+                embedding_id = await agent_manager.add_to_knowledge_base(
+                    "chapter",
+                    result['content'],
+                    {
+                        "title": result.get('chapter_title', f"Chapter {chapter_number}"),
+                        "id": new_chapter['id'],
+                        "type": "chapter",
+                        "chapter_number": chapter_number
+                    }
+                )
 
-                        # Update the chapter with the embedding_id
-                        await db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
+                # Update the chapter with the embedding_id
+                await db_instance.update_chapter_embedding_id(new_chapter['id'], embedding_id)
 
-                        # Save the validity check
-                        if 'validity_check' in chunk:
-                            await agent_manager.save_validity_feedback(
-                                result=chunk['validity_check'],
-                                chapter_number=chapter_number,
-                                chapter_id=new_chapter['id']
+                # Save the validity check
+                if 'validity_check' in result:
+                    await agent_manager.save_validity_feedback(
+                        result=result['validity_check'],
+                        chapter_number=chapter_number,
+                        chapter_id=new_chapter['id']
+                    )
+
+                # Process new codex items if present
+                if 'new_codex_items' in result:
+                    for item in result['new_codex_items']:
+                        try:
+                            # Create codex item in DB
+                            item_id = await db_instance.create_codex_item(
+                                name=item['name'],
+                                description=item['description'],
+                                type=item['type'],
+                                subtype=item.get('subtype'),
+                                user_id=current_user.id,
+                                project_id=project_id
                             )
 
-                        # Process new codex items if present
-                        if 'new_codex_items' in chunk:
-                            for item in chunk['new_codex_items']:
-                                try:
-                                    # Create codex item in DB
-                                    item_id = await db_instance.create_codex_item(
-                                        name=item['name'],
-                                        description=item['description'],
-                                        type=item['type'],
-                                        subtype=item.get('subtype'),
-                                        user_id=current_user.id,
-                                        project_id=project_id
-                                    )
+                            # Add to knowledge base with the specific type
+                            embedding_id = await agent_manager.add_to_knowledge_base(
+                                item['type'],
+                                item['description'],
+                                {
+                                    "name": item['name'],
+                                    "id": str(item_id),
+                                    "type": item['type'],
+                                    "subtype": item.get('subtype')
+                                }
+                            )
 
-                                    # Add to knowledge base with the specific type
-                                    embedding_id = await agent_manager.add_to_knowledge_base(
-                                        item['type'],
-                                        item['description'],
-                                        {
-                                            "name": item['name'],
-                                            "id": str(item_id),
-                                            "type": item['type'],
-                                            "subtype": item.get('subtype')
-                                        }
-                                    )
+                            await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
 
-                                    await db_instance.update_codex_item_embedding_id(item_id, embedding_id)
-
-                                except Exception as e:
-                                    logger.error(f"Error processing codex item: {str(e)}")
-                                    continue
+                        except Exception as e:
+                            logger.error(f"Error processing codex item: {str(e)}")
+                            continue
 
             return {"generated_chapters": generated_chapters}
 

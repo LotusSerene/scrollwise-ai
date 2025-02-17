@@ -1,13 +1,10 @@
 # backend/agent_manager.py
-import os
 from typing import Dict, Any, List, Tuple, Optional, AsyncGenerator, Union
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
-from langchain.callbacks.manager import CallbackManager
-from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.output_parsers import PydanticOutputParser
@@ -17,8 +14,6 @@ import logging
 from cachetools import TTLCache
 
 from api_key_manager import ApiKeyManager
-
-import uuid
 from database import db_instance
 from pydantic import BaseModel, Field, ValidationError
 
@@ -36,7 +31,7 @@ from langchain.chains.summarize import load_summarize_chain
 import asyncio
 from langchain.callbacks.base import BaseCallbackHandler
 from datetime import timedelta
-from models import ChapterValidation, CodexItem, CriterionScore,  WorldbuildingSubtype, CodexItemType, CodexExtractionTypes
+from models import ChapterValidation, CodexItem,  WorldbuildingSubtype, CodexItemType, CodexExtractionTypes
 
 # Add at the top with other imports
 PROCESS_TYPES = {
@@ -258,7 +253,15 @@ class AgentManager:
         self.setup_caching()
         self.llm = await self._get_llm(self.model_settings['mainLLM'])
         self.check_llm = await self._get_llm(self.model_settings['checkLLM'])
-        self.vector_store = VectorStore(self.user_id, self.project_id, self.api_key, self.model_settings['embeddingsModel'])
+        
+        self.vector_store = VectorStore(
+            self.user_id, 
+            self.project_id, 
+            self.api_key, 
+            self.model_settings['embeddingsModel']
+        )
+        self.vector_store.set_llm(self.llm)
+        
         self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
 
         # Register this instance for cleanup
@@ -321,15 +324,14 @@ class AgentManager:
         # Set up SQLite caching
         set_llm_cache(SQLiteCache(database_path=".langchain.db"))
 
-    async def generate_chapter_stream(
+    async def generate_chapter(
         self,
         chapter_number: int,
         plot: str,
         writing_style: str,
         instructions: Dict[str, Any]
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> Dict[str, Any]:
         try:
-
             # Construct context using vector store directly
             context = await self._construct_context(
                 plot, 
@@ -349,11 +351,11 @@ class AgentManager:
 
             chat_history = ChatMessageHistory()
             
-            # Get relevant previous chapters from vector store instead of passing them
+            # Get relevant previous chapters from vector store
             previous_chapters = await self.vector_store.similarity_search(
                 query_text=plot,
                 filter={"type": "chapter"},
-                k=3  # Adjust number as needed
+                k=3
             )
             
             # Add relevant chapters to chat history
@@ -368,10 +370,8 @@ class AgentManager:
                 history_messages_key="chat_history",
             )
 
-            # Collect the full chapter content
-            chapter_content = []  # Use list instead of string for better memory management
-            async for chunk in self._stream_chapter_generation(
-                chain,
+            # Generate the chapter content
+            chapter_content = await chain.ainvoke(
                 {
                     "chapter_number": chapter_number,
                     "plot": plot,
@@ -381,40 +381,35 @@ class AgentManager:
                     "context": context
                 },
                 config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
-            ):
-                if isinstance(chunk, dict):
-                    if "content" in chunk:
-                        chapter_content.append(chunk["content"])
-                    yield chunk
-                elif isinstance(chunk, str):
-                    chapter_content.append(chunk)
-                    yield {"type": "chunk", "content": chunk}
+            )
 
-            # Join the chunks and validate
-            chapter_content = " ".join(chapter_content).strip()
             if not chapter_content:
                 raise ValueError("No chapter content was generated")
 
-            # Generate title before returning
+            # Generate title
             chapter_title = await self.generate_title(chapter_content, chapter_number)
 
+            # Check and extract codex items
+            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content)
 
-            # Return the chapter content and metadata
-            yield {
-                "type": "complete",
+            # Perform validity check
+            validity_check = await self.check_chapter(
+                chapter_content,
+                instructions,
+                await self.vector_store.similarity_search(plot, k=3)
+            )
+
+            # Return the complete result
+            return {
                 "content": chapter_content,
                 "chapter_title": chapter_title,
-                "new_codex_items": await self.check_and_extract_new_codex_items(chapter_content),
-                "validity_check": await self.check_chapter(
-                    chapter_content,
-                    instructions,
-                    await self.vector_store.similarity_search(plot, k=3)
-                )
+                "new_codex_items": new_codex_items,
+                "validity_check": validity_check
             }
 
         except Exception as e:
-            self.logger.error(f"Error in generate_chapter_stream: {str(e)}", exc_info=True)
-            yield {"error": str(e)}
+            self.logger.error(f"Error in generate_chapter: {str(e)}", exc_info=True)
+            raise
 
     def _construct_prompt(self, instructions: Dict[str, Any], context: str) -> ChatPromptTemplate:
         system_template = """You are a skilled author tasked with writing a chapter for a novel. Follow these instructions EXACTLY:
@@ -498,20 +493,16 @@ class AgentManager:
     async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
         try:
             self.logger.debug("Starting context construction")
-            #self.logger.debug(f"Plot length: {len(plot)}, Writing style length: {len(writing_style)}")
             
-            # Get relevant chapters
-            #self.logger.debug("Fetching relevant chapters...")
+
+            query = f"Plot: {plot}\nWriting Style: {writing_style}"
             chapters = await vector_store.similarity_search(
-                query_text=plot,
+                query_text=query,
                 filter={"type": "chapter"},
-                k=3
+                k=5  # Increased from 3 to 5 for better context
             )
-           # self.logger.debug(f"Found {len(chapters)} relevant chapters")
             
             context_parts = []
-            
-            # Add plot and writing style
             context_parts.append(f"Plot: {plot}\n")
             context_parts.append(f"Writing Style: {writing_style}\n")
             
@@ -520,16 +511,18 @@ class AgentManager:
             for chapter in chapters:
                 chapter_number = chapter.metadata.get('chapter_number', 'Unknown')
                 chapter_content = chapter.page_content
+                # Include chapter summary if available
+                summary = chapter.metadata.get('summary', '')
+                if summary:
+                    context_parts.append(f"Chapter {chapter_number} Summary: {summary}\n")
                 context_parts.append(f"Chapter {chapter_number}: {chapter_content}\n")
             
-            # Get relevant codex items
             self.logger.debug("Fetching relevant codex items...")
             codex_items = await vector_store.similarity_search(
-                query_text=plot,
+                query_text=query,
                 filter={"type": {"$in": [t.value for t in CodexItemType]}},
-                k=5
+                k=10  # Increased from 5 to 10 for better coverage
             )
-           # self.logger.debug(f"Found {len(codex_items)} relevant codex items")
             
             # Add codex items to context
             if codex_items:
@@ -537,10 +530,21 @@ class AgentManager:
                 for item in codex_items:
                     name = item.metadata.get('name', 'Unknown')
                     item_type = item.metadata.get('type', 'Unknown')
+                    # Include rules and relationships if available
+                    rules = item.metadata.get('rules', [])
+                    relationships = item.metadata.get('relationships', {})
+                    
                     context_parts.append(f"\n{name} ({item_type}): {item.page_content}")
+                    if rules:
+                        context_parts.append("Rules:")
+                        for rule in rules:
+                            context_parts.append(f"- {rule}")
+                    if relationships:
+                        context_parts.append("Relationships:")
+                        for rel_type, rel_items in relationships.items():
+                            context_parts.append(f"- {rel_type}: {', '.join(rel_items)}")
             
             final_context = "\n".join(context_parts)
-            #self.logger.debug(f"Final context length: {len(final_context)} characters")
             return final_context
             
         except Exception as e:
@@ -736,15 +740,51 @@ class AgentManager:
 
     async def query_knowledge_base(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         try:
+
             docs = await self.vector_store.similarity_search(
                 query_text=query,
-                k=5
+                k=20  # Increased from 5 to 20 as per recommendation
             )
             
             if not docs:
                 return "I don't have enough information to answer that question."
 
-            context = "\n\n".join(doc.page_content for doc in docs)
+            # Include metadata in context
+            context_parts = []
+            for doc in docs:
+                content = doc.page_content
+                metadata = doc.metadata
+                
+                # Add document type and name if available
+                doc_type = metadata.get('type', 'Unknown')
+                doc_name = metadata.get('name', '')
+                if doc_name:
+                    context_parts.append(f"\n{doc_type.capitalize()}: {doc_name}")
+                
+                # Add summary if available
+                summary = metadata.get('summary', '')
+                if summary:
+                    context_parts.append(f"Summary: {summary}")
+                
+                # Add rules if available
+                rules = metadata.get('rules', [])
+                if rules:
+                    context_parts.append("Rules:")
+                    for rule in rules:
+                        context_parts.append(f"- {rule}")
+                
+                # Add relationships if available
+                relationships = metadata.get('relationships', {})
+                if relationships:
+                    context_parts.append("Related Items:")
+                    for rel_type, rel_items in relationships.items():
+                        context_parts.append(f"- {rel_type}: {', '.join(rel_items)}")
+                
+                # Add the main content
+                context_parts.append(content)
+                context_parts.append("---")
+
+            context = "\n".join(context_parts)
 
             messages = []
             if chat_history:
@@ -756,7 +796,15 @@ class AgentManager:
 
             prompt = ChatPromptTemplate.from_messages([
                 ("system", """You are a helpful AI assistant answering questions about a story. 
-                Use ONLY the provided context to answer questions. If you cannot answer based on the context, say so.
+                Use the provided context to answer questions. The context includes various types of information:
+                - Document content
+                - Summaries
+                - Rules and constraints
+                - Relationships between items
+                
+                Use all available information to provide comprehensive answers.
+                If you cannot answer based on the context, say so.
+                
                 Context: {context}"""),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{question}")
