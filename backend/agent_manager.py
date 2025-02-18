@@ -332,6 +332,9 @@ class AgentManager:
         instructions: Dict[str, Any]
     ) -> Dict[str, Any]:
         try:
+            self.logger.info("Entering generate_chapter...")
+            self.logger.info(f"Expected word count from instructions: {instructions.get('wordCount')}")
+
             # Construct context using vector store directly
             context = await self._construct_context(
                 plot, 
@@ -374,8 +377,12 @@ class AgentManager:
             chapter_content = await chain.ainvoke(
                 {
                     "chapter_number": chapter_number,
+                    "chapter_title_placeholder": f"Chapter {chapter_number}", # Added placeholder
                     "plot": plot,
                     "writing_style": writing_style,
+                    "word_count_target": instructions.get('wordCount', 0),
+                    "keywords": instructions.get('keywords', []),
+                    "tone": instructions.get('tone', ''),
                     "style_guide": instructions.get('styleGuide', ''),
                     "additional_instructions": instructions.get('additionalInstructions', ''),
                     "context": context
@@ -386,12 +393,18 @@ class AgentManager:
             if not chapter_content:
                 raise ValueError("No chapter content was generated")
 
+            current_word_count = len(chapter_content.split())
+            self.logger.info(f"Generated chapter content. Word count: {current_word_count}")
+
             # Check and extend chapter if needed
             expected_word_count = instructions.get('wordCount', 0)
             if expected_word_count > 0:
+                self.logger.info(f"Word count check: Current word count ({current_word_count}) vs Expected word count ({expected_word_count})")
+                if current_word_count < expected_word_count: # Corrected condition
+                    self.logger.info("Chapter is shorter than expected, calling check_and_extend_chapter...")
                 chapter_content = await self.check_and_extend_chapter(
                     chapter_content,
-                    instructions,
+                    writing_style,
                     context,
                     expected_word_count
                 )
@@ -502,59 +515,45 @@ class AgentManager:
 
     async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
         try:
-            self.logger.debug("Starting context construction")
+            self.logger.info("Starting context construction...")
             
-
-            query = f"Plot: {plot}\nWriting Style: {writing_style}"
-            chapters = await vector_store.similarity_search(
-                query_text=query,
-                filter={"type": "chapter"},
-                k=5  # Increased from 3 to 5 for better context
-            )
+            # Get all previous chapters in chronological order
+            self.logger.info("Fetching previous chapters from database...")
+            previous_chapters = await db_instance.get_all_chapters(self.user_id, self.project_id)
+            self.logger.info(f"Number of previous chapters fetched: {len(previous_chapters)}")
+            if previous_chapters:
+                for chap in previous_chapters:
+                    self.logger.info(f"Chapter Title: {chap.get('title')}, Chapter Number: {chap.get('chapter_number')}")
+            
+            # Sort chapters by chapter number
+            if previous_chapters:
+                previous_chapters.sort(key=lambda x: x.get('chapter_number', 0))
+                self.logger.info("Previous chapters sorted by chapter number.")
             
             context_parts = []
             context_parts.append(f"Plot: {plot}\n")
             context_parts.append(f"Writing Style: {writing_style}\n")
             
-            # Process chapters
-            self.logger.debug("Processing chapters...")
-            for chapter in chapters:
-                chapter_number = chapter.metadata.get('chapter_number', 'Unknown')
-                chapter_content = chapter.page_content
-                # Include chapter summary if available
-                summary = chapter.metadata.get('summary', '')
-                if summary:
-                    context_parts.append(f"Chapter {chapter_number} Summary: {summary}\n")
-                context_parts.append(f"Chapter {chapter_number}: {chapter_content}\n")
-            
-            self.logger.debug("Fetching relevant codex items...")
-            codex_items = await vector_store.similarity_search(
-                query_text=query,
-                filter={"type": {"$in": [t.value for t in CodexItemType]}},
-                k=10  # Increased from 5 to 10 for better coverage
-            )
-            
-            # Add codex items to context
-            if codex_items:
-                context_parts.append("\nRelevant Codex Items:")
-                for item in codex_items:
-                    name = item.metadata.get('name', 'Unknown')
-                    item_type = item.metadata.get('type', 'Unknown')
-                    # Include rules and relationships if available
-                    rules = item.metadata.get('rules', [])
-                    relationships = item.metadata.get('relationships', {})
-                    
-                    context_parts.append(f"\n{name} ({item_type}): {item.page_content}")
-                    if rules:
-                        context_parts.append("Rules:")
-                        for rule in rules:
-                            context_parts.append(f"- {rule}")
-                    if relationships:
-                        context_parts.append("Relationships:")
-                        for rel_type, rel_items in relationships.items():
-                            context_parts.append(f"- {rel_type}: {', '.join(rel_items)}")
-            
+            # Add previous chapters in chronological order
+            self.logger.info("Adding previous chapters to context...")
+            if previous_chapters:
+                context_parts.append("\nPrevious Chapters:")
+                for chapter in previous_chapters:
+                    chapter_number = chapter.get('chapter_number', 'Unknown')
+                    chapter_title = chapter.get('title', f'Chapter {chapter_number}')
+                    content = chapter.get('content', '')
+                    self.logger.info(f"Processing chapter for context: {chapter_title}")
+
+                    # Create a summary for long chapters
+                    self.logger.info(f"Chapter word count: {len(content.split())}")
+                    if len(content.split()) > 500:
+                        summary = await self.summarize_chain.arun([Document(page_content=content)])
+                        context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nSummary: {summary}")
+                    else:
+                        context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nContent: {content}")
+
             final_context = "\n".join(context_parts)
+            self.logger.info("Context construction completed.")
             return final_context
             
         except Exception as e:
@@ -1393,58 +1392,72 @@ class AgentManager:
             self.logger.error(f"Error generating project summary: {str(e)}")
             raise
 
-    async def check_and_extend_chapter(self, chapter_content: str, instructions: Dict[str, Any], context: str, expected_word_count: int) -> str:
-        current_word_count = len(re.findall(r'\w+', chapter_content))
-        
-        if current_word_count >= expected_word_count:
-            return chapter_content
+    async def check_and_extend_chapter(
+        self,
+        chapter_content: str,
+        writing_style: str,
+        context: str,
+        expected_word_count: int
+    ) -> str:
+        """Checks and extends chapter content if it's shorter than expected."""
+        self.logger.info("Entering check_and_extend_chapter...")
+        try:
+            current_word_count = len(chapter_content.split())
+            self.logger.info(f"Current word count: {current_word_count}, Expected word count: {expected_word_count}")
+            if current_word_count >= expected_word_count:
+                self.logger.info("Chapter word count is sufficient, no extension needed.")
+                return chapter_content
+            self.logger.info("Chapter word count is less than expected, proceeding with extension...")
+            prompt = ChatPromptTemplate.from_template("""
+                The current chapter is shorter than expected. Please extend it while maintaining consistency and quality.
+                
+                Current chapter content:
+                {chapter_content}
+                
+                Context and requirements:
+                {context}
+                
+                Writing style: {writing_style}
+                Current word count: {current_word_count}
+                Target word count: {target_word_count}
+                
+                Additional instructions:
+                1. Maintain the same writing style and tone
+                2. Ensure consistency with the existing content
+                3. Add approximately {words_to_add} words
+                4. Focus on expanding existing scenes or adding relevant details
+                5. Do not contradict or repeat existing content
+                6. Ensure smooth transitions between existing and new content
+                
+                Return the complete extended chapter.
+            """)
 
-        #self.logger.info(f"Chapter word count ({current_word_count}) is below expected ({expected_word_count}). Extending chapter.")
-        
-        return await self.extend_chapter(chapter_content, instructions, context, expected_word_count, current_word_count)
-
-    async def extend_chapter(self, chapter_content: str, instructions: Dict[str, Any], context: str, expected_word_count: int, current_word_count: int) -> str:
-        prompt = ChatPromptTemplate.from_template("""
-        You are tasked with extending the following chapter to reach the expected word count. The current chapter is:
-
-        {chapter_content}
-
-        Context:
-        {context}
-
-        Instructions:
-        {instructions}
-
-        Current word count: {current_word_count}
-        Expected word count: {expected_word_count}
-
-        Please extend the chapter, maintaining consistency with the existing content and adhering to the provided instructions and context. Add approximately {words_to_add} words to reach the expected word count. Ensure the additions flow naturally and enhance the narrative. Start writing immediately without any introductory phrases or chapter numbers.
-
-        """)
-
-        llmExtend = await self._get_llm(self.model_settings['mainLLM'])
-        chain =  prompt | llmExtend | StrOutputParser()
-
-        while current_word_count < expected_word_count:
             words_to_add = expected_word_count - current_word_count
+
+            self.logger.info("Creating chain for chapter extension...")
+            chain = prompt | self.llm | StrOutputParser()
 
             extended_content = await chain.ainvoke({
                 "chapter_content": chapter_content,
                 "context": context,
-                "instructions": json.dumps(instructions),
+                "writing_style": writing_style,
                 "current_word_count": current_word_count,
-                "expected_word_count": expected_word_count,
+                "target_word_count": expected_word_count,
                 "words_to_add": words_to_add
             })
 
-            chapter_content += "\n" + extended_content
-            current_word_count = len(re.findall(r'\w+', chapter_content))
+            self.logger.info("Chapter extension process completed.")
 
-            # Add a safety check to prevent infinite loops
-            if len(extended_content.split()) < 10:  # If less than 10 words were added
-                break
+            # Verify the extension
+            if len(extended_content.split()) < expected_word_count:
+                self.logger.warning(f"Chapter extension didn't reach target word count. Got {len(extended_content.split())}, expected {expected_word_count}")
+            self.logger.info(f"Extended chapter word count: {len(extended_content.split())}")
 
-        return chapter_content
+            return extended_content
+
+        except Exception as e:
+            self.logger.error(f"Error in check_and_extend_chapter: {str(e)}", exc_info=True)
+            return chapter_content  # Return original content if extension fails
 
 
     async def analyze_unprocessed_chapter_locations(self) -> List[Dict[str, Any]]:

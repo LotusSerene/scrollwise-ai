@@ -331,7 +331,7 @@ class AppState extends ChangeNotifier {
     'plot': '',
     'writingStyle': '',
     'styleGuide': '',
-    'minWordCount': '1000',
+    'wordCount': '1000',
     'additionalInstructions': '',
     'isGenerating': false,
     'currentChapter': 0,
@@ -353,7 +353,7 @@ class AppState extends ChangeNotifier {
       'plot': '',
       'writingStyle': '',
       'styleGuide': '',
-      'minWordCount': '1000',
+      'wordCount': '1000',
       'additionalInstructions': '',
       'isGenerating': false,
       'currentChapter': 0,
@@ -401,7 +401,7 @@ class AppState extends ChangeNotifier {
     _chapterCreationState['plot'] = '';
     _chapterCreationState['writingStyle'] = '';
     _chapterCreationState['styleGuide'] = '';
-    _chapterCreationState['minWordCount'] = '1000';
+    _chapterCreationState['wordCount'] = '1000';
     _chapterCreationState['additionalInstructions'] = '';
     _chapterCreationState['currentChapter'] = 0;
     _chapterCreationState['streamedContent'] = '';

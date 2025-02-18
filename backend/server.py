@@ -273,6 +273,7 @@ class ChapterGenerationRequest(BaseModel):
 class PresetCreate(BaseModel):
     name: str
     data: Dict[str, Any]
+    project_id: str
 
 class PresetUpdate(BaseModel):  # New model for updating presets
     name: str
@@ -1577,10 +1578,14 @@ async def save_model_settings(settings: ModelSettings, current_user: User = Depe
 
 
 @preset_router.post("")
-async def create_preset(preset: PresetCreate, current_user: User = Depends(get_current_active_user)):
+async def create_preset(preset: PresetCreate, project_id: str = Query(...), current_user: User = Depends(get_current_active_user)):
     try:
-        # Remove project_id from create_preset call
-        preset_id = await db_instance.create_preset(current_user.id, None, preset.name, preset.data)
+        preset_id = await db_instance.create_preset(
+            current_user.id, 
+            project_id,
+            preset.name, 
+            preset.data
+        )
         return {"id": preset_id, "name": preset.name, "data": preset.data}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

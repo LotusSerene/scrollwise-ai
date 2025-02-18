@@ -12,19 +12,28 @@ class PresetProvider with ChangeNotifier {
   String? _selectedPreset;
   Map<String, dynamic>? _currentPreset;
   bool _isLoading = false;
+  String? _currentProjectId;
 
   List<String> get presets => _presets;
   String? get selectedPreset => _selectedPreset;
   Map<String, dynamic>? get currentPreset => _currentPreset;
   bool get isLoading => _isLoading;
 
+  void setProjectId(String projectId) {
+    _currentProjectId = projectId;
+  }
+
   Future<void> fetchPresets() async {
+    if (_currentProjectId == null) {
+      throw Exception('No project ID set');
+    }
+
     _isLoading = true;
     notifyListeners();
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/presets'),
+        Uri.parse('$apiUrl/presets?project_id=$_currentProjectId'),
         headers: await getAuthHeaders(),
       );
 
@@ -75,6 +84,10 @@ class PresetProvider with ChangeNotifier {
   Future<void> savePreset(
       String presetName, Map<String, dynamic> presetData) async {
     try {
+      if (_currentProjectId == null) {
+        throw Exception('No project ID set');
+      }
+
       final response = await http.post(
         Uri.parse('$apiUrl/presets'),
         headers: {
@@ -84,6 +97,7 @@ class PresetProvider with ChangeNotifier {
         body: json.encode({
           'name': presetName,
           'data': presetData,
+          'project_id': _currentProjectId,
         }),
       );
 
@@ -123,4 +137,13 @@ class PresetProvider with ChangeNotifier {
       rethrow;
     }
   }
+
+  Map<String, dynamic> get defaultPreset => {
+        'numChapters': 1,
+        'plot': '',
+        'writingStyle': '',
+        'styleGuide': '',
+        'wordCount': 1000,
+        'additionalInstructions': '',
+      };
 }

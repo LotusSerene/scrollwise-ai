@@ -28,7 +28,7 @@ class _CreateChapterState extends State<CreateChapter> {
   final TextEditingController _plotController = TextEditingController();
   final TextEditingController _writingStyleController = TextEditingController();
   final TextEditingController _styleGuideController = TextEditingController();
-  final TextEditingController _minWordCountController = TextEditingController();
+  final TextEditingController _wordCountController = TextEditingController();
   final TextEditingController _additionalInstructionsController =
       TextEditingController();
   final TextEditingController _newPresetNameController =
@@ -45,6 +45,10 @@ class _CreateChapterState extends State<CreateChapter> {
   void initState() {
     super.initState();
     final appState = Provider.of<AppState>(context, listen: false);
+    final presetProvider = Provider.of<PresetProvider>(context, listen: false);
+
+    // Set project ID for presets
+    presetProvider.setProjectId(widget.projectId);
 
     // Initialize controllers with saved state
     _plotController.text = appState.chapterCreationState['plot'] ?? '';
@@ -52,8 +56,8 @@ class _CreateChapterState extends State<CreateChapter> {
         appState.chapterCreationState['writingStyle'] ?? '';
     _styleGuideController.text =
         appState.chapterCreationState['styleGuide'] ?? '';
-    _minWordCountController.text =
-        appState.chapterCreationState['minWordCount'] ?? '';
+    _wordCountController.text =
+        appState.chapterCreationState['wordCount'] ?? '';
     _additionalInstructionsController.text =
         appState.chapterCreationState['additionalInstructions'] ?? '';
 
@@ -69,9 +73,9 @@ class _CreateChapterState extends State<CreateChapter> {
       appState.updateChapterCreationField(
           'styleGuide', _styleGuideController.text);
     });
-    _minWordCountController.addListener(() {
+    _wordCountController.addListener(() {
       appState.updateChapterCreationField(
-          'minWordCount', _minWordCountController.text);
+          'wordCount', _wordCountController.text);
     });
     _additionalInstructionsController.addListener(() {
       appState.updateChapterCreationField(
@@ -94,7 +98,7 @@ class _CreateChapterState extends State<CreateChapter> {
     _plotController.dispose();
     _writingStyleController.dispose();
     _styleGuideController.dispose();
-    _minWordCountController.dispose();
+    _wordCountController.dispose();
     _additionalInstructionsController.dispose();
     _newPresetNameController.dispose();
     super.dispose();
@@ -111,7 +115,7 @@ class _CreateChapterState extends State<CreateChapter> {
         _plotController.text = preset['plot'] ?? '';
         _writingStyleController.text = preset['writingStyle'] ?? '';
         _styleGuideController.text = preset['styleGuide'] ?? '';
-        _minWordCountController.text = preset['minWordCount']?.toString() ?? '';
+        _wordCountController.text = preset['wordCount']?.toString() ?? '';
         _additionalInstructionsController.text =
             preset['additionalInstructions'] ?? '';
       });
@@ -135,7 +139,7 @@ class _CreateChapterState extends State<CreateChapter> {
       'plot': _plotController.text,
       'writingStyle': _writingStyleController.text,
       'styleGuide': _styleGuideController.text,
-      'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
+      'wordCount': int.tryParse(_wordCountController.text) ?? 1000,
       'additionalInstructions': _additionalInstructionsController.text,
     };
 
@@ -178,7 +182,7 @@ class _CreateChapterState extends State<CreateChapter> {
           'writingStyle': _writingStyleController.text,
           'instructions': {
             'styleGuide': _styleGuideController.text,
-            'minWordCount': int.tryParse(_minWordCountController.text) ?? 1000,
+            'wordCount': int.tryParse(_wordCountController.text) ?? 1000,
             'additionalInstructions': _additionalInstructionsController.text,
           },
           'project_id': widget.projectId,
@@ -310,7 +314,7 @@ class _CreateChapterState extends State<CreateChapter> {
         _plotController.text = '';
         _writingStyleController.text = '';
         _styleGuideController.text = '';
-        _minWordCountController.text = '1000';
+        _wordCountController.text = '1000';
         _additionalInstructionsController.text = '';
       });
     } else {
@@ -729,9 +733,9 @@ class _CreateChapterState extends State<CreateChapter> {
                                 ),
                                 const SizedBox(height: 15),
                                 TextFormField(
-                                  controller: _minWordCountController,
+                                  controller: _wordCountController,
                                   decoration: const InputDecoration(
-                                    labelText: 'Minimum Word Count',
+                                    labelText: 'Word Count Target',
                                     labelStyle:
                                         TextStyle(color: Color(0xFFf8f9fa)),
                                     enabledBorder: OutlineInputBorder(
