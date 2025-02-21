@@ -56,6 +56,9 @@ class ApiKeyManager:
         self.security_manager = security_manager
 
     async def save_api_key(self, user_id: str, api_key: str) -> None:
+        if api_key is None:  # Check if api_key is None
+            logger.error("API key cannot be None")
+            raise HTTPException(status_code=400, detail="API key cannot be None")
         try:
             encrypted_key = self.security_manager.encrypt_data(api_key)
             async with db_instance.Session() as session:

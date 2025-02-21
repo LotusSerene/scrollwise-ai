@@ -89,7 +89,7 @@ class PresetProvider with ChangeNotifier {
       }
 
       final response = await http.post(
-        Uri.parse('$apiUrl/presets'),
+        Uri.parse('$apiUrl/presets?project_id=$_currentProjectId'),
         headers: {
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
@@ -97,7 +97,6 @@ class PresetProvider with ChangeNotifier {
         body: json.encode({
           'name': presetName,
           'data': presetData,
-          'project_id': _currentProjectId,
         }),
       );
 

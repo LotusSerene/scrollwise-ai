@@ -331,6 +331,13 @@ class _CreateChapterState extends State<CreateChapter> {
       scaffoldMessenger.showSnackBar(
         const SnackBar(content: Text('Preset deleted successfully')),
       );
+      // Reset fields after deleting preset
+      _numChapters = 1;
+      _plotController.clear();
+      _writingStyleController.clear();
+      _styleGuideController.clear();
+      _wordCountController.clear();
+      _additionalInstructionsController.clear();
     } catch (error) {
       if (!context.mounted) return;
       scaffoldMessenger.showSnackBar(

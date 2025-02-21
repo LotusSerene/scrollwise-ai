@@ -981,13 +981,22 @@ class AgentManager:
     async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
         try:
             prompt = ChatPromptTemplate.from_template("""
-            Generate a concise, engaging title for Chapter {chapter_number}. 
-            The title should be brief (maximum 50 characters) but capture the essence of the chapter.
-            
-            Chapter content:
+            You are a master storyteller tasked with creating the perfect chapter title. Analyze the following chapter and create a compelling, memorable title that:
+
+            1. Captures the chapter's main theme, conflict, or pivotal moment
+            2. Creates intrigue without spoiling major revelations
+            3. Maintains consistency with professional novel chapter naming conventions
+            4. Uses literary devices (alliteration, metaphor, etc.) when appropriate
+            5. Keeps length between 2-6 words
+            6. Avoids clichés and generic phrasing
+
+            Chapter Number: {chapter_number}
+
+            Chapter Content:
             {chapter_content}
-            
-            Return only the title, without "Chapter X:" prefix.
+
+            Return ONLY the title without "Chapter X:" prefix or any other text.
+            The title should be memorable and make readers eager to begin the chapter.
             """)
             
             llm = await self._get_llm(self.model_settings['titleGenerationLLM']) 
@@ -1000,7 +1009,7 @@ class AgentManager:
             
             # Clean and format the title
             title = title.strip()
-            if len(title) > 200:  # Leave room for "Chapter X: " prefix
+            if len(title) > 200:
                 title = title[:197] + "..."
                 
             return f"Chapter {chapter_number}: {title}"
@@ -1407,29 +1416,45 @@ class AgentManager:
             if current_word_count >= expected_word_count:
                 self.logger.info("Chapter word count is sufficient, no extension needed.")
                 return chapter_content
+
             self.logger.info("Chapter word count is less than expected, proceeding with extension...")
             prompt = ChatPromptTemplate.from_template("""
-                The current chapter is shorter than expected. Please extend it while maintaining consistency and quality.
-                
+                You are a skilled author tasked with extending a chapter that's shorter than desired. Your goal is to seamlessly expand the narrative while maintaining perfect consistency with the existing content.
+
                 Current chapter content:
                 {chapter_content}
                 
                 Context and requirements:
                 {context}
                 
-                Writing style: {writing_style}
+                Writing style to match exactly: {writing_style}
                 Current word count: {current_word_count}
                 Target word count: {target_word_count}
+                Words to add: {words_to_add}
                 
-                Additional instructions:
-                1. Maintain the same writing style and tone
-                2. Ensure consistency with the existing content
-                3. Add approximately {words_to_add} words
-                4. Focus on expanding existing scenes or adding relevant details
-                5. Do not contradict or repeat existing content
-                6. Ensure smooth transitions between existing and new content
+                Extension Guidelines:
+                1. Maintain perfect consistency with:
+                   - Existing plot points and events
+                   - Character voices and behaviors
+                   - Setting details and atmosphere
+                   - Writing style and tone
                 
-                Return the complete extended chapter.
+                2. Focus on enhancing the chapter by:
+                   - Expanding important scenes with more detail
+                   - Adding meaningful character interactions
+                   - Deepening emotional resonance
+                   - Including relevant sensory details
+                   - Developing themes further
+                
+                3. Avoid:
+                   - Contradicting existing content
+                   - Adding unnecessary plot points
+                   - Disrupting pacing
+                   - Repeating information
+                   - Adding filler content
+                
+                Return the complete extended chapter, seamlessly integrating new content with the existing text.
+                The final result should read as one cohesive piece, not feel like two separate parts.
             """)
 
             words_to_add = expected_word_count - current_word_count
