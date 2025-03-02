@@ -1040,7 +1040,7 @@ class _EditorState extends State<Editor> {
             );
 
             // Save the PDF
-            final outputPath = '$outputDir/${title}.pdf';
+            final outputPath = '$outputDir/$title.pdf';
             final file = File(outputPath);
             await file.writeAsBytes(await pdf.save());
             successCount++;
