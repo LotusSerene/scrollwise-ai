@@ -400,14 +400,14 @@ class AgentManager:
             expected_word_count = instructions.get('wordCount', 0)
             if expected_word_count > 0:
                 self.logger.info(f"Word count check: Current word count ({current_word_count}) vs Expected word count ({expected_word_count})")
-                if current_word_count < expected_word_count: # Corrected condition
+                if current_word_count < expected_word_count:
                     self.logger.info("Chapter is shorter than expected, calling check_and_extend_chapter...")
-                chapter_content = await self.check_and_extend_chapter(
-                    chapter_content,
-                    writing_style,
-                    context,
-                    expected_word_count
-                )
+                    chapter_content = await self.check_and_extend_chapter(
+                        chapter_content,
+                        writing_style,
+                        context,
+                        expected_word_count
+                    )
 
             # Generate title
             chapter_title = await self.generate_title(chapter_content, chapter_number)
@@ -1418,65 +1418,83 @@ class AgentManager:
                 return chapter_content
 
             self.logger.info("Chapter word count is less than expected, proceeding with extension...")
-            prompt = ChatPromptTemplate.from_template("""
-                You are a skilled author tasked with extending a chapter that's shorter than desired. Your goal is to seamlessly expand the narrative while maintaining perfect consistency with the existing content.
+            
+            # Add a maximum number of attempts to prevent infinite loops
+            max_attempts = 3
+            attempts = 0
+            extended_content = chapter_content
+            
+            while current_word_count < expected_word_count and attempts < max_attempts:
+                attempts += 1
+                self.logger.info(f"Extension attempt {attempts} of {max_attempts}...")
+                
+                prompt = ChatPromptTemplate.from_template("""
+                    You are a skilled author tasked with extending a chapter that's shorter than desired. Your goal is to seamlessly expand the narrative while maintaining perfect consistency with the existing content.
 
-                Current chapter content:
-                {chapter_content}
-                
-                Context and requirements:
-                {context}
-                
-                Writing style to match exactly: {writing_style}
-                Current word count: {current_word_count}
-                Target word count: {target_word_count}
-                Words to add: {words_to_add}
-                
-                Extension Guidelines:
-                1. Maintain perfect consistency with:
-                   - Existing plot points and events
-                   - Character voices and behaviors
-                   - Setting details and atmosphere
-                   - Writing style and tone
-                
-                2. Focus on enhancing the chapter by:
-                   - Expanding important scenes with more detail
-                   - Adding meaningful character interactions
-                   - Deepening emotional resonance
-                   - Including relevant sensory details
-                   - Developing themes further
-                
-                3. Avoid:
-                   - Contradicting existing content
-                   - Adding unnecessary plot points
-                   - Disrupting pacing
-                   - Repeating information
-                   - Adding filler content
-                
-                Return the complete extended chapter, seamlessly integrating new content with the existing text.
-                The final result should read as one cohesive piece, not feel like two separate parts.
-            """)
+                    Current chapter content:
+                    {chapter_content}
+                    
+                    Context and requirements:
+                    {context}
+                    
+                    Writing style to match exactly: {writing_style}
+                    Current word count: {current_word_count}
+                    Target word count: {target_word_count}
+                    Words to add: {words_to_add}
+                    
+                    Extension Guidelines:
+                    1. Maintain perfect consistency with:
+                       - Existing plot points and events
+                       - Character voices and behaviors
+                       - Setting details and atmosphere
+                       - Writing style and tone
+                    
+                    2. Focus on enhancing the chapter by:
+                       - Expanding important scenes with more detail
+                       - Adding meaningful character interactions
+                       - Deepening emotional resonance
+                       - Including relevant sensory details
+                       - Developing themes further
+                    
+                    3. Avoid:
+                       - Contradicting existing content
+                       - Adding unnecessary plot points
+                       - Disrupting pacing
+                       - Repeating information
+                       - Adding filler content
+                    
+                    Return the complete extended chapter, seamlessly integrating new content with the existing text.
+                    The final result should read as one cohesive piece, not feel like two separate parts.
+                """)
 
-            words_to_add = expected_word_count - current_word_count
+                words_to_add = expected_word_count - current_word_count
 
-            self.logger.info("Creating chain for chapter extension...")
-            chain = prompt | self.llm | StrOutputParser()
+                self.logger.info(f"Creating chain for chapter extension (adding {words_to_add} words)...")
+                chain = prompt | self.llm | StrOutputParser()
 
-            extended_content = await chain.ainvoke({
-                "chapter_content": chapter_content,
-                "context": context,
-                "writing_style": writing_style,
-                "current_word_count": current_word_count,
-                "target_word_count": expected_word_count,
-                "words_to_add": words_to_add
-            })
+                extended_content = await chain.ainvoke({
+                    "chapter_content": extended_content,
+                    "context": context,
+                    "writing_style": writing_style,
+                    "current_word_count": current_word_count,
+                    "target_word_count": expected_word_count,
+                    "words_to_add": words_to_add
+                })
+
+                current_word_count = len(extended_content.split())
+                self.logger.info(f"After attempt {attempts}, word count: {current_word_count}/{expected_word_count}")
+                
+                # If we're close enough (within 5% of target), consider it sufficient
+                if current_word_count >= expected_word_count * 0.95:
+                    self.logger.info("Chapter extension reached at least 95% of target word count, considering it sufficient.")
+                    break
 
             self.logger.info("Chapter extension process completed.")
 
-            # Verify the extension
-            if len(extended_content.split()) < expected_word_count:
-                self.logger.warning(f"Chapter extension didn't reach target word count. Got {len(extended_content.split())}, expected {expected_word_count}")
-            self.logger.info(f"Extended chapter word count: {len(extended_content.split())}")
+            # Log final status
+            if current_word_count < expected_word_count:
+                self.logger.warning(f"Chapter extension didn't reach target word count. Got {current_word_count}, expected {expected_word_count}")
+            self.logger.info(f"Extended chapter word count: {current_word_count}")
 
             return extended_content
 
