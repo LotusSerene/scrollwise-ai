@@ -42,6 +42,7 @@ class PresetProvider with ChangeNotifier {
         final List<dynamic> presetList = data['presets'];
         _presets =
             presetList.map((preset) => preset['name'] as String).toList();
+        notifyListeners();
       } else {
         throw Exception('Failed to load presets: ${response.statusCode}');
       }
@@ -63,7 +64,8 @@ class PresetProvider with ChangeNotifier {
     }
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
+        Uri.parse(
+            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=$_currentProjectId'),
         headers: await getAuthHeaders(),
       );
 
@@ -97,6 +99,7 @@ class PresetProvider with ChangeNotifier {
         body: json.encode({
           'name': presetName,
           'data': presetData,
+          'project_id': _currentProjectId,
         }),
       );
 
@@ -114,8 +117,13 @@ class PresetProvider with ChangeNotifier {
 
   Future<void> deletePreset(String presetName) async {
     try {
+      if (_currentProjectId == null) {
+        throw Exception('No project ID set');
+      }
+
       final response = await http.delete(
-        Uri.parse('$apiUrl/presets/${Uri.encodeComponent(presetName)}'),
+        Uri.parse(
+            '$apiUrl/presets/${Uri.encodeComponent(presetName)}?project_id=$_currentProjectId'),
         headers: await getAuthHeaders(),
       );
 

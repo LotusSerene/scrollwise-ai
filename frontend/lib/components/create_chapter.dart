@@ -141,6 +141,7 @@ class _CreateChapterState extends State<CreateChapter> {
       'styleGuide': _styleGuideController.text,
       'wordCount': int.tryParse(_wordCountController.text) ?? 1000,
       'additionalInstructions': _additionalInstructionsController.text,
+      'project_id': widget.projectId,
     };
 
     try {
@@ -150,6 +151,7 @@ class _CreateChapterState extends State<CreateChapter> {
         const SnackBar(content: Text('Preset saved successfully')),
       );
       _newPresetNameController.clear();
+      await _presetProvider.fetchPresets();
     } catch (e) {
       if (!context.mounted) return;
       scaffoldMessenger.showSnackBar(
@@ -338,6 +340,7 @@ class _CreateChapterState extends State<CreateChapter> {
       _styleGuideController.clear();
       _wordCountController.clear();
       _additionalInstructionsController.clear();
+      await _presetProvider.fetchPresets();
     } catch (error) {
       if (!context.mounted) return;
       scaffoldMessenger.showSnackBar(
@@ -827,7 +830,7 @@ class _CreateChapterState extends State<CreateChapter> {
                                       textStyle: const TextStyle(fontSize: 18),
                                     ),
                                     child: const Text('Generate Chapter'),
-                                  ),
+                                  )
                               ],
                             ),
                           ),
@@ -862,6 +865,7 @@ class _CreateChapterState extends State<CreateChapter> {
             child: Scaffold(
               appBar: AppBar(
                 elevation: 0,
+                automaticallyImplyLeading: false,
                 title: Row(
                   children: [
                     Icon(Icons.create_new_folder,

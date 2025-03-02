@@ -71,8 +71,10 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
     }
 
     return Scaffold(
-      // Wrapped ListView.builder in Scaffold
-      appBar: AppBar(title: const Text('Chapters')),
+      appBar: AppBar(
+        title: const Text('Chapters'),
+        automaticallyImplyLeading: false,
+      ),
       body: RefreshIndicator(
         onRefresh: _fetchChapters,
         child: ListView.builder(
