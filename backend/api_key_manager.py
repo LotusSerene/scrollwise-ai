@@ -48,8 +48,9 @@ class SecurityManager:
         try:
             return self.fernet.decrypt(encrypted_data.encode()).decode()
         except Exception as e:
-            logger.error(f"Error decrypting data: {e}")
-            raise
+            logger.error(f"Decryption failed: {type(e).__name__} - {str(e)}")
+            logger.error(f"Encrypted data length: {len(encrypted_data)}")
+            raise ValueError("Failed to decrypt data - may be corrupted or using wrong encryption key") from e
 
 class ApiKeyManager:
     def __init__(self, security_manager: SecurityManager):
@@ -86,10 +87,29 @@ class ApiKeyManager:
                         decrypted_key = self.security_manager.decrypt_data(user.api_key)
                         return decrypted_key
                     except Exception as e:
-                        logger.error(f"Error decrypting API key for user {user_id}: {e}")
+                        logger.error(f"Decryption failed for user {user_id}:")
+                        logger.error(f"Stored key length: {len(user.api_key)}")
+                        logger.error(f"Error type: {type(e).__name__}, Details: {str(e)}")
                         return None
                 return None
         except Exception as e:
             logger.error(f"Error retrieving API key: {e}")
             raise HTTPException(status_code=500, detail="Error retrieving API key")
+
+    async def remove_api_key(self, user_id: str) -> None:
+        """New method to safely clear API key"""
+        try:
+            async with db_instance.Session() as session:
+                query = select(User).where(User.id == user_id)
+                result = await session.execute(query)
+                user = result.scalars().first()
+                if user:
+                    user.api_key = None
+                    user.updated_at = datetime.now(timezone.utc)
+                    await session.commit()
+                else:
+                    raise HTTPException(status_code=404, detail="User not found")
+        except Exception as e:
+            logger.error(f"Error removing API key: {e}")
+            raise HTTPException(status_code=500, detail="Error removing API key")
         

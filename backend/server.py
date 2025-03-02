@@ -1549,7 +1549,7 @@ async def check_api_key(current_user: User = Depends(get_current_active_user)):
 @settings_router.delete("/api-key")
 async def remove_api_key(current_user: User = Depends(get_current_active_user)):
     try:
-        await api_key_manager.save_api_key(current_user.id, None)
+        await api_key_manager.remove_api_key(current_user.id)  # Updated to call remove_api_key
         return {"message": "API key removed successfully"}
     except Exception as e:
         logger.error(f"Error removing API key: {str(e)}")
@@ -1604,25 +1604,24 @@ async def get_presets(current_user: User = Depends(get_current_active_user)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @preset_router.put("/{preset_name}")
-async def update_preset(preset_name: str, preset_update: PresetUpdate, current_user: User = Depends(get_current_active_user)):
+async def update_preset(preset_name: str, preset_update: PresetUpdate, current_user: User = Depends(get_current_active_user), project_id: str = Query(...)):
     try:
-        # Remove project_id from get_preset_by_name and update_preset calls
-        existing_preset = await db_instance.get_preset_by_name(preset_name, current_user.id, None)
+        existing_preset = await db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
         if not existing_preset:
             raise HTTPException(status_code=404, detail="Preset not found")
 
         updated_data = preset_update.model_dump()
-        await db_instance.update_preset(preset_name, current_user.id, None, updated_data)
+        await db_instance.update_preset(preset_name, current_user.id, project_id, updated_data)
         return {"message": "Preset updated successfully", "name": preset_name, "data": updated_data}
     except Exception as e:
         logger.error(f"Error updating preset: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @preset_router.get("/{preset_name}")
-async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
+async def get_preset(preset_name: str, current_user: User = Depends(get_current_active_user), project_id: str = Query(...)):
     try:
         # Remove project_id from get_preset_by_name call
-        preset = await db_instance.get_preset_by_name(preset_name, current_user.id, None)
+        preset = await db_instance.get_preset_by_name(preset_name, current_user.id, project_id)
         if not preset:
             raise HTTPException(status_code=404, detail="Preset not found")
         return preset
@@ -1631,10 +1630,10 @@ async def get_preset(preset_name: str, current_user: User = Depends(get_current_
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @preset_router.delete("/{preset_name}")
-async def delete_preset(preset_name: str, current_user: User = Depends(get_current_active_user)):
+async def delete_preset(preset_name: str, current_user: User = Depends(get_current_active_user), project_id: str = Query(...)):
     try:
         # Remove project_id from delete_preset call
-        deleted = await db_instance.delete_preset(preset_name, current_user.id, None)
+        deleted = await db_instance.delete_preset(preset_name, current_user.id, project_id)
         if deleted:
             return {"message": "Preset deleted successfully"}
         else:
