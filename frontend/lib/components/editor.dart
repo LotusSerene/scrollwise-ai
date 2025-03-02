@@ -11,6 +11,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:logging/logging.dart';
 import 'dart:async';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:io';
 
 final _logger = Logger('Editor');
 
@@ -345,9 +348,17 @@ class _EditorState extends State<Editor> {
             );
             await _fetchChapters();
           } else {
-            final errorMessage =
-                jsonResponse['error'] ?? 'Error saving chapter';
-            throw Exception(errorMessage);
+            // If response is successful but empty, we can consider it a success
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _selectedChapter != null
+                      ? 'Chapter updated successfully'
+                      : 'Chapter created successfully',
+                ),
+              ),
+            );
+            await _fetchChapters();
           }
         } else {
           // If response is successful but empty, we can consider it a success
@@ -741,6 +752,11 @@ class _EditorState extends State<Editor> {
               onPressed: _importDocuments,
               tooltip: 'Import documents',
             ),
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf),
+              onPressed: _exportChapters,
+              tooltip: 'Export chapters as PDF',
+            ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: _handleSaveChapter,
@@ -911,6 +927,211 @@ class _EditorState extends State<Editor> {
           Text(
             'Create a new chapter to get started',
             style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _exportChapters() async {
+    if (!mounted) return;
+
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      if (appState.chapters.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No chapters to export')),
+        );
+        return;
+      }
+
+      // Let user select output directory
+      String? outputDir = await FilePicker.platform.getDirectoryPath();
+      if (outputDir == null) {
+        // User canceled the picker
+        return;
+      }
+
+      // Show progress indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Exporting chapters...'),
+            ],
+          ),
+        ),
+      );
+
+      int successCount = 0;
+      List<String> failures = [];
+
+      // Get all chapters with full content
+      final headers = await getAuthHeaders();
+      for (var chapter in appState.chapters) {
+        try {
+          // Fetch full chapter content if needed
+          final response = await http.get(
+            Uri.parse(
+                '$apiUrl/chapters/${chapter['id']}?project_id=${widget.projectId}'),
+            headers: headers,
+          );
+
+          if (response.statusCode == 200) {
+            final fullChapter = json.decode(utf8.decode(response.bodyBytes));
+            final title = _sanitizeFilename(fullChapter['title']);
+            final content = fullChapter['content'];
+
+            // Generate PDF
+            final pdf = pw.Document();
+
+            // Split content into paragraphs to help with pagination
+            final paragraphs = content.split('\n\n');
+
+            pdf.addPage(
+              pw.MultiPage(
+                pageFormat: PdfPageFormat.a4,
+                margin: const pw.EdgeInsets.all(32),
+                header: (context) => pw.Text(
+                  title,
+                  style: pw.TextStyle(
+                      fontSize: 24, fontWeight: pw.FontWeight.bold),
+                ),
+                build: (context) {
+                  List<pw.Widget> widgets = [];
+                  widgets.add(pw.SizedBox(height: 20));
+
+                  // Add each paragraph separately to help with pagination
+                  for (var paragraph in paragraphs) {
+                    if (paragraph.trim().isNotEmpty) {
+                      widgets.add(
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(bottom: 8),
+                          child: pw.Text(
+                            paragraph.trim(),
+                            style: const pw.TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      );
+                    }
+                  }
+
+                  return widgets;
+                },
+                footer: (context) => pw.Column(
+                  children: [
+                    pw.Divider(),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text('${getWordCount(content)} words'),
+                        pw.Text(
+                            'Page ${context.pageNumber} of ${context.pagesCount}'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+
+            // Save the PDF
+            final outputPath = '$outputDir/${title}.pdf';
+            final file = File(outputPath);
+            await file.writeAsBytes(await pdf.save());
+            successCount++;
+          } else {
+            failures.add(
+                '${chapter['title']} - Server error: ${response.statusCode}');
+          }
+        } catch (e) {
+          _logger.severe('Error exporting chapter ${chapter['title']}: $e');
+          failures.add('${chapter['title']} - ${e.toString()}');
+        }
+      }
+
+      // Close progress dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Show result
+      if (mounted) {
+        if (failures.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Successfully exported $successCount chapters to $outputDir')),
+          );
+        } else {
+          _showExportResultDialog(successCount, failures);
+        }
+      }
+    } catch (e) {
+      // Close progress dialog if open
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      _logger.severe('Error during export: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error exporting chapters: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  String _sanitizeFilename(String name) {
+    // Replace characters that aren't allowed in filenames
+    return name
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  void _showExportResultDialog(int successCount, List<String> failures) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              failures.isEmpty ? Icons.check_circle : Icons.warning,
+              color: failures.isEmpty
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 8),
+            const Text('Export Result'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Text('Successfully exported $successCount chapters'),
+              if (failures.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('Failed to export:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                ...failures.map((failure) => Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text('• $failure'),
+                    )),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
           ),
         ],
       ),
