@@ -1408,7 +1408,8 @@ class AgentManager:
         context: str,
         expected_word_count: int
     ) -> str:
-        """Checks and extends chapter content if it's shorter than expected."""
+        """Checks and extends chapter content if it's shorter than expected,
+        ensuring that the original writing style is maintained."""
         self.logger.info("Entering check_and_extend_chapter...")
         try:
             current_word_count = len(chapter_content.split())
@@ -1418,58 +1419,41 @@ class AgentManager:
                 return chapter_content
 
             self.logger.info("Chapter word count is less than expected, proceeding with extension...")
-            
-            # Add a maximum number of attempts to prevent infinite loops
+
             max_attempts = 3
             attempts = 0
             extended_content = chapter_content
-            
+
             while current_word_count < expected_word_count and attempts < max_attempts:
                 attempts += 1
                 self.logger.info(f"Extension attempt {attempts} of {max_attempts}...")
-                
-                prompt = ChatPromptTemplate.from_template("""
-                    You are a skilled author tasked with extending a chapter that's shorter than desired. Your goal is to seamlessly expand the narrative while maintaining perfect consistency with the existing content.
 
-                    Current chapter content:
+
+                prompt = ChatPromptTemplate.from_template(""" Your Task is to seamlessly expand the narrative while preserving the exact narrative voice, tone, vocabulary, and sentence structure found in the original chapter excerpt provided below. Study the style of the original text carefully and extend the chapter in a way that integrates naturally with its existing style.
+
+                    Original Chapter Content (for style reference):
                     {chapter_content}
-                    
-                    Context and requirements:
+
+                    Context and Additional Requirements:
                     {context}
-                    
-                    Writing style to match exactly: {writing_style}
+
+                    Writing Style to Match Exactly:
+                    {writing_style}
+
                     Current word count: {current_word_count}
                     Target word count: {target_word_count}
-                    Words to add: {words_to_add}
-                    
+                    Words needed: {words_to_add}
+
                     Extension Guidelines:
-                    1. Maintain perfect consistency with:
-                       - Existing plot points and events
-                       - Character voices and behaviors
-                       - Setting details and atmosphere
-                       - Writing style and tone
+                    1. Retain the original narrative voice, tone, and writing style.
+                    2. Extend plot points and character interactions without introducing stylistic changes.
+                    3. Ensure the new text flows naturally from the original chapter.
+                    4. Do not alter key details or change vocabulary patterns.
                     
-                    2. Focus on enhancing the chapter by:
-                       - Expanding important scenes with more detail
-                       - Adding meaningful character interactions
-                       - Deepening emotional resonance
-                       - Including relevant sensory details
-                       - Developing themes further
-                    
-                    3. Avoid:
-                       - Contradicting existing content
-                       - Adding unnecessary plot points
-                       - Disrupting pacing
-                       - Repeating information
-                       - Adding filler content
-                    
-                    Return the complete extended chapter, seamlessly integrating new content with the existing text.
-                    The final result should read as one cohesive piece, not feel like two separate parts.
+                    Return the complete extended chapter as one cohesive piece.
                 """)
 
                 words_to_add = expected_word_count - current_word_count
-
-                self.logger.info(f"Creating chain for chapter extension (adding {words_to_add} words)...")
                 chain = prompt | self.llm | StrOutputParser()
 
                 extended_content = await chain.ainvoke({
@@ -1484,14 +1468,13 @@ class AgentManager:
                 current_word_count = len(extended_content.split())
                 self.logger.info(f"After attempt {attempts}, word count: {current_word_count}/{expected_word_count}")
                 
-                # If we're close enough (within 5% of target), consider it sufficient
+                # If we're within 95% of target, consider it sufficient
                 if current_word_count >= expected_word_count * 0.95:
                     self.logger.info("Chapter extension reached at least 95% of target word count, considering it sufficient.")
                     break
 
             self.logger.info("Chapter extension process completed.")
 
-            # Log final status
             if current_word_count < expected_word_count:
                 self.logger.warning(f"Chapter extension didn't reach target word count. Got {current_word_count}, expected {expected_word_count}")
             self.logger.info(f"Extended chapter word count: {current_word_count}")
