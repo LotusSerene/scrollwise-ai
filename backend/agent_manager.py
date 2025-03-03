@@ -381,8 +381,6 @@ class AgentManager:
                     "plot": plot,
                     "writing_style": writing_style,
                     "word_count_target": instructions.get('wordCount', 0),
-                    "keywords": instructions.get('keywords', []),
-                    "tone": instructions.get('tone', ''),
                     "style_guide": instructions.get('styleGuide', ''),
                     "additional_instructions": instructions.get('additionalInstructions', ''),
                     "context": context
@@ -406,8 +404,8 @@ class AgentManager:
                         chapter_content,
                         writing_style,
                         context,
-                        expected_word_count
-                    )
+                        expected_word_count,
+                        instructions.get('styleGuide', ''))
 
             # Generate title
             chapter_title = await self.generate_title(chapter_content, chapter_number)
@@ -1229,7 +1227,6 @@ class AgentManager:
             raise
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
-        #self.logger.debug(f"Generating codex item of type: {codex_type}, subtype: {subtype}, description: {description}")
         try:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
             llm = await self._get_llm(self.model_settings['mainLLM'])
@@ -1238,8 +1235,24 @@ class AgentManager:
             # Fetch all existing codex items for the user and project
             existing_codex_items = await db_instance.get_all_codex_items(self.user_id, self.project_id)
             
-            prompt = ChatPromptTemplate.from_template("""
-            You are a master storyteller and world-builder, tasked with creating rich, detailed codex items for an immersive narrative universe. Your expertise spans across various domains, including history, culture, geography, character development, and artifact creation. Your goal is to craft a new codex item that seamlessly integrates into the story world.
+            # Get relevant chapters from vector store
+            relevant_chapters = await self.vector_store.similarity_search(
+                query_text=description,
+                filter={"type": "chapter"},
+                k=15
+            )
+
+            # Format chapter context
+            chapter_context = "\n\n".join(
+                f"Chapter {doc.metadata.get('chapter_number', 'N/A')}: {doc.page_content[:500]}..."
+                for doc in relevant_chapters
+            )
+
+            # Update prompt template
+            prompt = ChatPromptTemplate.from_template("""Create rich, detailed codex items for an immersive narrative universe.
+
+            Relevant Story Chapters:
+            {chapter_context}
 
             Create a new codex item based on the following specifications:
 
@@ -1269,11 +1282,12 @@ class AgentManager:
 
             Types: worldbuilding, character, item, lore
             Subtypes (for worldbuilding only): history, culture, geography
-
+            - Carefully align with events and descriptions from the Relevant Story Chapters above
+            - Reference chapter content where appropriate without contradicting established facts
+            - Maintain continuity with both existing codex items AND chapter content
             {format_instructions}
             """)
             
-            llm = await self._get_llm(self.model_settings['mainLLM'])
             chain = prompt | llm | fixing_parser
             
             result = await chain.ainvoke({
@@ -1281,10 +1295,10 @@ class AgentManager:
                 "subtype": subtype or "N/A",
                 "description": description,
                 "existing_codex_items": json.dumps(existing_codex_items, indent=2),
+                "chapter_context": chapter_context,
                 "format_instructions": parser.get_format_instructions()
             })
             
-            #self.logger.debug(f"Generated codex item: {result}")
             
             if not isinstance(result, GeneratedCodexItem):
                 raise ValueError("Invalid result type from chain.invoke")
@@ -1406,7 +1420,8 @@ class AgentManager:
         chapter_content: str,
         writing_style: str,
         context: str,
-        expected_word_count: int
+        expected_word_count: int,
+        style_guide: str
     ) -> str:
         """Checks and extends chapter content if it's shorter than expected,
         ensuring that the original writing style is maintained."""
@@ -1440,6 +1455,9 @@ class AgentManager:
                     Writing Style to Match Exactly:
                     {writing_style}
 
+                    Style Guide:
+                    {style_guide}
+
                     Current word count: {current_word_count}
                     Target word count: {target_word_count}
                     Words needed: {words_to_add}
@@ -1460,6 +1478,7 @@ class AgentManager:
                     "chapter_content": extended_content,
                     "context": context,
                     "writing_style": writing_style,
+                    "style_guide": style_guide,
                     "current_word_count": current_word_count,
                     "target_word_count": expected_word_count,
                     "words_to_add": words_to_add
