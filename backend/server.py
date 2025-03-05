@@ -13,7 +13,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from models import CodexItemType, WorldbuildingSubtype
-from database import User, Chapter, Project, CodexItem, Database
+from database import User, Chapter, Project, CodexItem
 from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile, Form, Body, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -35,7 +35,7 @@ import io
 
 import sys
 import signal
-import psutil
+
 
 def setup_logging():
     """Configure logging to save to a log file and output to console"""
@@ -72,6 +72,10 @@ def setup_logging():
             encoding='utf-8'
         )
         console_handler = logging.StreamHandler()
+
+        # Set handlers level
+        file_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO)
 
         # Create formatters and add it to handlers
         log_format = logging.Formatter(
@@ -628,6 +632,103 @@ async def update_project_target_word_count(
         logger.error(f"Error updating project target word count: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@project_router.post("/{project_id}/refresh-knowledge-base")
+async def refresh_project_knowledge_base(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        logger.info(f"Starting knowledge base refresh for project {project_id}")
+        
+        # Initialize agent manager
+        async with agent_manager_store.get_or_create_manager(current_user.id, project_id) as agent_manager:
+            
+            logger.info("Resetting knowledge base and restoring from backup...")
+            restored_items = await agent_manager.reset_knowledge_base()
+            logger.info(f"Restored {len(restored_items)} items from backup")
+            
+
+            logger.info("Fetching project data from database...")
+            # Fix parameter order: should be (user_id, project_id) not (project_id, user_id)
+            chapters = await db_instance.get_all_chapters(current_user.id, project_id)
+            codex_items = await db_instance.get_all_codex_items(current_user.id, project_id)
+            logger.info(f"Found {len(chapters)} chapters and {len(codex_items)} codex items in database")
+            
+            # Track items added during refresh
+            added_items = 0
+            
+            # Re-add chapters that weren't restored from backup
+            logger.info("Processing chapters...")
+            for chapter in chapters:
+                item_key = f"chapter_{chapter['id']}"
+                if item_key not in restored_items:
+                    embedding_id = await agent_manager.add_to_knowledge_base(
+                        "chapter", 
+                        chapter['content'], 
+                        {"id": chapter['id'], "title": chapter['title'], "type": "chapter", "chapter_number": chapter.get('chapter_number')}
+                    )
+                    if embedding_id:
+                        added_items += 1
+                        await db_instance.update_chapter_embedding_id(chapter['id'], embedding_id)
+                        logger.debug(f"Added chapter: {chapter['title']}")
+            
+            # Re-add codex items that weren't restored from backup
+            logger.info("Processing codex items...")
+            for item in codex_items:
+                # Use the actual codex type to create the key to match vector_store._get_item_key
+                item_key = f"{item['type']}_{item['id']}"
+                if item_key not in restored_items:
+                    metadata = {
+                        "id": item['id'],
+                        "name": item['name'],
+                        "type": item['type'],  # Use the actual type from the database
+                    }
+                    if item.get('subtype'):
+                        metadata["subtype"] = item['subtype']
+                    
+                    embedding_id = await agent_manager.add_to_knowledge_base(
+                        item['type'],  # Use the actual type as the content_type
+                        item['description'], 
+                        metadata
+                    )
+                    if embedding_id:
+                        added_items += 1
+                        await db_instance.update_codex_item_embedding_id(item['id'], embedding_id)
+                        logger.debug(f"Added {item['type']}: {item['name']}")
+                        
+                    # Handle character backstories if present
+                    if item['type'] == 'character' and item.get('backstory'):
+                        backstory_key = f"character_backstory_{item['id']}"
+                        if backstory_key not in restored_items:
+                            backstory_embedding_id = await agent_manager.add_to_knowledge_base(
+                                "character_backstory",
+                                item['backstory'],
+                                {
+                                    "id": item['id'],
+                                    "type": "character_backstory",
+                                    "character_id": item['id']
+                                }
+                            )
+                            if backstory_embedding_id:
+                                added_items += 1
+                                logger.debug(f"Added backstory for character: {item['name']}")
+            
+            logger.info(f"Knowledge base refresh complete. Restored {len(restored_items)} items from backup, Added {added_items} items from database")
+            return {
+                "status": "success", 
+                "restored": len(restored_items), 
+                "added": added_items,
+                "total": len(restored_items) + added_items
+            }
+                
+    except Exception as e:
+        logger.error(f"Error refreshing knowledge base: {str(e)}", exc_info=True)
+        error_details = str(e)
+        return {
+            "status": "error",
+            "message": "Failed to refresh knowledge base",
+            "details": error_details
+        }
 
 # Universe routes
 @universe_router.post("/", response_model=Dict[str, Any])

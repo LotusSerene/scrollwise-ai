@@ -1,5 +1,5 @@
 # backend/agent_manager.py
-from typing import Dict, Any, List, Tuple, Optional, AsyncGenerator, Union
+from typing import Dict, Any, List, Tuple, Optional, Union
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
@@ -18,7 +18,6 @@ from database import db_instance
 from pydantic import BaseModel, Field, ValidationError
 
 import json
-import re
 # Load environment variables
 load_dotenv()
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -335,7 +334,7 @@ class AgentManager:
             self.logger.info("Entering generate_chapter...")
             self.logger.info(f"Expected word count from instructions: {instructions.get('wordCount')}")
 
-            # Construct context using vector store directly
+            # Construct context
             context = await self._construct_context(
                 plot, 
                 writing_style,
@@ -353,19 +352,6 @@ class AgentManager:
             )
 
             chat_history = ChatMessageHistory()
-            
-            # Get relevant previous chapters from vector store
-            previous_chapters = await self.vector_store.similarity_search(
-                query_text=plot,
-                filter={"type": "chapter"},
-                k=3
-            )
-            
-            # Add relevant chapters to chat history
-            for doc in previous_chapters:
-                chat_history.add_user_message(doc.page_content)
-                chat_history.add_ai_message("Understood.")
-
             chain = RunnableWithMessageHistory(
                 chain,
                 lambda session_id: chat_history,
@@ -377,7 +363,7 @@ class AgentManager:
             chapter_content = await chain.ainvoke(
                 {
                     "chapter_number": chapter_number,
-                    "chapter_title_placeholder": f"Chapter {chapter_number}", # Added placeholder
+                    "chapter_title_placeholder": f"Chapter {chapter_number}",
                     "plot": plot,
                     "writing_style": writing_style,
                     "word_count_target": instructions.get('wordCount', 0),
@@ -480,57 +466,53 @@ class AgentManager:
             ("human", human_template)
         ])
 
-    async def _stream_chapter_generation(self, chain, variables: Dict[str, Any], config: Dict[str, Any] = None) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Stream the chapter generation using the provided chain and variables.
-
-        Args:
-            chain: The LangChain chain to use for generation.
-            variables (Dict[str, Any]): The variables to pass to the chain.
-            config (Dict[str, Any], optional): Additional configuration for the chain.
-
-        Yields:
-            Dict[str, Any]: Chunks of generated content or error information.
-        """
-        try:
-            #self.logger.debug(f"Starting chapter generation with variables: {variables}")
-            stream_kwargs = {}
-            if config:
-                stream_kwargs['config'] = config
-
-            async for chunk in chain.astream(variables, **stream_kwargs):
-                if isinstance(chunk, str):
-                    #self.logger.debug(f"Received chunk: {chunk[:100]}...")  # Log first 100 chars
-                    yield {"type": "chunk", "content": chunk}
-                else:
-                   # self.logger.debug(f"Received non-string chunk: {chunk}")
-                    yield chunk
-        except Exception as e:
-            self.logger.error(f"Error in _stream_chapter_generation: {str(e)}")
-            yield {"error": str(e)}
-
-
-
     async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
         try:
             self.logger.info("Starting context construction...")
             
+            context_parts = []
+            context_parts.append(f"Plot: {plot}\n")
+            context_parts.append(f"Writing Style: {writing_style}\n")
+            
             # Get all previous chapters in chronological order
             self.logger.info("Fetching previous chapters from database...")
             previous_chapters = await db_instance.get_all_chapters(self.user_id, self.project_id)
-            self.logger.info(f"Number of previous chapters fetched: {len(previous_chapters)}")
-            if previous_chapters:
-                for chap in previous_chapters:
-                    self.logger.info(f"Chapter Title: {chap.get('title')}, Chapter Number: {chap.get('chapter_number')}")
             
             # Sort chapters by chapter number
             if previous_chapters:
                 previous_chapters.sort(key=lambda x: x.get('chapter_number', 0))
                 self.logger.info("Previous chapters sorted by chapter number.")
             
-            context_parts = []
-            context_parts.append(f"Plot: {plot}\n")
-            context_parts.append(f"Writing Style: {writing_style}\n")
+            # Get all codex items except chapters from vector store
+            self.logger.info("Fetching codex items...")
+            codex_items = await vector_store.similarity_search(
+                query_text=plot,
+                k=30,
+                filter={
+                    "type": {
+                        "$nin": ["chapter"]
+                    }
+                }
+            )
+            
+            # Add codex items to context, grouped by type
+            if codex_items:
+                context_parts.append("\nRelevant World Information:")
+                
+                # Group items by type
+                items_by_type = {}
+                for item in codex_items:
+                    item_type = item.metadata.get('type', 'other')
+                    if item_type not in items_by_type:
+                        items_by_type[item_type] = []
+                    items_by_type[item_type].append(item)
+                
+                # Add each type of item to context
+                for item_type, items in items_by_type.items():
+                    context_parts.append(f"\n{item_type.title()}:")
+                    for item in items:
+                        name = item.metadata.get('name', 'Unnamed')
+                        context_parts.append(f"- {name}: {item.page_content}")
             
             # Add previous chapters in chronological order
             self.logger.info("Adding previous chapters to context...")
@@ -540,15 +522,11 @@ class AgentManager:
                     chapter_number = chapter.get('chapter_number', 'Unknown')
                     chapter_title = chapter.get('title', f'Chapter {chapter_number}')
                     content = chapter.get('content', '')
-                    self.logger.info(f"Processing chapter for context: {chapter_title}")
+                    self.logger.debug(f"Processing chapter for context: {chapter_title}")
 
                     # Create a summary for long chapters
-                    self.logger.info(f"Chapter word count: {len(content.split())}")
-                    if len(content.split()) > 500:
-                        summary = await self.summarize_chain.arun([Document(page_content=content)])
-                        context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nSummary: {summary}")
-                    else:
-                        context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nContent: {content}")
+                    self.logger.debug(f"Chapter word count: {len(content.split())}")
+                    context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nContent: {content}")
 
             final_context = "\n".join(context_parts)
             self.logger.info("Context construction completed.")
@@ -558,18 +536,10 @@ class AgentManager:
             self.logger.error(f"Error constructing context: {str(e)}", exc_info=True)
             raise
 
-    def summarize_chapter(self, chapter_content: str) -> str:
-        document = Document(page_content=chapter_content)
-        summary = self.summarize_chain.run([document])
-        return summary
-
     def estimate_token_count(self, text: str) -> int:
         if not text or not text.strip():
             return 0
         return self.llm.get_num_tokens(text)
-
-    def get_embedding(self, text: str) -> List[float]:
-        return self.embeddings.embed_query(text)
 
     async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
                         previous_chapters: List[Document]) -> Dict[str, Any]:
@@ -708,12 +678,17 @@ class AgentManager:
             
             self._embedding_batch.append((content, filtered_metadata))
             
+            # Process immediately if batch is full
             if len(self._embedding_batch) >= 10:  # Process in batches of 10
                 await self._process_embedding_batch()
-
-            # Add the content to the vector store and get the embedding ID
+                return filtered_metadata.get('id', 'batch_processed')  # Return an identifier
+            
+            # Otherwise, process the current item directly
             embedding_id = await self.vector_store.add_to_knowledge_base(content, metadata=filtered_metadata)
-
+            
+            # Remove the item from the batch since we processed it directly
+            self._embedding_batch.pop()
+            
             return embedding_id
         except Exception as e:
             self.logger.error(f"Error adding to knowledge base: {str(e)}", exc_info=True)
@@ -829,117 +804,6 @@ class AgentManager:
         except Exception as e:
             self.logger.error(f"Error in query_knowledge_base: {str(e)}", exc_info=True)
             raise
-
-    async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
-        try:
-            qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
-            
-            # Create a history-aware retriever function
-            async def retrieve_with_history(query: str) -> List[Document]:
-                # Use the condense question prompt to get the standalone question
-                condense_question_prompt = ChatPromptTemplate.from_messages([
-                    ("human", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
-                    MessagesPlaceholder(variable_name="chat_history"),
-                    ("human", "{input}"),
-                ])
-                
-                # Prepare chat history - ensure alternating human/ai messages
-                messages = []
-                for i, message in enumerate(chat_history):
-                    if isinstance(message, dict):
-                        if message.get('type') == 'human':
-                            messages.append(HumanMessage(content=message['content']))
-                        elif message.get('type') == 'ai':
-                            # Only add AI message if previous message was human
-                            if messages and isinstance(messages[-1], HumanMessage):
-                                messages.append(AIMessage(content=message['content']))
-                    elif isinstance(message, (HumanMessage, AIMessage)):
-                        if isinstance(message, HumanMessage) or (messages and isinstance(messages[-1], HumanMessage)):
-                            messages.append(message)
-                    
-                # Get the standalone question
-                chain = condense_question_prompt | qa_llm | StrOutputParser()
-                standalone_question = await chain.ainvoke({
-                    "input": query,
-                    "chat_history": messages
-                })
-                
-                # Use similarity search instead of retriever
-                return await self.vector_store.similarity_search(standalone_question, k=5)
-
-            # Create the QA chain with proper message ordering
-            qa_prompt = ChatPromptTemplate.from_messages([
-                ("human", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{input}"),
-                ("human", "Context: {context}"),
-            ])
-            
-            # Get relevant documents using our history-aware retriever
-            documents = await retrieve_with_history(query)
-            
-            # Format documents for the context
-            context = "\n\n".join(doc.page_content for doc in documents)
-            
-            # Prepare chat history for QA
-            messages = []
-            for message in chat_history:
-                if isinstance(message, dict):
-                    if message.get('type') == 'human':
-                        messages.append(HumanMessage(content=message['content']))
-                    elif message.get('type') == 'ai':
-                        messages.append(AIMessage(content=message['content']))
-                elif isinstance(message, (HumanMessage, AIMessage)):
-                    messages.append(message)
-            
-            # Get the answer
-            chain = qa_prompt | qa_llm | StrOutputParser()
-            answer = await chain.ainvoke({
-                "input": query,
-                "chat_history": messages,
-                "context": context
-            })
-
-            # Format the response with source information
-            response = f"{answer}\n\nSources:\n"
-            for i, doc in enumerate(documents, 1):
-                source_info = f"Type: {doc.metadata.get('type', 'Unknown')}"
-                if 'name' in doc.metadata:
-                    source_info += f", Name: {doc.metadata['name']}"
-                response += f"{i}. {source_info}\n"
-
-            return response
-
-        except Exception as e:
-            self.logger.error(f"Error in generate_with_retrieval: {str(e)}")
-            return f"An error occurred while processing your query: {str(e)}"
-
-    def _construct_query_context(self, relevant_docs: List[Document]) -> str:
-        context = "\n".join([doc.page_content for doc in relevant_docs])
-        return self._truncate_context(context)
-
-    def _truncate_context(self, context: str) -> str:
-        max_tokens = self.MAX_INPUT_TOKENS // 2  # Reserve half of the tokens for context
-        summary = self.summarize_context(context)
-        if self.estimate_token_count(summary) > max_tokens:
-            return ' '.join(summary.split()[:max_tokens]) + "..."
-        return context
-
-    def get_existing_chapter_content(self, chapter_number: int, previous_chapters: List[Dict[str, Any]]) -> Optional[str]:
-        existing_content = ""
-        total_tokens = 0
-
-        for chapter in previous_chapters:
-            chapter_content = chapter['content']
-            chapter_tokens = self.estimate_token_count(chapter_content)
-
-            if total_tokens + chapter_tokens > self.MAX_INPUT_TOKENS // 2:
-                break
-
-            existing_content = f"Chapter {chapter['chapter_number']}: {chapter_content}\n" + existing_content
-            total_tokens += chapter_tokens
-
-        return existing_content if existing_content else None
 
 
     def _truncate_previous_chapters(self, previous_chapters: List[Document]) -> str:
@@ -1378,42 +1242,6 @@ class AgentManager:
             self.logger.error(f"Error extracting character backstory: {str(e)}")
             raise
 
- 
-    async def summarize_project(self) -> str:
-        try:
-            # Use the wrapper method instead of direct vector store calls
-            characters = await self.query_knowledge_base("type:character", k=100)
-            events = await self.query_knowledge_base("type:event", k=100)
-            locations = await self.query_knowledge_base("type:location", k=100)
-            
-            prompt = ChatPromptTemplate.from_template("""
-            Create a concise summary of the project based on the following information:
-
-            Characters:
-            {characters}
-
-            Events:
-            {events}
-
-            Locations:
-            {locations}
-
-            Summarize the key elements of the story, including main characters, major events, and important locations.
-            Limit your response to 500 words.
-            """)
-            
-            chain = prompt | self.check_llm | StrOutputParser()
-            
-            result = await chain.ainvoke({
-                "characters": json.dumps([doc.page_content for doc in characters], indent=2),
-                "events": json.dumps([doc.page_content for doc in events], indent=2),
-                "locations": json.dumps([doc.page_content for doc in locations], indent=2)
-            })
-            
-            return result
-        except Exception as e:
-            self.logger.error(f"Error generating project summary: {str(e)}")
-            raise
 
     async def check_and_extend_chapter(
         self,
@@ -1922,4 +1750,21 @@ class AgentManager:
             self.logger.error(f"Error processing embedding batch: {str(e)}")
             # Clear the batch even if there's an error to prevent getting stuck
             self._embedding_batch = []
+            raise
+
+
+
+    async def reset_knowledge_base(self):
+        """Delete and recreate the collection."""
+        try:
+            # Process any pending batched items first
+            if hasattr(self, '_embedding_batch') and self._embedding_batch:
+                self.logger.info(f"Processing {len(self._embedding_batch)} pending batched items before reset")
+                await self._process_embedding_batch()
+            
+            restored_items = await self.vector_store.reset_knowledge_base()
+            self.logger.info(f"Knowledge base reset complete. Restored {len(restored_items)} items from backup.")
+            return restored_items
+        except Exception as e:
+            self.logger.error(f"Error resetting knowledge base: {str(e)}")
             raise

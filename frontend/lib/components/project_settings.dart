@@ -163,6 +163,67 @@ class _ProjectSettingsState extends State<ProjectSettings> {
     }
   }
 
+  Future<void> _refreshKnowledgeBase() async {
+    if (await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Refresh Knowledge Base'),
+            content: const Text(
+                'This will rebuild the entire knowledge base for this project. This may take a few minutes. Are you sure?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context, true);
+                },
+                child: const Text('Refresh'),
+              ),
+            ],
+          ),
+        ) !=
+        true) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/refresh-knowledge-base'),
+        headers: await getAuthHeaders(),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Knowledge base refreshed successfully')),
+        );
+      } else {
+        throw Exception('Failed to refresh knowledge base');
+      }
+    } catch (error) {
+      _logger.severe('Error refreshing knowledge base: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error refreshing knowledge base')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -331,6 +392,18 @@ class _ProjectSettingsState extends State<ProjectSettings> {
                         .onSurface
                         .withOpacity(0.6),
                   ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _refreshKnowledgeBase,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh Knowledge Base'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
