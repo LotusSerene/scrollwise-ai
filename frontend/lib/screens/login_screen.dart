@@ -553,7 +553,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   TextButton(
                     onPressed: () async {
-                      final Uri url = Uri.parse('https://discord.gg/QHkAMkss');
+                      final Uri url =
+                          Uri.parse('https://discord.gg/R8PUtxFPUq');
                       if (!await launchUrl(url)) {
                         throw Exception('Could not launch $url');
                       }

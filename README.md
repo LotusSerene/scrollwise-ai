@@ -5,12 +5,14 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 ## 🌟 Features
 
 ### Story Management
+
 - Create and organize multiple writing projects
 - Chapter management and organization
 - Import existing documents (PDF, DOCX)
 - Real-time content editing and saving
 
 ### AI-Powered Tools
+
 - Character development assistance
 - Worldbuilding generation
 - Plot consistency checking
@@ -18,16 +20,18 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 - Knowledge base generation from your content
 
 ### Codex System
+
 - Maintain a detailed story bible
 - Track characters, locations, items, and lore
 - Automatic codex entry generation from your writing
 - Relationship mapping between story elements
 
 ### Cross-Platform
+
 - Available for Windows only (Cross-platform coming soon)
 
-
 ## Some Previews
+
 <details>
   <summary>Project Management</summary>
   
@@ -56,6 +60,7 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - Flutter SDK >=3.1.3
 - Python 3.8+
 - PostgreSQL (optional, SQLite supported by default)
@@ -63,27 +68,31 @@ ScrollWise AI is an open-source AI-powered writing assistant that helps authors 
 ### Installation
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/LotusSerene/scrollwise-ai.git
 cd scrollwise-ai
 ```
 
 2. Install backend dependencies:
+
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
 3. Install frontend dependencies:
+
 ```bash
 cd frontend
 flutter pub get
 ```
 
 4. Configure environment variables:
-Create a `.env` file in both `backend` and `frontend` directories with necessary configurations.
+   Create a `.env` file in both `backend` and `frontend` directories with necessary configurations.
 
 5. Run the application:
+
 ```bash
 # Start backend server
 cd backend
@@ -97,12 +106,14 @@ flutter run
 ## 🛠️ Technology Stack
 
 ### Frontend
+
 - Flutter/Dart
 - Provider for state management
 - Material Design
 - HTTP for API communication
 
 ### Backend
+
 - FastAPI
 - SQLAlchemy
 - LangChain
@@ -114,6 +125,7 @@ flutter run
 We welcome contributions! You can contribute to the project by creating a pull request.
 
 ### Development Setup
+
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
@@ -125,6 +137,7 @@ We welcome contributions! You can contribute to the project by creating a pull r
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see the [LICENSE](LICENSE) file for details.
 
 This means:
+
 - ✅ You can use the software freely
 - ✅ You can modify the software
 - ✅ You can distribute the software
@@ -136,7 +149,7 @@ This means:
 ## 🌐 Links
 
 - [Official Website](https://scrollwise.netlify.app/)
-- [Discord](https://discord.gg/QHkAMkss)
+- [Discord](https://discord.gg/R8PUtxFPUq)
 - [Changelog](https://github.com/LotusSerene/scrollwise-ai/blob/master/changelog.md)
 
 ## 💝 Support the Project
@@ -150,5 +163,4 @@ ScrollWise AI is and will always be free and open source. If you'd like to suppo
 
 ## 📊 Project Status
 
-ScrollWise AI is under active development. 
-
+ScrollWise AI is under active development.

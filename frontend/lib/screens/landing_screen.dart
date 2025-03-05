@@ -113,7 +113,7 @@ class LandingScreen extends StatelessWidget {
             children: [
               IconButton.filled(
                 onPressed: () async {
-                  final Uri url = Uri.parse('https://discord.gg/QHkAMkss');
+                  final Uri url = Uri.parse('https://discord.gg/R8PUtxFPUq');
                   if (!await launchUrl(url)) {
                     throw Exception('Could not launch $url');
                   }

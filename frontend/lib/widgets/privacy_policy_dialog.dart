@@ -12,46 +12,46 @@ class PrivacyPolicyDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Last updated: 26.03.2024',
+              'Last updated: 05.03.2025',
               style: TextStyle(fontStyle: FontStyle.italic),
             ),
             const SizedBox(height: 16),
             const Text(
-              'At ScrollWise AI, we prioritize the protection of your privacy and personal information. This Privacy Policy outlines how we collect, use, and safeguard your data when using our application.',
+              'At ScrollWise AI, we prioritize the protection of your privacy and personal information. This Privacy Policy outlines how we handle your data when using our application, which is designed with a local-first approach.',
             ),
             const SizedBox(height: 16),
             _buildSection(
+              'Local-First Application',
+              'ScrollWise AI operates primarily on your local device. This means your writing content and project data are stored locally on your device, giving you more control over your information.',
+            ),
+            _buildSection(
+              'API Key Handling',
+              'To utilize the AI features, you need to provide your own API key. This API key is stored securely on your local device and is used to directly access the Gemini API. We do not store or have access to your API key.',
+            ),
+            _buildSection(
               'Information We Collect',
-              'We collect and process the following types of information:\n'
-                  '• Account information (email address, username)\n'
-                  '• Writing content (chapters, stories, projects)\n'
-                  '• AI-generated content (suggestions, analysis)\n'
-                  '• Project settings and preferences\n'
-                  '• Vector embeddings of your content for AI processing',
+              'We collect and process only the following types of information:\n'
+                  '• Account information (email address, username)',
             ),
             _buildSection(
               'How We Use Your Information',
-              'Your information is used to:\n'
-                  '• Provide our writing assistance services\n'
-                  '• Generate and manage story content\n'
-                  '• Create and maintain vector embeddings for AI analysis\n'
-                  '• Process your writing through AI models\n'
-                  '• Save your preferences and settings',
+              'Your account information is used to:\n'
+                  '• Authenticate and manage your account\n'
+                  '• Personalize your experience',
             ),
             _buildSection(
               'Data Storage and Security',
-              'We implement industry-standard security measures to protect your data. Your content is stored securely using encryption, and we regularly update our security practices to maintain data protection.',
+              'Your account information is stored securely. Your writing content and projects are stored locally on your device.',
             ),
             _buildSection(
               'AI Processing',
-              'Our application uses artificial intelligence to process your writing. While we strive to maintain privacy, please be mindful that AI processing involves sending your content to our secure servers and third-party AI providers.',
+              'When you use AI features, your writing content is processed by the Gemini API directly using your API key. We do not process or store your writing content on our servers.',
             ),
             _buildSection(
               'Your Rights',
               'You have the right to:\n'
-                  '• Access your personal data\n'
+                  '• Access your account data\n'
                   '• Request data correction or deletion\n'
-                  '• Export your content\n'
                   '• Opt-out of certain data processing\n'
                   '• Withdraw consent at any time',
             ),
@@ -61,7 +61,7 @@ class PrivacyPolicyDialog extends StatelessWidget {
             ),
             _buildSection(
               'Contact Us',
-              'Sadly, we do not have a contact email yet.',
+              'For privacy-related inquiries, please join our Discord server.',
             ),
           ],
         ),
