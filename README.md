@@ -1,4 +1,4 @@
-#Expect a few things to break here and there
+# Expect a few things to break here and there
 
 # ScrollWise AI
 
