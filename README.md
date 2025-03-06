@@ -1,3 +1,5 @@
+#Expect a few things to break here and there
+
 # ScrollWise AI
 
 ScrollWise AI is an open-source AI-powered writing assistant that helps authors create, manage, and analyze their stories. It provides comprehensive worldbuilding tools, character development features, and AI-assisted content generation.
