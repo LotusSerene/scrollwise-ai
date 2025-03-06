@@ -953,6 +953,7 @@ class _EditorState extends State<Editor> {
       }
 
       // Show progress indicator
+      if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -1055,7 +1056,7 @@ class _EditorState extends State<Editor> {
       }
 
       // Close progress dialog
-      if (mounted) {
+      if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
 

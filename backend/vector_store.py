@@ -1,22 +1,23 @@
 import asyncio 
-from langchain_chroma import Chroma
+from langchain_qdrant import Qdrant
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.docstore.document import Document
 from typing import List, Dict, Any, Optional
 import logging
-from chromadb.config import Settings
-import chromadb
 import json
 from datetime import datetime
 import os
 from pathlib import Path
+import psutil
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as rest
+from qdrant_client.http.models import Distance, VectorParams, PointStruct, FieldCondition, Filter, MatchValue
+import uuid
 
-# Constants for Chroma configuration
-CHROMA_HOST = "localhost"
-CHROMA_PORT = 8000
-CHROMA_URL = f"http://{CHROMA_HOST}:{CHROMA_PORT}"
+# Constants for Qdrant configuration - saving locally
+QDRANT_PATH = "./qdrant_db"
 
-class ChromaEmbeddingFunction:
+class QdrantEmbeddingFunction:
     def __init__(self, embeddings_model):
         self.embeddings = embeddings_model
 
@@ -52,9 +53,6 @@ def flatten_metadata(metadata):
 
 class VectorStore:
     def __init__(self, user_id, project_id, api_key, embeddings_model):
-        self.chroma_url = CHROMA_URL
-        self.host = CHROMA_HOST
-        self.chroma_port = CHROMA_PORT
         self.user_id = user_id
         self.project_id = project_id
         self.api_key = api_key
@@ -67,95 +65,71 @@ class VectorStore:
             base_embeddings = GoogleGenerativeAIEmbeddings(
                 model=embeddings_model, google_api_key=self.api_key
             )
-            self.embeddings = ChromaEmbeddingFunction(base_embeddings)
+            self.embeddings = QdrantEmbeddingFunction(base_embeddings)
+            self.embedding_size = 768  # Default for Google's text embeddings
             self.logger.debug("Embeddings model initialized successfully")
         except Exception as e:
             self.logger.error(f"Error initializing GoogleGenerativeAIEmbeddings: {str(e)}")
             raise
 
         try:
-            self.logger.debug("Creating Chroma client...")
-            chroma_client = chromadb.PersistentClient(
-                path="./chroma_db",
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    is_persistent=True,
-                    persist_directory="./chroma_db",
-                    allow_reset=True
-                )
+            self.logger.debug("Creating Qdrant client...")
+            # Initialize Qdrant with local persistence and telemetry off
+            self.collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
+            self.logger.debug(f"Setting up collection: {self.collection_name}")
+            
+            # Create local Qdrant client with telemetry disabled
+            self.qdrant_client = QdrantClient(
+                path=QDRANT_PATH,
+                prefer_grpc=False,
+                timeout=10.0,
             )
-            self.logger.debug("Chroma client created successfully")
             
-            collection_name = f"user_{user_id[:8]}_project_{project_id[:8]}"
-            self.logger.debug(f"Setting up collection: {collection_name}")
-            
-            # Get or create collection
+            # Check if collection exists or create it
             try:
-                self.logger.debug("Attempting to get existing collection...")
-                collection = chroma_client.get_collection(
-                    name=collection_name,
-                    embedding_function=self.embeddings
-                )
-                self.logger.debug("Successfully retrieved existing collection")
-            except Exception as collection_e:
-                self.logger.debug(f"Collection not found, creating new one: {str(collection_e)}")
-                try:
-                    # Only delete if we can't get the collection AND it exists
-                    try:
-                        existing = chroma_client.get_collection(name=collection_name)
-                        if not existing._embedding_function:
-                            self.logger.debug("Found collection without embedding function, recreating...")
-                            chroma_client.delete_collection(name=collection_name)
-                            self.logger.debug(f"Deleted corrupted collection: {collection_name}")
-                    except Exception:
-                        self.logger.debug("No existing collection found")
-                    
-                    # Create new collection
-                    collection = chroma_client.create_collection(
-                        name=collection_name,
-                        embedding_function=self.embeddings,
-                        metadata={"user_id": user_id, "project_id": project_id}
+                collections = self.qdrant_client.get_collections()
+                collection_exists = any(c.name == self.collection_name for c in collections.collections)
+                
+                if not collection_exists:
+                    self.logger.debug(f"Collection not found, creating new one: {self.collection_name}")
+                    # Create the collection
+                    self.qdrant_client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=VectorParams(
+                            size=self.embedding_size,
+                            distance=Distance.COSINE
+                        )
                     )
-                    self.logger.debug("New collection created successfully")
-                except Exception as create_e:
-                    self.logger.error(f"Error creating collection: {str(create_e)}")
-                    raise
-
-            self.logger.debug("Initializing Chroma vector store...")
-            self.vector_store = Chroma(
-                client=chroma_client,
-                collection_name=collection_name,
-                embedding_function=self.embeddings,
-                persist_directory="./chroma_db"
+                else:
+                    self.logger.debug(f"Collection already exists: {self.collection_name}")
+            except Exception as e:
+                self.logger.error(f"Error checking or creating collection: {str(e)}")
+                raise
+            
+            # Initialize Qdrant vector store with LangChain
+            self.vector_store = Qdrant(
+                client=self.qdrant_client,
+                collection_name=self.collection_name,
+                embeddings=base_embeddings
             )
             
-            # Verify collection initialization
-            if not self.vector_store._collection:
-                self.logger.error("Collection not properly initialized in vector store")
-                raise ValueError("Failed to initialize Chroma collection in vector store")
-            
-            # Try to perform a simple operation to verify the collection is working
-            self.logger.debug("Verifying collection functionality...")
+            # Verify collection initialization by getting count
             try:
-                count = len(self.vector_store._collection.get()['ids'])
+                count = self.qdrant_client.count(
+                    collection_name=self.collection_name,
+                    exact=True
+                ).count
                 self.logger.debug(f"Collection verification successful. Current document count: {count}")
                 if count == 0:
                     self.logger.warning("Collection is empty - this might indicate data loss")
             except Exception as verify_e:
                 self.logger.error(f"Collection verification failed: {str(verify_e)}")
                 raise
-                
-            self.logger.info(f"Successfully initialized vector store with collection: {collection_name}")
+            
+            self.logger.info(f"Successfully initialized vector store with collection: {self.collection_name}")
             
         except Exception as e:
-            self.logger.error(f"Error initializing Chroma vector store: {str(e)}", exc_info=True)
-            # Try to clean up if initialization failed
-            try:
-                if hasattr(self, 'vector_store') and hasattr(self.vector_store, '_client'):
-                    self.vector_store._client.persist()
-                    self.vector_store._client.close()
-            except:
-                pass
+            self.logger.error(f"Error initializing Qdrant vector store: {str(e)}", exc_info=True)
             raise
 
         self.backup_dir = Path("./vector_store_backups")
@@ -215,58 +189,41 @@ class VectorStore:
         try:
             self.logger.info(f"Attempting to delete embedding ID: {embedding_id}")
             
-            # First, try to get the document to verify it exists
-            collection = self.vector_store._collection
-            if collection is None:
-                self.logger.error(f"No collection found when trying to delete embedding ID: {embedding_id}")
-                return
-            
-            self.logger.debug(f"Got collection reference. Collection name: {collection.name}")
-            
-            # Check if the document exists before deletion
-            self.logger.debug(f"Checking if document exists with ID: {embedding_id}")
-            doc_check = None
+            # Check if point exists before deletion
             try:
-                doc_check = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: collection.get(ids=[embedding_id])
+                point_exists = await asyncio.get_running_loop().run_in_executor(
+                    None, 
+                    lambda: self.qdrant_client.retrieve(
+                        collection_name=self.collection_name,
+                        ids=[embedding_id],
+                        with_payload=True
+                    )
                 )
-                self.logger.debug(f"Document check result: {doc_check}")
+                if not point_exists:
+                    self.logger.warning(f"Document with embedding ID {embedding_id} not found in collection")
+                    return
             except Exception as inner_e:
                 self.logger.error(f"Error checking document existence: {str(inner_e)}", exc_info=True)
                 raise
-            
-            if not doc_check or not doc_check['ids']:
-                self.logger.warning(f"Document with embedding ID {embedding_id} not found in collection")
-                return
-                
-            self.logger.debug(f"Found document to delete. Metadata: {doc_check['metadatas'][0] if doc_check['metadatas'] else 'None'}")
             
             # Proceed with deletion
             self.logger.debug(f"Attempting to execute delete operation for ID: {embedding_id}")
             try:
                 await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: collection.delete(ids=[embedding_id])
+                    None, 
+                    lambda: self.qdrant_client.delete(
+                        collection_name=self.collection_name,
+                        points_selector=[embedding_id]
+                    )
                 )
                 self.logger.debug(f"Delete operation executed successfully")
-                
-                # Persist changes after deletion
-                if hasattr(self.vector_store, '_client') and hasattr(self.vector_store._client, 'persist'):
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, self.vector_store._client.persist
-                    )
-                    self.logger.debug("Changes persisted to disk")
-                
             except Exception as delete_e:
                 self.logger.error(f"Error during delete operation: {str(delete_e)}", exc_info=True)
-                self.logger.error(f"Delete error type: {type(delete_e).__name__}")
-                self.logger.error(f"Delete error args: {delete_e.args}")
                 raise
             
             self.logger.info(f"Successfully deleted embedding ID: {embedding_id}")
         except Exception as e:
             self.logger.error(f"Error deleting embedding ID {embedding_id}: {str(e)}", exc_info=True)
-            self.logger.error(f"Error type: {type(e).__name__}")
-            self.logger.error(f"Error args: {e.args}")
             return None
 
     async def update_in_knowledge_base(self, doc_id: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
@@ -278,85 +235,82 @@ class VectorStore:
 
             loop = asyncio.get_running_loop()
             
-            # Fetch current metadata
-            current_metadata = await loop.run_in_executor(None, lambda: self.vector_store._collection.get(ids=[doc_id]))
-            current_metadata = current_metadata['metadatas'][0]
+            # Fetch current payload/metadata
+            current_point = await loop.run_in_executor(
+                None, 
+                lambda: self.qdrant_client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=[doc_id],
+                    with_payload=True
+                )
+            )
+            
+            if not current_point:
+                self.logger.error(f"Document with ID {doc_id} not found for update")
+                return
+                
+            current_metadata = current_point[0].payload
             
             # Update metadata
             if new_metadata:
                 new_metadata["user_id"] = self.user_id
                 new_metadata["project_id"] = self.project_id
                 for key, value in new_metadata.items():
-                    if value is None:
+                    if value is None and key in current_metadata:
                         current_metadata.pop(key, None)
                     else:
                         current_metadata[key] = value
 
-            # Compute new embeddings if content changed
-            new_embeddings = await loop.run_in_executor(None, self.embeddings.embed_documents, [new_content]) if new_content else None
-
-            # Update document
+            # Prepare data for update
+            update_data = {}
+            
+            # Add new embedding if content changed
+            if new_content:
+                # Compute new embeddings
+                new_vector = await loop.run_in_executor(
+                    None, 
+                    lambda: self.embeddings.embed_documents([new_content])[0]
+                )
+                
+                update_data["vectors"] = new_vector
+                current_metadata["page_content"] = new_content
+            
+            # Always update metadata
+            update_data["payload"] = current_metadata
+            
+            # Update point
             await loop.run_in_executor(
                 None,
-                lambda: self.vector_store._collection.update(
-                    ids=[doc_id],
-                    embeddings=new_embeddings[0] if new_embeddings else None,
-                    documents=[new_content] if new_content else None,
-                    metadatas=[current_metadata]
+                lambda: self.qdrant_client.update(
+                    collection_name=self.collection_name,
+                    points=[rest.PointStruct(
+                        id=doc_id,
+                        **update_data
+                    )]
                 )
             )
+            
         except Exception as e:
             self.logger.error(f"Error updating doc ID: {doc_id}. Error: {str(e)}")
             raise
 
     async def similarity_search(self, query_text: str, k: int = 4, filter: Dict[str, Any] = None) -> List[Document]:
         try:
+            # Add a memory check before performing expensive operations
+            mem = psutil.virtual_memory()
+            if mem.percent > 90:  # If memory usage is above 90%
+                self.logger.warning(f"High memory usage detected: {mem.percent}%. This might cause instability.")
+            
             loop = asyncio.get_running_loop()
 
-            # Prepare the base filter with user and project
-            combined_filter = {
-                "$and": [
-                    {"user_id": {"$eq": self.user_id}},
-                    {"project_id": {"$eq": self.project_id}}
-                ]
-            }
+            # Build Qdrant filter for search
+            qdrant_filter = self._build_qdrant_filter(filter)
             
-            # Handle type filtering
-            if filter and "type" in filter:
-                if isinstance(filter["type"], dict):
-                    # Handle $nin operator by converting to $neq if there's only one value
-                    if "$nin" in filter["type"] and len(filter["type"]["$nin"]) == 1:
-                        combined_filter["$and"].append(
-                            {"type": {"$ne": filter["type"]["$nin"][0]}}
-                        )
-                    # For multiple values, we'll need to use $or with $ne
-                    elif "$nin" in filter["type"]:
-                        combined_filter["$and"].append({
-                            "$or": [
-                                {"type": {"$ne": val}} 
-                                for val in filter["type"]["$nin"]
-                            ]
-                        })
-                    else:
-                        combined_filter["$and"].append({"type": filter["type"]})
-                else:
-                    combined_filter["$and"].append({"type": {"$eq": filter["type"]}})
-            
-            # Add any additional filter conditions
-            if filter:
-                for key, value in filter.items():
-                    if key != "type":  # Skip 'type' as it's already handled
-                        if isinstance(value, dict):
-                            # Handle operators
-                            combined_filter["$and"].append({key: value})
-                        else:
-                            combined_filter["$and"].append({key: {"$eq": value}})
-
             # Perform the similarity search with relevance scores
             results = await self._search_with_relevance(
                 query_text,
                 k=k,
-                filter=combined_filter
+                filter=qdrant_filter
             )
 
             return results
@@ -364,47 +318,152 @@ class VectorStore:
         except Exception as e:
             self.logger.error(f"Error in similarity_search: {str(e)}")
             raise
+    
+    def _build_qdrant_filter(self, filter_dict: Dict[str, Any] = None) -> Optional[Filter]:
+        """Convert API filter dict to Qdrant Filter object"""
+        if not filter_dict:
+            # Base filter for user and project
+            return Filter(
+                must=[
+                    FieldCondition(
+                        key="user_id",
+                        match=MatchValue(value=self.user_id)
+                    ),
+                    FieldCondition(
+                        key="project_id",
+                        match=MatchValue(value=self.project_id)
+                    )
+                ]
+            )
+        
+        # Start with user and project filter conditions
+        must_conditions = [
+            FieldCondition(key="user_id", match=MatchValue(value=self.user_id)),
+            FieldCondition(key="project_id", match=MatchValue(value=self.project_id))
+        ]
+        
+        # Handle special case for type filtering
+        if "type" in filter_dict:
+            if isinstance(filter_dict["type"], dict):
+                # Handle $nin operator by converting to $neq for each value
+                if "$nin" in filter_dict["type"]:
+                    for val in filter_dict["type"]["$nin"]:
+                        must_not_condition = FieldCondition(
+                            key="type",
+                            match=MatchValue(value=val)
+                        )
+                        # Add a must_not condition to filter
+                        return Filter(
+                            must=must_conditions,
+                            must_not=[must_not_condition]
+                        )
+                # Other operators can be handled similarly
+            else:
+                # Simple equality match
+                must_conditions.append(
+                    FieldCondition(key="type", match=MatchValue(value=filter_dict["type"]))
+                )
+        
+        # Add any other filter conditions (simplified implementation)
+        for key, value in filter_dict.items():
+            if key != "type":  # Skip 'type' as it's already handled
+                if isinstance(value, dict):
+                    # Operators not fully implemented in this basic version
+                    pass
+                else:
+                    must_conditions.append(
+                        FieldCondition(key=key, match=MatchValue(value=value))
+                    )
+        
+        return Filter(must=must_conditions)
 
-    async def _search_with_relevance(self, query: str, k: int, filter: Dict[str, Any]) -> List[Document]:
+    async def _search_with_relevance(self, query: str, k: int, filter: Filter) -> List[Document]:
         loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(
+        
+        # Get embedding for query
+        query_vector = await loop.run_in_executor(None, self.embeddings.embed_query, query)
+        
+        # Search with Qdrant native client for more control
+        search_results = await loop.run_in_executor(
             None,
-            lambda: self.vector_store.similarity_search_with_relevance_scores(
-                query,
-                k=k,
+            lambda: self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=k,
+                with_payload=True,
                 filter=filter
             )
         )
         
-        # Add relevance scores to metadata
-        for doc, score in results:
-            doc.metadata['relevance_score'] = score
+        # Convert to Document objects
+        documents = []
+        for result in search_results:
+            # Extract payload/metadata
+            payload = result.payload
+            page_content = payload.pop("page_content", "")
             
-        return [doc for doc, _ in results]
+            # Add score to metadata
+            payload["relevance_score"] = result.score
+            
+            # Create Document
+            doc = Document(
+                page_content=page_content,
+                metadata=payload
+            )
+            documents.append(doc)
+            
+        return documents
 
     async def get_knowledge_base_content(self) -> List[Dict[str, Any]]:
         loop = asyncio.get_running_loop()
-        collection = self.vector_store._collection
-        if collection is None:
-            self.logger.warning(f"No collection found for user {self.user_id}")
-            return []
-
+        
         try:
-            all_docs = await loop.run_in_executor(
-                None, 
-                lambda: collection.get(where={"user_id": self.user_id})
-            )
-            content = []
-            for i, doc_id in enumerate(all_docs["ids"]):
-                metadata = all_docs["metadatas"][i] if all_docs["metadatas"] else {}
-                page_content = all_docs["documents"][i] if all_docs["documents"] else ""
-                content.append(
-                    {
-                        "id": doc_id,  # This is the embedding ID
-                        "metadata": metadata,
-                        "page_content": page_content,
-                    }
+            # Get all points in batches (Qdrant typically limits to 100 points per call)
+            points = []
+            offset = 0
+            limit = 100
+            
+            while True:
+                # Use scroll without filter parameter
+                batch = await loop.run_in_executor(
+                    None,
+                    lambda: self.qdrant_client.scroll(
+                        collection_name=self.collection_name,
+                        limit=limit,
+                        offset=offset,
+                        with_payload=True
+                    )
                 )
+                
+                # Unpack the tuple (points, next_page_offset)
+                batch_points, next_offset = batch
+                
+                if not batch_points:
+                    break
+                
+                points.extend(batch_points)
+                
+                if next_offset is None:
+                    break
+                    
+                offset = next_offset
+
+            # Filter points manually for user and project
+            filtered_points = [
+                p for p in points 
+                if p.payload.get("user_id") == self.user_id and p.payload.get("project_id") == self.project_id
+            ]
+
+            # Convert to required format
+            content = []
+            for point in filtered_points:
+                payload = point.payload
+                page_content = payload.pop("page_content", "")
+                content.append({
+                    "id": point.id,
+                    "metadata": payload,
+                    "page_content": page_content
+                })
 
             return content if content else []
         except Exception as e:
@@ -440,41 +499,55 @@ class VectorStore:
         try:
             self.logger.debug(f"Updating document with ID: {doc_id}")
             
-            # Get the existing document to verify it exists
+            # Verify document exists
             try:
-                result = self.vector_store._collection.get(
-                    ids=[doc_id],
-                    include=['documents', 'metadatas']
+                point = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: self.qdrant_client.retrieve(
+                        collection_name=self.collection_name,
+                        ids=[doc_id],
+                        with_payload=True
+                    )
                 )
-                if not result['ids']:
+                if not point:
                     self.logger.warning(f"Document {doc_id} not found in collection")
                     raise ValueError(f"Document {doc_id} not found in collection")
             except Exception as e:
                 self.logger.error(f"Error getting existing document: {str(e)}")
                 raise
 
-            # Delete the existing document
-            try:
-                self.vector_store._collection.delete(
-                    ids=[doc_id]
+            # Generate embeddings for new content
+            new_vector = await asyncio.get_running_loop().run_in_executor(
+                None, 
+                lambda: self.embeddings.embed_documents([content])[0]
+            )
+            
+            # Prepare metadata payload
+            if metadata is None:
+                metadata = {}
+            
+            # Make sure page_content is in the payload
+            metadata["page_content"] = content
+            metadata["user_id"] = self.user_id
+            metadata["project_id"] = self.project_id
+                
+            # Update the point
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: self.qdrant_client.upsert(
+                    collection_name=self.collection_name,
+                    points=[
+                        PointStruct(
+                            id=doc_id,
+                            vector=new_vector,
+                            payload=metadata
+                        )
+                    ]
                 )
-                self.logger.debug(f"Deleted existing document: {doc_id}")
-            except Exception as e:
-                self.logger.error(f"Error deleting existing document: {str(e)}")
-                raise
-
-            # Add the updated document with the same ID
-            try:
-                self.vector_store._collection.add(
-                    documents=[content],
-                    metadatas=[metadata] if metadata else None,
-                    ids=[doc_id]
-                )
-                self.logger.debug(f"Added updated document with ID: {doc_id}")
-                return doc_id
-            except Exception as e:
-                self.logger.error(f"Error adding updated document: {str(e)}")
-                raise
+            )
+            
+            self.logger.debug(f"Updated document with ID: {doc_id}")
+            return doc_id
 
         except Exception as e:
             self.logger.error(f"Error updating doc ID: {doc_id}. Error: {str(e)}")
@@ -488,7 +561,10 @@ class VectorStore:
                 self.logger.debug(f"Removing document with ID: {doc_id}")
                 await asyncio.get_running_loop().run_in_executor(
                     None,
-                    lambda: self.vector_store._collection.delete(ids=[doc_id])
+                    lambda: self.qdrant_client.delete(
+                        collection_name=self.collection_name,
+                        points_selector=[doc_id]
+                    )
                 )
                 return None
             else:
@@ -502,53 +578,160 @@ class VectorStore:
     async def update_document(
         self, doc_id: str, new_content: str, metadata: Dict[str, Any] = None
     ):
-        loop = asyncio.get_running_loop()
+        """LangChain-compatible update method"""
         if metadata is None:
             metadata = {}
-        await loop.run_in_executor(
+            
+        # Store content in metadata for Qdrant
+        metadata["page_content"] = new_content
+        metadata["user_id"] = self.user_id
+        metadata["project_id"] = self.project_id
+        
+        # Generate new embedding
+        new_vector = await asyncio.get_running_loop().run_in_executor(
+            None, 
+            lambda: self.embeddings.embed_documents([new_content])[0]
+        )
+        
+        # Update the document
+        await asyncio.get_running_loop().run_in_executor(
             None,
-            self.vector_store.update_document,
-            doc_id,
-            Document(page_content=new_content, metadata=metadata)
+            lambda: self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=[
+                    PointStruct(
+                        id=doc_id,
+                        vector=new_vector,
+                        payload=metadata
+                    )
+                ]
+            )
         )
 
     async def clear(self):
+        """Clear the collection"""
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self.vector_store.delete_collection)
-        self.vector_store = Chroma(
-            client=self.vector_store._client,
-            collection_name=f"user_{self.user_id}_project_{self.project_id}",
-            embedding_function=self.embeddings,
+        # Delete and recreate collection
+        try:
+            await loop.run_in_executor(
+                None, 
+                lambda: self.qdrant_client.delete_collection(
+                    collection_name=self.collection_name
+                )
+            )
+        except Exception as e:
+            self.logger.warning(f"Error deleting collection: {str(e)}")
+            
+        # Recreate collection    
+        await loop.run_in_executor(
+            None,
+            lambda: self.qdrant_client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(
+                    size=self.embedding_size,
+                    distance=Distance.COSINE
+                )
+            )
         )
 
     async def get_document_by_id(self, doc_id: str) -> Document:
+        """Get a document by ID"""
         loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(None, self.vector_store.get, [doc_id])
-        if results and results["documents"]:
-            return Document(
-                page_content=results["documents"][0], metadata=results["metadatas"][0]
+        
+        # Retrieve the point by ID
+        points = await loop.run_in_executor(
+            None,
+            lambda: self.qdrant_client.retrieve(
+                collection_name=self.collection_name,
+                ids=[doc_id],
+                with_payload=True
             )
-        return None
+        )
+        
+        if not points:
+            return None
+            
+        # Convert to Document
+        point = points[0]
+        payload = point.payload
+        page_content = payload.pop("page_content", "")
+        
+        return Document(
+            page_content=page_content,
+            metadata=payload
+        )
 
     async def add_texts(self, texts: List[str], metadatas: List[Dict[str, Any]] = None) -> List[str]:
         """Add multiple texts to the vector store."""
         if metadatas is None:
             metadatas = [{}] * len(texts)
+        
+        # Ensure user_id and project_id in metadata
         for metadata in metadatas:
             metadata["user_id"] = self.user_id
             metadata["project_id"] = self.project_id
         
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.vector_store.add_texts, texts, metadatas)
+        # Add batching to prevent memory issues with large numbers of documents
+        batch_size = 10  # Process 10 documents at a time
+        all_ids = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i+batch_size]
+            batch_metadatas = metadatas[i:i+batch_size]
+            
+            # Generate UUIDs for this batch instead of custom strings
+            batch_ids = [str(uuid.uuid4()) for _ in range(len(batch_texts))]
+            
+            # Create embeddings
+            loop = asyncio.get_running_loop()
+            vectors = await loop.run_in_executor(
+                None, self.embeddings.embed_documents, batch_texts
+            )
+            
+            # Prepare points for batch upsert
+            points = []
+            for j, (text, metadata, vector, point_id) in enumerate(
+                zip(batch_texts, batch_metadatas, vectors, batch_ids)
+            ):
+                # Store the text in metadata for Qdrant
+                metadata["page_content"] = text
+                
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=vector,
+                        payload=metadata
+                    )
+                )
+            
+            # Upsert the batch
+            await loop.run_in_executor(
+                None,
+                lambda: self.qdrant_client.upsert(
+                    collection_name=self.collection_name,
+                    points=points
+                )
+            )
+            
+            all_ids.extend(batch_ids)
+            
+            # Give the event loop a chance to process other tasks
+            await asyncio.sleep(0.1)
+            
+        return all_ids
 
     def close(self):
         """Properly close the vector store connections"""
         try:
-            if hasattr(self.vector_store, '_client'):
-                if hasattr(self.vector_store._client, 'persist'):
-                    self.vector_store._client.persist()
-                if hasattr(self.vector_store._client, 'close'):
-                    self.vector_store._client.close()
+            # Close Qdrant client connection if possible
+            if hasattr(self, 'qdrant_client'):
+                if hasattr(self.qdrant_client, 'close'):
+                    self.qdrant_client.close()
+                    
+            # Also clean up the embedding model if possible
+            if hasattr(self, 'embeddings') and hasattr(self.embeddings, 'embeddings'):
+                if hasattr(self.embeddings.embeddings, 'close'):
+                    self.embeddings.embeddings.close()
         except Exception as e:
             self.logger.error(f"Error closing vector store: {str(e)}")
 
@@ -565,27 +748,33 @@ class VectorStore:
         """
         try:
             # Create filter for the search
-            search_filter = {
-                "$and": [
-                    {"user_id": {"$eq": self.user_id}},
-                    {"project_id": {"$eq": self.project_id}},
-                    {"id": {"$eq": item_id}},
-                    {"type": {"$eq": item_type}}
+            search_filter = Filter(
+                must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=self.user_id)),
+                    FieldCondition(key="project_id", match=MatchValue(value=self.project_id)),
+                    FieldCondition(key="id", match=MatchValue(value=item_id)),
+                    FieldCondition(key="type", match=MatchValue(value=item_type))
                 ]
-            }
-
-            # Get all matching documents
-            loop = asyncio.get_running_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self.vector_store._collection.get(
-                    where=search_filter
-                )
             )
 
+            # Get matching points
+            loop = asyncio.get_running_loop()
+            points = await loop.run_in_executor(
+                None,
+                lambda: self.qdrant_client.scroll(
+                    collection_name=self.collection_name,
+                    filter=search_filter,
+                    limit=1,
+                    with_payload=False
+                )
+            )
+            
+            # Unpack the tuple (points, next_page_offset)
+            matching_points, _ = points
+
             # Return the ID of the first matching document if found
-            if results and results['ids'] and len(results['ids']) > 0:
-                return results['ids'][0]
+            if matching_points and len(matching_points) > 0:
+                return str(matching_points[0].id)
 
             return None
 
@@ -600,8 +789,7 @@ class VectorStore:
     async def reset_knowledge_base(self):
         """Delete and recreate the collection."""
         try:
-            collection_name = f"user_{self.user_id[:8]}_project_{self.project_id[:8]}"
-            self.logger.info(f"Resetting knowledge base for collection: {collection_name}")
+            self.logger.info(f"Resetting knowledge base for collection: {self.collection_name}")
             
             # Load backups before deleting collection
             backups = []
@@ -617,31 +805,24 @@ class VectorStore:
             try:
                 await asyncio.get_running_loop().run_in_executor(
                     None,
-                    lambda: self.vector_store._client.delete_collection(collection_name)
+                    lambda: self.qdrant_client.delete_collection(collection_name=self.collection_name)
                 )
                 self.logger.debug("Existing collection deleted successfully")
             except Exception as e:
                 self.logger.debug(f"No existing collection to delete or error: {str(e)}")
             
             # Create new collection
-            collection = await asyncio.get_running_loop().run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: self.vector_store._client.create_collection(
-                    name=collection_name,
-                    embedding_function=self.embeddings,
-                    metadata={"user_id": self.user_id, "project_id": self.project_id}
+                lambda: self.qdrant_client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(
+                        size=self.embedding_size,
+                        distance=Distance.COSINE
+                    )
                 )
             )
             self.logger.debug("New collection created successfully")
-            
-            # Reinitialize the vector store with the new collection
-            self.vector_store = Chroma(
-                client=self.vector_store._client,
-                collection_name=collection_name,
-                embedding_function=self.embeddings,
-                persist_directory="./chroma_db"
-            )
-            self.logger.debug("Vector store reinitialized with new collection")
             
             # Track restored items to prevent duplicates
             restored_items = set()
