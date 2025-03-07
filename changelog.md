@@ -178,3 +178,11 @@
 ## 1.0.4-beta
 
 - Fixed users not being able to log in
+
+## 1.0.5-beta
+
+- Fixed a bug where the app would crash when the user had too many knowledge base items
+
+- Migrated to Qdrant
+
+- Added vector store backing

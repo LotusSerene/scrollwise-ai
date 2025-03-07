@@ -11,7 +11,7 @@ from pathlib import Path
 import psutil
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
-from qdrant_client.http.models import Distance, VectorParams, PointStruct, FieldCondition, Filter, MatchValue
+from qdrant_client.http.models import Distance, VectorParams, PointStruct, FieldCondition, Filter, MatchValue, MatchAny
 import uuid
 
 # Constants for Qdrant configuration - saving locally
@@ -294,26 +294,84 @@ class VectorStore:
             self.logger.error(f"Error updating doc ID: {doc_id}. Error: {str(e)}")
             raise
 
-    async def similarity_search(self, query_text: str, k: int = 4, filter: Dict[str, Any] = None) -> List[Document]:
+    async def similarity_search(
+        self, 
+        query_text: str, 
+        k: int = 4, 
+        filter: Optional[Dict[str, Any]] = None
+    ) -> List[Document]:
+        """Search for similar documents."""
         try:
-            # Add a memory check before performing expensive operations
-            mem = psutil.virtual_memory()
-            if mem.percent > 90:  # If memory usage is above 90%
-                self.logger.warning(f"High memory usage detected: {mem.percent}%. This might cause instability.")
-            
-            loop = asyncio.get_running_loop()
+            # Convert the filter dict to Qdrant's filter format
+            qdrant_filter = None
+            if filter:
+                must_conditions = []
+                must_not_conditions = []
+                
+                for key, value in filter.items():
+                    if isinstance(value, dict):
+                        # Handle special operators
+                        for op, val in value.items():
+                            if op == "$eq":
+                                must_conditions.append(
+                                    FieldCondition(key=key, match=MatchValue(value=val))
+                                )
+                            elif op == "$ne":
+                                must_not_conditions.append(
+                                    FieldCondition(key=key, match=MatchValue(value=val))
+                                )
+                            elif op == "$in":
+                                must_conditions.append(
+                                    FieldCondition(key=key, match=MatchAny(any=val))
+                                )
+                            elif op == "$nin":
+                                must_not_conditions.append(
+                                    FieldCondition(key=key, match=MatchAny(any=val))
+                                )
+                    else:
+                        # Simple equality match
+                        must_conditions.append(
+                            FieldCondition(key=key, match=MatchValue(value=value))
+                        )
+                
+                if must_conditions or must_not_conditions:
+                    qdrant_filter = Filter(
+                        must=must_conditions if must_conditions else None,
+                        must_not=must_not_conditions if must_not_conditions else None
+                    )
 
-            # Build Qdrant filter for search
-            qdrant_filter = self._build_qdrant_filter(filter)
-            
-            # Perform the similarity search with relevance scores
-            results = await self._search_with_relevance(
-                query_text,
-                k=k,
-                filter=qdrant_filter
+            # Get embeddings for the query
+            query_embedding = await asyncio.get_running_loop().run_in_executor(
+                None, self.embeddings.embed_query, query_text
             )
 
-            return results
+            # Search in Qdrant
+            search_result = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    limit=k,
+                    query_filter=qdrant_filter  # Use query_filter instead of filter
+                )
+            )
+
+            # Convert results to Documents
+            documents = []
+            for scored_point in search_result:
+                if hasattr(scored_point, 'payload') and scored_point.payload:
+                    # Extract page_content and metadata from payload
+                    page_content = scored_point.payload.pop('page_content', '')
+                    metadata = scored_point.payload
+                    
+                    documents.append(
+                        Document(
+                            page_content=page_content,
+                            metadata=metadata
+                        )
+                    )
+
+            return documents
 
         except Exception as e:
             self.logger.error(f"Error in similarity_search: {str(e)}")
@@ -377,22 +435,28 @@ class VectorStore:
         
         return Filter(must=must_conditions)
 
-    async def _search_with_relevance(self, query: str, k: int, filter: Filter) -> List[Document]:
+    async def _search_with_relevance(self, query: str, k: int, filter: Optional[Filter] = None) -> List[Document]:
         loop = asyncio.get_running_loop()
         
         # Get embedding for query
         query_vector = await loop.run_in_executor(None, self.embeddings.embed_query, query)
         
+        # Prepare search parameters
+        search_params = {
+            "collection_name": self.collection_name,
+            "query_vector": query_vector,
+            "limit": k,
+            "with_payload": True,
+        }
+        
+        # Only add filter if it's not None
+        if filter is not None:
+            search_params["filter"] = filter
+        
         # Search with Qdrant native client for more control
         search_results = await loop.run_in_executor(
             None,
-            lambda: self.qdrant_client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=k,
-                with_payload=True,
-                filter=filter
-            )
+            lambda: self.qdrant_client.search(**search_params)
         )
         
         # Convert to Document objects

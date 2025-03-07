@@ -113,6 +113,11 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing database...")
         await db_instance.initialize()
         
+        # Create Qdrant data directory if it doesn't exist
+        qdrant_path = Path("./qdrant_db")
+        qdrant_path.mkdir(exist_ok=True)
+        logger.info(f"Qdrant data directory: {qdrant_path.absolute()}")
+        
         # Start session cleanup task
         async def cleanup_sessions():
             try:
@@ -138,55 +143,37 @@ async def lifespan(app: FastAPI):
         logger.error(f"Error during startup: {str(e)}")
         raise
     finally:
-        logger.info("Graceful shutdown initiated")
-        logger.info("Starting cleanup process...")
+        # Cleanup
+        logger.info("Shutting down server...")
         
-        # Set keep_alive to False to stop the cleanup loop
-        setattr(app.state, "keep_alive", False)
+        # Cancel cleanup task
+        if cleanup_task:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
         
+        # Close all agent managers to properly close vector stores
+        for key, manager in list(agent_manager_store._managers.items()):
+            try:
+                await manager.close()
+                logger.info(f"Closed agent manager for user {key[0][:8]}, project {key[1][:8]}")
+            except Exception as e:
+                logger.error(f"Error closing agent manager: {str(e)}")
+        
+        # Close database connection
         try:
-            # Cancel cleanup task if it exists and wait for it to complete
-            if cleanup_task and not cleanup_task.done():
-                cleanup_task.cancel()
-                try:
-                    # Use asyncio.wait instead of wait_for
-                    await asyncio.wait([cleanup_task], timeout=5.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Cleanup task timed out")
-                except asyncio.CancelledError:
-                    pass
-            
-            # Clean up agent managers
-            async with agent_manager_store._lock:
-                tasks = []
-                for manager in agent_manager_store._managers.values():
-                    if hasattr(manager, 'vector_store'):
-                        manager.vector_store.close()
-                    tasks.append(manager.close())
-                
-                if tasks:
-                    # Use wait with timeout instead of gather
-                    done, pending = await asyncio.wait(tasks, timeout=10.0)
-                    for task in pending:
-                        task.cancel()
-            
-            # Clean up database
             await db_instance.dispose()
-            
-            logger.info("Cleanup completed successfully")
-            
+            logger.info("Database connection closed")
         except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}")
-        finally:
-            logger.info("Cleanup complete")
-            # Give a small delay for final cleanup
-            await asyncio.sleep(0.5)
+            logger.error(f"Error closing database connection: {str(e)}")
     # Shutdown
     shutdown_event.set()
 
 app = FastAPI(
     title="Scrollwise AI", 
-    version="1.0.4", 
+    version="1.0.5", 
     lifespan=lifespan,
     default_response_class=JSONResponse,
     # Ensure responses are UTF-8
@@ -2796,9 +2783,18 @@ async def graceful_shutdown():
             
         # Close all agent managers
         for manager in agent_manager_store._managers.values():
-            await manager.close()
-            
-        # Close database connections - Fix: Use dispose() instead of close()
+            try:
+                await manager.close()
+                logger.info(f"Closed agent manager during shutdown")
+            except Exception as e:
+                logger.error(f"Error closing agent manager during shutdown: {str(e)}")
+        
+        # Also close any vector stores that might be directly instantiated
+        from vector_store import VectorStore
+        # Set a flag to indicate shutdown is in progress
+        VectorStore.shutdown_in_progress = True
+        
+        # Close database connections
         await db_instance.dispose()
         
         # Set shutdown event

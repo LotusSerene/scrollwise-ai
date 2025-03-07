@@ -273,15 +273,22 @@ class AgentManager:
         # Clean up resources
         self._llm_cache.clear()
         if self.vector_store:
-            # Check if the vector_store has a close method before calling it
-            if hasattr(self.vector_store, 'close') and callable(self.vector_store.close):
-                self.vector_store.close()
-            # If there's no close method, we might want to perform any necessary cleanup here
-            # For example, if there's a client that needs to be closed:
-            # if hasattr(self.vector_store, '_client') and hasattr(self.vector_store._client, 'close'):
-            #     self.vector_store._client.close()
+            try:
+                # Process any pending batched items before closing
+                if hasattr(self, '_embedding_batch') and self._embedding_batch:
+                    self.logger.info(f"Processing {len(self._embedding_batch)} pending items before closing")
+                    await self._process_embedding_batch()
+                
+                # Check if the vector_store has a close method before calling it
+                if hasattr(self.vector_store, 'close') and callable(self.vector_store.close):
+                    self.vector_store.close()
+                    self.logger.debug("Vector store closed successfully")
+            except Exception as e:
+                self.logger.error(f"Error closing vector store: {str(e)}")
+        
         self.chat_history = []
         self.agents.clear()
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
     async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
         self.logger.debug(f"Getting LLM instance for model: {model}")
@@ -485,15 +492,26 @@ class AgentManager:
             
             # Get all codex items except chapters from vector store
             self.logger.info("Fetching codex items...")
-            codex_items = await vector_store.similarity_search(
-                query_text=plot,
-                k=30,
-                filter={
-                    "type": {
-                        "$nin": ["chapter"]
+            try:
+                # Updated filter format for Qdrant
+                codex_items = await vector_store.similarity_search(
+                    query_text=plot,
+                    k=30,
+                    filter={
+                        "type": {
+                            "$nin": ["chapter"]
+                        }
                     }
-                }
-            )
+                )
+            except Exception as e:
+                self.logger.warning(f"Error during similarity search: {str(e)}. Trying without filter.")
+                # Fallback to search without filter if the filter format causes issues
+                codex_items = await vector_store.similarity_search(
+                    query_text=plot,
+                    k=30
+                )
+                # Filter out chapters manually
+                codex_items = [item for item in codex_items if item.metadata.get('type') != 'chapter']
             
             # Add codex items to context, grouped by type
             if codex_items:
@@ -1739,9 +1757,27 @@ class AgentManager:
             if not self._embedding_batch:
                 return
             
-            # Process all items in the current batch
+            self.logger.debug(f"Processing batch of {len(self._embedding_batch)} embeddings")
+            
+            # Extract texts and metadatas for batch processing
+            texts = []
+            metadatas = []
+            
             for content, metadata in self._embedding_batch:
-                await self.vector_store.add_to_knowledge_base(content, metadata=metadata)
+                texts.append(content)
+                metadatas.append(metadata)
+            
+            # Use add_texts for batch processing instead of individual calls
+            try:
+                await self.vector_store.add_texts(texts, metadatas)
+            except Exception as batch_error:
+                self.logger.error(f"Batch processing failed: {str(batch_error)}. Falling back to individual processing.")
+                # Fallback to individual processing if batch fails
+                for content, metadata in self._embedding_batch:
+                    try:
+                        await self.vector_store.add_to_knowledge_base(content, metadata=metadata)
+                    except Exception as individual_error:
+                        self.logger.error(f"Failed to add item to vector store: {str(individual_error)}")
             
             # Clear the batch after processing
             self._embedding_batch = []
@@ -1844,8 +1880,10 @@ class AgentManager:
                 self.logger.info(f"Processing {len(self._embedding_batch)} pending batched items before reset")
                 await self._process_embedding_batch()
             
+            self.logger.info("Starting knowledge base reset...")
             restored_items = await self.vector_store.reset_knowledge_base()
-            self.logger.info(f"Knowledge base reset complete. Restored {len(restored_items)} items from backup.")
+            count = len(restored_items) if isinstance(restored_items, (list, set)) else 0
+            self.logger.info(f"Knowledge base reset complete. Restored {count} items from backup.")
             return restored_items
         except Exception as e:
             self.logger.error(f"Error resetting knowledge base: {str(e)}")
