@@ -175,7 +175,7 @@ class _CodexState extends State<Codex> {
 
         final response = await http.put(
           Uri.parse(
-              '$apiUrl/codex-items/${item['id']}?project_id=${widget.projectId}'),
+              '$apiUrl/projects/${widget.projectId}/codex-items/${item['id']}?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode({
             'name': nameController.text,
@@ -363,7 +363,7 @@ class _CodexState extends State<Codex> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/codex-items/$itemId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/$itemId?project_id=${widget.projectId}'),
         headers: headers,
       );
 

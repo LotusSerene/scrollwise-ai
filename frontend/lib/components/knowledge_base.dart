@@ -90,7 +90,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/knowledge-base?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
 
@@ -142,9 +142,10 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
         'Content-Type': 'application/x-www-form-urlencoded',
       };
       final response = await http.post(
-        Uri.parse('$apiUrl/knowledge-base/'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/'),
         headers: headers,
         body: {
+          'project_id': widget.projectId,
           'documents': text,
           'metadata_str':
               json.encode({'type': 'text', 'project_id': widget.projectId}),
@@ -276,19 +277,18 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       _logger.info('Processing: $filename ($type)');
 
       final response = await http.post(
-        Uri.parse('$apiUrl/knowledge-base/'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/'),
         headers: {
           ...await getAuthHeaders(),
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: {
+          'project_id': widget.projectId,
           'documents': content,
           'metadata_str': json.encode({
             'type': type,
             'filename': filename,
-            'project_id': widget.projectId,
           }),
-          'project_id': widget.projectId,
         },
       );
 
@@ -340,7 +340,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
     try {
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/knowledge-base/$embeddingId?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/$embeddingId?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
       final jsonResponse = json.decode(response.body);

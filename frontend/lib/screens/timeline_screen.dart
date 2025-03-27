@@ -70,7 +70,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/events?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/events?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -92,7 +92,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/locations?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/locations?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -119,13 +119,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       // Removed chapter_id parameter since it's handled server-side
       final eventResponse = await http.post(
         Uri.parse(
-            '$apiUrl/events/analyze-chapter?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/events/analyze-chapter?project_id=${widget.projectId}'),
         headers: headers,
       );
 
       final locationResponse = await http.post(
         Uri.parse(
-            '$apiUrl/locations/analyze-chapter?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/analyze-chapter?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -173,7 +173,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
         final response = await http.put(
           Uri.parse(
-              '$apiUrl/events/${event.id}?project_id=${widget.projectId}'),
+              '$apiUrl/projects/${widget.projectId}/events/${event.id}?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode(result),
         );
@@ -201,7 +201,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
         final response = await http.put(
           Uri.parse(
-              '$apiUrl/locations/${location.id}?project_id=${widget.projectId}'),
+              '$apiUrl/projects/${widget.projectId}/locations/${location.id}?project_id=${widget.projectId}'),
           headers: headers,
           body: json.encode(result),
         );
@@ -220,7 +220,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/events/$eventId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/events/$eventId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -266,7 +266,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/locations/$locationId?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/$locationId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -303,7 +303,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           final headers = await getAuthHeaders();
           headers['Content-Type'] = 'application/json';
           final response = await http.post(
-            Uri.parse('$apiUrl/events?project_id=${widget.projectId}'),
+            Uri.parse('$apiUrl/projects/${widget.projectId}/events?project_id=${widget.projectId}'),
             headers: headers,
             body: json.encode(result),
           );
@@ -326,7 +326,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           final headers = await getAuthHeaders();
           headers['Content-Type'] = 'application/json';
           final response = await http.post(
-            Uri.parse('$apiUrl/locations?project_id=${widget.projectId}'),
+            Uri.parse('$apiUrl/projects/${widget.projectId}/locations?project_id=${widget.projectId}'),
             headers: headers,
             body: json.encode(result),
           );
@@ -345,7 +345,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/events/connections?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/events/connections?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -366,7 +366,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/events/connections/$connectionId?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/events/connections/$connectionId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -384,7 +384,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse(
-            '$apiUrl/locations/connections?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/connections?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -405,7 +405,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/locations/connections/$connectionId?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/connections/$connectionId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -425,7 +425,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
       final response = await http.put(
         Uri.parse(
-            '$apiUrl/events/connections/${connection.id}?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/events/connections/${connection.id}?project_id=${widget.projectId}'),
         headers: headers,
         body: json.encode({
           'connection_type': connection.connectionType,
@@ -450,7 +450,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
       final response = await http.put(
         Uri.parse(
-            '$apiUrl/locations/connections/${connection.id}?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/connections/${connection.id}?project_id=${widget.projectId}'),
         headers: headers,
         body: json.encode({
           'travel_route': connection.travelRoute,
@@ -475,14 +475,14 @@ class _TimelineScreenState extends State<TimelineScreen>
       // Analyze event connections
       final eventResponse = await http.post(
         Uri.parse(
-            '$apiUrl/events/analyze-connections?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/events/analyze-connections?project_id=${widget.projectId}'),
         headers: headers,
       );
 
       // Analyze location connections
       final locationResponse = await http.post(
         Uri.parse(
-            '$apiUrl/locations/analyze-connections?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/locations/analyze-connections?project_id=${widget.projectId}'),
         headers: headers,
       );
 

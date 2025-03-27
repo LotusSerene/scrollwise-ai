@@ -191,7 +191,7 @@ class _CreateChapterState extends State<CreateChapter> {
         };
 
         final response = await http.post(
-          Uri.parse('$apiUrl/chapters/generate?project_id=${widget.projectId}'),
+          Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/generate?project_id=${widget.projectId}'),
           headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );
@@ -245,7 +245,7 @@ class _CreateChapterState extends State<CreateChapter> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -277,35 +277,6 @@ class _CreateChapterState extends State<CreateChapter> {
     }
   }
 
-  Future<void> _handleCancel() async {
-    final appState = Provider.of<AppState>(context, listen: false);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    try {
-      final response = await http.post(
-        Uri.parse('$apiUrl/chapters/cancel?project_id=${widget.projectId}'),
-        headers: await getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        appState.cancelChapterGeneration();
-        if (!context.mounted) return;
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Chapter generation cancelled')),
-        );
-      } else {
-        if (!context.mounted) return;
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Failed to cancel chapter generation')),
-        );
-      }
-    } catch (error) {
-      if (!context.mounted) return;
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(content: Text('Error cancelling chapter generation')),
-      );
-    }
-  }
 
   void _handlePresetChange(String? newValue) {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);

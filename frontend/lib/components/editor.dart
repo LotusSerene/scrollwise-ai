@@ -149,7 +149,7 @@ class _EditorState extends State<Editor> {
         final headers = await getAuthHeaders();
         final response = await http.get(
           Uri.parse(
-              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
+              '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
           headers: headers,
         );
         if (response.statusCode == 200) {
@@ -182,7 +182,7 @@ class _EditorState extends State<Editor> {
 
       final response = await http.get(
         Uri.parse(
-            '$apiUrl/chapters/${chapter['id']}?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -230,7 +230,7 @@ class _EditorState extends State<Editor> {
       if (!mounted) return;
 
       final response = await http.delete(
-        Uri.parse('$apiUrl/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -288,8 +288,8 @@ class _EditorState extends State<Editor> {
       // Create the initial request
       var uri = _selectedChapter != null
           ? Uri.parse(
-              '$apiUrl/chapters/$chapterId?project_id=${widget.projectId}')
-          : Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}');
+              '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}')
+          : Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
 
       var request =
           http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);

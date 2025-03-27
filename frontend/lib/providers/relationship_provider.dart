@@ -23,7 +23,7 @@ class RelationshipProvider extends ChangeNotifier {
     try {
       final headers = await getAuthHeaders();
       final response = await http.post(
-        Uri.parse('$apiUrl/relationships/analyze?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/relationships/analyze?project_id=$projectId'),
         headers: {
           ...headers,
           'Content-Type': 'application/json',
@@ -62,7 +62,7 @@ class RelationshipProvider extends ChangeNotifier {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse('$apiUrl/relationships/?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/relationships/?project_id=$projectId'),
         headers: headers,
         body: json.encode({
           'character_id': character1Id,
@@ -92,7 +92,7 @@ class RelationshipProvider extends ChangeNotifier {
       final headers = await getAuthHeaders();
 
       final response = await http.get(
-        Uri.parse('$apiUrl/relationships?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/relationships/?project_id=$projectId'),
         headers: headers,
       );
 
@@ -132,7 +132,7 @@ class RelationshipProvider extends ChangeNotifier {
       headers['Content-Type'] = 'application/json';
       final response = await http.put(
         Uri.parse(
-            '$apiUrl/relationships/$relationshipId?project_id=$projectId'),
+            '$apiUrl/projects/$projectId/relationships/$relationshipId?project_id=$projectId'),
         headers: headers,
         body: json.encode({
           'relationship_type': relationshipType,
@@ -156,7 +156,7 @@ class RelationshipProvider extends ChangeNotifier {
       final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse(
-            '$apiUrl/relationships/$relationshipId?project_id=$projectId'),
+            '$apiUrl/projects/$projectId/relationships/$relationshipId?project_id=$projectId'),
         headers: headers,
       );
 

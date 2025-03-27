@@ -45,7 +45,7 @@ class _CharacterRelationshipsScreenState
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/codex/characters?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters?project_id=${widget.projectId}'),
         headers: headers,
       );
 

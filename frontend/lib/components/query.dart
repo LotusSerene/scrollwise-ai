@@ -42,7 +42,7 @@ class _QueryState extends State<Query> {
       final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse(
-            '$apiUrl/knowledge-base/chat-history?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -76,7 +76,7 @@ class _QueryState extends State<Query> {
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
         Uri.parse(
-            '$apiUrl/knowledge-base/query?project_id=${widget.projectId}'),
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/query?project_id=${widget.projectId}'),
         headers: headers,
         body: utf8.encode(json.encode({
           'query': _queryController.text,
@@ -127,30 +127,14 @@ class _QueryState extends State<Query> {
     }
   }
 
-  Future<void> _saveChatHistory() async {
-    final appState = Provider.of<AppState>(context, listen: false);
-
-    try {
-      final headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/json';
-      await http.post(
-        Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
-        headers: headers,
-        // Use appState.queryState['chatHistory'] instead of _chatHistory
-        body: json.encode({'chatHistory': appState.queryState['chatHistory']}),
-      );
-    } catch (error) {
-      _logger.severe('Error saving chat history: $error');
-    }
-  }
 
   Future<void> _resetChatHistory() async {
     final appState = Provider.of<AppState>(context, listen: false);
 
     try {
       final headers = await getAuthHeaders();
-      await http.delete(
-        Uri.parse('$apiUrl/chat-history?project_id=${widget.projectId}'),
+      await http.post(
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
       appState.updateQueryProgress(
