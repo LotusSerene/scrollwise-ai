@@ -1,38 +1,42 @@
 # backend/agent_manager.py
-from typing import Dict, Any, List, Tuple, Optional, Union
+import os
+from typing import Dict, Any, List, Tuple, Optional, Union, TypedDict
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema import StrOutputParser
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.output_parsers import PydanticOutputParser, JsonOutputParser
 from langchain.docstore.document import Document
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from cachetools import TTLCache
-
+import json
+import asyncio
+from asyncio import Lock
+from tenacity import retry, stop_after_attempt, wait_exponential
+from langgraph.graph import StateGraph, END
+from langchain.chains.summarize import load_summarize_chain
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.globals import set_llm_cache
+from langchain_community.cache import SQLiteCache
+from langchain.output_parsers import OutputFixingParser
+from pydantic import BaseModel, Field, ValidationError
+from datetime import timezone
 from api_key_manager import ApiKeyManager
 from database import db_instance
-from pydantic import BaseModel, Field, ValidationError
+from vector_store import VectorStore
+from models import (
+    ChapterValidation, CodexItem, WorldbuildingSubtype, CodexItemType, CodexExtractionTypes,
+    GeneratedCodexItem, CharacterBackstoryExtraction, RelationshipAnalysis, EventDescription,
+    RelationshipAnalysisList, EventAnalysis, LocationConnection, LocationConnectionAnalysis,
+    LocationAnalysis, LocationAnalysisList, EventConnection, EventConnectionAnalysis
+)
 
-import json
 # Load environment variables
 load_dotenv()
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from vector_store import VectorStore
-from langchain.output_parsers import OutputFixingParser
-from langchain_community.cache import SQLiteCache
-from langchain_core.globals import set_llm_cache
-from tenacity import retry, stop_after_attempt, wait_exponential
-from langchain.chains.summarize import load_summarize_chain
-import asyncio
-from langchain.callbacks.base import BaseCallbackHandler
-from datetime import timedelta
-from models import ChapterValidation, CodexItem,  WorldbuildingSubtype, CodexItemType, CodexExtractionTypes
 
-# Add at the top with other imports
+# --- Constants ---
 PROCESS_TYPES = {
     'BACKSTORY': 'backstory',
     'RELATIONSHIPS': 'relationships',
@@ -40,295 +44,940 @@ PROCESS_TYPES = {
     'EVENTS': 'events',
 }
 
+# Gemini API Limits (adjust based on your plan - Pay-as-you-go recommended)
+# Using conservative Pay-as-you-go limits for Pro 1.5
+GEMINI_PRO_RPM = 60
+GEMINI_PRO_TPM = 2_000_000 # 2 Million Tokens Per Minute
+GEMINI_PRO_RPD = 10000 # Example, might be higher
+
+# Using conservative Pay-as-you-go limits for Flash 1.5
+GEMINI_FLASH_RPM = 60
+GEMINI_FLASH_TPM = 2_000_000
+GEMINI_FLASH_RPD = 10000 # Example, might be higher
+
+# --- Rate Limiter ---
 class StreamingRateLimiter(BaseCallbackHandler):
-    def __init__(self, rpm_limit, tpm_limit, rpd_limit):
+    """More robust rate limiter for async LLM calls."""
+    def __init__(self, rpm_limit: int, tpm_limit: int, rpd_limit: int):
         self.rpm_limit = rpm_limit
         self.tpm_limit = tpm_limit
         self.rpd_limit = rpd_limit
-        self.request_count = 0
-        self.token_count = 0
-        self.daily_request_count = 0
-        self.last_reset = datetime.now()
-        self.last_day_reset = datetime.now().date()
 
-    async def on_llm_start(self, serialized, prompts, **kwargs):
-        await self.limit(sum(len(prompt.split()) for prompt in prompts))
+        self._minute_timestamps: List[datetime] = []
+        self._day_timestamps: List[datetime] = []
+        self._token_counts: List[Tuple[datetime, int]] = []
+        self._lock = asyncio.Lock()
 
-    async def on_llm_new_token(self, token: str, **kwargs):
-        await self.limit(1)  # Assuming each token is counted individually
+    async def _prune_timestamps(self):
+        """Remove timestamps older than their respective limits."""
+        now = datetime.now()
+        minute_ago = now - timedelta(minutes=1)
+        day_ago = now - timedelta(days=1)
 
-    async def limit(self, token_count):
-        current_time = datetime.now()
-        
-        if current_time - self.last_reset >= timedelta(minutes=1):
-            self.request_count = 0
-            self.token_count = 0
-            self.last_reset = current_time
+        self._minute_timestamps = [t for t in self._minute_timestamps if t > minute_ago]
+        self._day_timestamps = [t for t in self._day_timestamps if t > day_ago]
+        self._token_counts = [(t, c) for t, c in self._token_counts if t > minute_ago]
 
-        if current_time.date() > self.last_day_reset:
-            self.daily_request_count = 0
-            self.last_day_reset = current_time.date()
+    async def _wait_if_needed(self, tokens_to_add: int):
+        while True:
+            async with self._lock:
+                await self._prune_timestamps()
+                now = datetime.now()
 
-        if (self.request_count >= self.rpm_limit or 
-            self.token_count + token_count > self.tpm_limit or 
-            self.daily_request_count >= self.rpd_limit):
-            wait_time = 60 - (current_time - self.last_reset).total_seconds()
-            await asyncio.sleep(max(0, wait_time))
-            return await self.limit(token_count)
+                # Check RPM
+                if len(self._minute_timestamps) >= self.rpm_limit:
+                    wait_rpm = (self._minute_timestamps[0] + timedelta(minutes=1) - now).total_seconds()
+                else:
+                    wait_rpm = 0
 
-        self.token_count += token_count
-        self.request_count += 1
-        self.daily_request_count += 1
+                # Check TPM
+                current_minute_tokens = sum(count for ts, count in self._token_counts)
+                if current_minute_tokens + tokens_to_add > self.tpm_limit:
+                    # Estimate wait time based on oldest token count entry
+                    if self._token_counts:
+                        wait_tpm = (self._token_counts[0][0] + timedelta(minutes=1) - now).total_seconds()
+                    else:
+                        wait_tpm = 60 # Wait a full minute if list is empty but limit exceeded (unlikely)
+                else:
+                    wait_tpm = 0
+
+                # Check RPD
+                if len(self._day_timestamps) >= self.rpd_limit:
+                    wait_rpd = (self._day_timestamps[0] + timedelta(days=1) - now).total_seconds()
+                else:
+                    wait_rpd = 0
+
+                wait_time = max(wait_rpm, wait_tpm, wait_rpd)
+
+                if wait_time <= 0:
+                    # Add current request/tokens if limits not hit
+                    self._minute_timestamps.append(now)
+                    self._day_timestamps.append(now)
+                    self._token_counts.append((now, tokens_to_add))
+                    return # Exit loop, ready to proceed
+
+            # Wait outside the lock
+            if wait_time > 0:
+                logging.getLogger(__name__).debug(f"Rate limiting: waiting for {wait_time:.2f} seconds.")
+                await asyncio.sleep(wait_time + 0.1) # Add small buffer
+
+    async def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> None:
+        """Run when LLM starts."""
+        # Estimate tokens based on prompt lengths (approximation)
+        num_tokens = sum(len(p.split()) for p in prompts) # Crude token estimate
+        await self._wait_if_needed(num_tokens)
+
+    async def on_chat_model_start(
+        self,
+        serialized: Dict[str, Any],
+        messages: List[List[BaseMessage]],
+        **kwargs: Any,
+    ) -> None:
+        """Run when Chat Model starts."""
+        # Estimate tokens based on message content (approximation)
+        num_tokens = 0
+        for msg_list in messages:
+            for msg in msg_list:
+                if isinstance(msg.content, str):
+                    num_tokens += len(msg.content.split())
+                # Add handling for other content types if needed
+        await self._wait_if_needed(num_tokens)
+
+    # on_llm_new_token can be intensive, maybe limit based on start call only?
+    # async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+    #     """Run on new LLM token. Minimal token counting for streaming."""
+    #     # This can be noisy and potentially slow down streaming
+    #     # Consider if tracking per-token is strictly necessary vs. just on_llm_start
+    #     # await self._wait_if_needed(1)
+    #     pass
+
+# --- Pydantic Models (Minor Adjustments if needed) ---
+# Assuming models from the original file are mostly correct.
+# Added some missing ones for clarity.
 
 class CodexExtraction(BaseModel):
     new_items: List[CodexItem] = Field(default_factory=list, description="List of new codex items found in the chapter")
 
+# --- LangGraph State ---
 
-class GeneratedCodexItem(BaseModel):
-    name: str = Field(description="Name of the codex item")
-    description: str = Field(description="Detailed description of the codex item")
+class ChapterGenerationState(TypedDict):
+    # Inputs
+    user_id: str
+    project_id: str
+    chapter_number: int
+    plot: str
+    writing_style: str
+    instructions: Dict[str, Any]
 
+    # Dynamic values
+    llm: ChatGoogleGenerativeAI # Main LLM
+    check_llm: ChatGoogleGenerativeAI # LLM for validation/extraction
+    vector_store: VectorStore
+    summarize_chain: Any # Type hint could be improved
 
-class CharacterBackstoryExtraction(BaseModel):
-    character_id: str = Field(..., description="ID of the character")
-    new_backstory: str = Field(..., description="New backstory information extracted from the chapter")
+    # Intermediate results
+    context: Optional[str] = None
+    initial_chapter_content: Optional[str] = None
+    extended_chapter_content: Optional[str] = None # Store extension result separately
+    current_word_count: int = 0
+    target_word_count: int = 0
+    chapter_title: Optional[str] = None
+    new_codex_items: Optional[List[Dict[str, Any]]] = None
+    validity_check: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
-
-
-class RelationshipAnalysis(BaseModel):
-    character1: str = Field(..., description="Name of the first character")
-    character2: str = Field(..., description="Name of the second character")
-    relationship_type: str = Field(..., description="Type of relationship between the characters")
-    description: str = Field(..., description="Detailed description of the relationship")
-
-
-class EventDescription(BaseModel):
-    title: str = Field(..., description="Title of the event")
-    description: str = Field(..., description="Detailed description of the event")
-    impact: str = Field(..., description="Impact of the event on the story or characters")
-    involved_characters: List[str] = Field(default_factory=list, description="Characters involved in the event")
-    location: Optional[str] = Field(None, description="Location where the event takes place")
-
-class RelationshipAnalysisList(BaseModel):
-    relationships: List[RelationshipAnalysis] = Field(..., description="List of relationship analyses")
-
-class EventAnalysis(BaseModel):
-    events: List[EventDescription] = Field(..., description="List of events found in the chapter")
-
-
-class LocationConnection(BaseModel):
-    id: str
-    location1_id: str
-    location2_id: str
-    location1_name: str
-    location2_name: str
-    connection_type: str
-    description: str
-    travel_route: Optional[str] = None
-    cultural_exchange: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-
-    def get_connection_key(self) -> Tuple[str, str]:
-        """Get a unique key for this connection based on location IDs"""
-        return tuple(sorted([self.location1_id, self.location2_id]))
-
-class LocationConnectionAnalysis(BaseModel):
-    connections: List[LocationConnection]
-
-    def deduplicate_connections(self) -> 'LocationConnectionAnalysis':
-        """Remove duplicate connections while preserving the first occurrence"""
-        seen_connections = set()
-        unique_connections = []
-        
-        for conn in self.connections:
-            conn_key = conn.get_connection_key()
-            if conn_key not in seen_connections:
-                seen_connections.add(conn_key)
-                unique_connections.append(conn)
-        
-        return LocationConnectionAnalysis(connections=unique_connections)
+    # Final output (assembled at the end)
+    final_chapter_content: Optional[str] = None
+    final_output: Optional[Dict[str, Any]] = None
 
 
-class LocationAnalysis(BaseModel):
-    location_name: str
-    location_id: str
-    significance_analysis: str
-    connected_locations: List[str]
-    notable_events: List[str]
-    character_associations: List[str]
-
-class LocationAnalysisList(BaseModel):
-    locations: List[LocationAnalysis]
-
-class EventConnection(BaseModel):
-    event1_id: str
-    event2_id: str
-    connection_type: str
-    description: str
-    impact: str
-    characters_involved: Optional[str] = Field(default="")
-    location_relation: str
-
-    def get_connection_key(self) -> Tuple[str, str]:
-        """Get a unique key for this connection based on event IDs"""
-        return tuple(sorted([self.event1_id, self.event2_id]))
-
-class EventConnectionAnalysis(BaseModel):
-    connections: List[EventConnection]
-
-    def deduplicate_connections(self) -> 'EventConnectionAnalysis':
-        """Remove duplicate connections while preserving the first occurrence"""
-        seen_connections = set()
-        unique_connections = []
-        
-        for conn in self.connections:
-            # Skip connections with null IDs
-            if not conn.event1_id or not conn.event2_id:
-                continue
-                
-            conn_key = conn.get_connection_key()
-            if conn_key not in seen_connections:
-                seen_connections.add(conn_key)
-                unique_connections.append(conn)
-        
-        return EventConnectionAnalysis(connections=unique_connections)
-
-class KnowledgeBaseQuery(BaseModel):
-    """Query the knowledge base for relevant information"""
-    query: str = Field(
-        ..., 
-        description="The search query to find relevant information"
-    )
-    type_filter: Optional[List[str]] = Field(
-        None, 
-        description="Types of entries to search for (e.g., ['character', 'worldbuilding', 'item', 'lore'])"
-    )
-    limit: int = Field(
-        default=5, 
-        description="Maximum number of entries to retrieve",
-        ge=1,
-        le=20
-    )
-
-    def run(self, query: str, type_filter: Optional[List[str]] = None, limit: int = 5) -> str:
-        return f"Querying knowledge base with: {query}, types: {type_filter}, limit: {limit}"
-
-
+# --- Agent Manager ---
 
 agent_managers: Dict[Tuple[str, str], 'AgentManager'] = {}
+
 class AgentManager:
     _llm_cache = TTLCache(maxsize=100, ttl=3600)  # Class-level cache for LLM instances
+    _graph_cache = {} # Cache for compiled graphs per project
 
     def __init__(self, user_id: str, project_id: str, api_key_manager: ApiKeyManager):
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.DEBUG) # Set higher level in production
         self.user_id = user_id
         self.project_id = project_id
         self.api_key_manager = api_key_manager
         self.model_settings = None
         self.MAX_INPUT_TOKENS = None
-        self.MAX_OUTPUT_TOKENS = None
-        self.chat_history = None
+        self.MAX_OUTPUT_TOKENS = 8192 # Standard for Gemini
         self.vector_store = None
         self.summarize_chain = None
-        self.agents = {}
-        self._lock = asyncio.Lock()
+        self.agents = {} # Keep for potential future non-graph agents
+        self._lock = Lock() # Lock for managing shared resources like caches
+        self.chapter_generation_graph = None # Compiled LangGraph
+
     @classmethod
     async def create(cls, user_id: str, project_id: str, api_key_manager: ApiKeyManager) -> 'AgentManager':
+        """Factory method to create and initialize AgentManager asynchronously."""
+        key = (user_id, project_id)
+        if key in agent_managers:
+            return agent_managers[key]
+
         instance = cls(user_id, project_id, api_key_manager)
         await instance.initialize()
+        agent_managers[key] = instance
         return instance
 
     async def initialize(self):
-        self.api_key = await self._get_api_key()
-        self.model_settings = await self._get_model_settings()
-        self.MAX_INPUT_TOKENS = 2097152 if 'pro' in self.model_settings else 1048576
-        self.MAX_OUTPUT_TOKENS = 8192
-        self.chat_history = await db_instance.get_chat_history(self.user_id, self.project_id)
-        if self.chat_history is None:
-            self.chat_history = []  # Initialize as an empty list if no history exists
+        """Initializes resources like API keys, LLMs, VectorStore, and the graph."""
+        self.logger.info(f"Initializing AgentManager for User: {self.user_id[:8]}, Project: {self.project_id[:8]}")
+        try:
+            self.api_key = await self._get_api_key()
+            self.model_settings = await self._get_model_settings() # Changed to async
 
-        self.setup_caching()
-        self.llm = await self._get_llm(self.model_settings['mainLLM'])
-        self.check_llm = await self._get_llm(self.model_settings['checkLLM'])
-        
-        self.vector_store = VectorStore(
-            self.user_id, 
-            self.project_id, 
-            self.api_key, 
-            self.model_settings['embeddingsModel']
-        )
-        self.vector_store.set_llm(self.llm)
-        
-        self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
+            # Determine token limits based on model type (simplified)
+            is_pro_model = 'pro' in self.model_settings.get('mainLLM', '')
+            self.MAX_INPUT_TOKENS = 2_097_152 if is_pro_model else 1_048_576 # Gemini 1.5 limits
 
-        # Register this instance for cleanup
-        agent_managers[(self.user_id, self.project_id)] = self
+            self.setup_caching() # Setup global LLM caching
 
-    def __del__(self):
-        asyncio.create_task(self.close())
+            # Initialize LLMs (using shared cache via _get_llm)
+            self.llm = await self._get_llm(self.model_settings['mainLLM'])
+            self.check_llm = await self._get_llm(self.model_settings['checkLLM'])
+
+            # Initialize Vector Store
+            self.vector_store = VectorStore(
+                self.user_id,
+                self.project_id,
+                self.api_key,
+                self.model_settings['embeddingsModel']
+            )
+            self.vector_store.set_llm(self.llm) # Pass LLM if needed by VS
+
+            # Initialize Summarize Chain
+            self.summarize_chain = load_summarize_chain(self.llm, chain_type="map_reduce")
+
+            # Build and compile the chapter generation graph
+            self.chapter_generation_graph = self._build_chapter_generation_graph()
+
+            self.logger.info(f"AgentManager Initialized for User: {self.user_id[:8]}, Project: {self.project_id[:8]}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to initialize AgentManager: {e}", exc_info=True)
+            raise # Re-raise exception to indicate initialization failure
 
     async def close(self):
-        # Clean up resources
-        self._llm_cache.clear()
+        """Cleans up resources like vector store connections."""
+        self.logger.info(f"Closing AgentManager for User: {self.user_id[:8]}, Project: {self.project_id[:8]}")
+        # Clear LLM cache entries specific to this manager if needed (though TTLCache handles expiry)
+        # self._llm_cache.clear() # Or selectively remove keys
+
         if self.vector_store:
             try:
-                # Process any pending batched items before closing
-                if hasattr(self, '_embedding_batch') and self._embedding_batch:
-                    self.logger.info(f"Processing {len(self._embedding_batch)} pending items before closing")
-                    await self._process_embedding_batch()
-                
-                # Check if the vector_store has a close method before calling it
+                # Process any pending batched items before closing (if batching implemented)
+                # if hasattr(self, '_embedding_batch') and self._embedding_batch:
+                #    self.logger.info(f"Processing pending items before closing")
+                #    await self._process_embedding_batch() # Assuming this method exists
+
                 if hasattr(self.vector_store, 'close') and callable(self.vector_store.close):
-                    self.vector_store.close()
-                    self.logger.debug("Vector store closed successfully")
+                    self.vector_store.close() # Qdrant client might need closing
+                    self.logger.debug("Vector store closed.")
             except Exception as e:
-                self.logger.error(f"Error closing vector store: {str(e)}")
-        
-        self.chat_history = []
-        self.agents.clear()
+                self.logger.error(f"Error closing vector store: {e}", exc_info=True)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))    
-    async def _get_llm(self, model: str) -> ChatGoogleGenerativeAI:
-        self.logger.debug(f"Getting LLM instance for model: {model}")
-        async with self._lock:
-            if model in self._llm_cache:
-                return self._llm_cache[model]
+        # Clear graph cache if specific to this instance (not typically needed if stateless)
+        # key = (self.user_id, self.project_id)
+        # AgentManager._graph_cache.pop(key, None)
 
-            rate_limiter = StreamingRateLimiter(
-                rpm_limit=2 if 'pro' in self.model_settings else 15,
-                tpm_limit=32000 if 'pro' in self.model_settings else 1000000,
-                rpd_limit=50 if 'pro' in self.model_settings else 1500
-            )
+        # Remove from global tracking
+        key = (self.user_id, self.project_id)
+        agent_managers.pop(key, None)
+        self.logger.info(f"AgentManager closed for User: {self.user_id[:8]}, Project: {self.project_id[:8]}")
 
-            llm = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=self.api_key,
-                temperature=self.model_settings.get('temperature', 0.7),
-                max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                max_input_tokens=self.MAX_INPUT_TOKENS,
-                caching=True,
-                streaming=True,
-                callbacks=[rate_limiter],
-            )
 
-            self._llm_cache[model] = llm
-            return llm
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def _get_llm(self, model_name: str) -> ChatGoogleGenerativeAI:
+        """Gets or creates a ChatGoogleGenerativeAI instance with caching and rate limiting."""
+        async with self._lock: # Protect access to the class-level cache
+            if model_name in self._llm_cache:
+                self.logger.debug(f"LLM Cache HIT for model: {model_name}")
+                return self._llm_cache[model_name]
+
+            self.logger.debug(f"LLM Cache MISS for model: {model_name}. Creating new instance.")
+
+            is_pro_model = 'pro' in model_name
+            rpm = GEMINI_PRO_RPM if is_pro_model else GEMINI_FLASH_RPM
+            tpm = GEMINI_PRO_TPM if is_pro_model else GEMINI_FLASH_TPM
+            rpd = GEMINI_PRO_RPD if is_pro_model else GEMINI_FLASH_RPD
+
+            rate_limiter = StreamingRateLimiter(rpm, tpm, rpd)
+
+            try:
+                llm = ChatGoogleGenerativeAI(
+                    model=model_name,
+                    google_api_key=self.api_key,
+                    temperature=float(self.model_settings.get('temperature', 0.7)), # Ensure float
+                    max_output_tokens=self.MAX_OUTPUT_TOKENS,
+                    # max_input_tokens not directly supported, handled via context truncation
+                    convert_system_message_to_human=True, # Often needed for Gemini
+                    streaming=True, # Keep streaming enabled
+                    callbacks=[rate_limiter],
+                    # Caching enabled globally via set_llm_cache
+                )
+                self._llm_cache[model_name] = llm
+                self.logger.info(f"LLM instance created and cached for model: {model_name}")
+                return llm
+            except Exception as e:
+                self.logger.error(f"Failed to create LLM instance for {model_name}: {e}", exc_info=True)
+                raise # Re-raise the exception after logging
 
 
     async def _get_api_key(self) -> str:
         api_key = await self.api_key_manager.get_api_key(self.user_id)
         if not api_key:
+            self.logger.error(f"API key not found for user {self.user_id}")
             raise ValueError("API key not set. Please set your API key in the settings.")
         return api_key
 
-    def _get_model_settings(self) -> dict:
-        return db_instance.get_model_settings(self.user_id)
+    async def _get_model_settings(self) -> dict:
+        """Fetches model settings from the database asynchronously."""
+        try:
+            settings = await db_instance.get_model_settings(self.user_id)
+            # Ensure temperature is float, provide defaults if missing
+            defaults = {
+                'mainLLM': 'gemini-1.5-flash-latest', # Default to Flash for cost/speed
+                'checkLLM': 'gemini-1.5-flash-latest',
+                'embeddingsModel': 'models/text-embedding-004',
+                'titleGenerationLLM': 'gemini-1.5-flash-latest',
+                'extractionLLM': 'gemini-1.5-flash-latest',
+                'knowledgeBaseQueryLLM': 'gemini-1.5-flash-latest',
+                'temperature': 0.7
+            }
+            settings = {**defaults, **settings} # Merge defaults with loaded settings
+            settings['temperature'] = float(settings['temperature']) # Ensure float
+            return settings
+        except Exception as e:
+            self.logger.error(f"Error getting model settings for user {self.user_id}: {e}", exc_info=True)
+            raise
 
     def setup_caching(self):
-        # Set up SQLite caching
-        set_llm_cache(SQLiteCache(database_path=".langchain.db"))
+        """Sets up global LangChain LLM caching using SQLite."""
+        # Ensure directory exists
+        db_path = ".cache"
+        os.makedirs(db_path, exist_ok=True)
+        cache_db = os.path.join(db_path, ".langchain.db")
+        set_llm_cache(SQLiteCache(database_path=cache_db))
+        self.logger.info(f"Global LLM caching enabled using SQLite at {cache_db}")
+
+    def estimate_token_count(self, text: str) -> int:
+        """Estimates token count using the main LLM."""
+        if not text or not isinstance(text, str):
+            return 0
+        try:
+            # Use the initialized main LLM instance
+            return self.llm.get_num_tokens(text)
+        except Exception as e:
+            self.logger.warning(f"Could not estimate token count: {e}. Using word count approximation.")
+            return len(text.split()) # Fallback approximation
+
+    # --- LangGraph Nodes ---
+
+    async def _construct_context_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Gathers context for chapter generation."""
+        self.logger.debug(f"Node: Constructing Context for Chapter {state['chapter_number']}")
+        try:
+            plot = state['plot']
+            writing_style = state['writing_style']
+            vector_store = state['vector_store']
+            user_id = state['user_id']
+            project_id = state['project_id']
+
+            context_parts = [f"Plot: {plot}", f"Writing Style: {writing_style}"]
+
+            # Fetch relevant previous chapters (e.g., last 3 summaries)
+            try:
+                previous_chapters_data = await db_instance.get_all_chapters(user_id, project_id)
+                previous_chapters_data.sort(key=lambda x: x.get('chapter_number', 0))
+                recent_chapters = previous_chapters_data[-3:] # Get last 3 chapters
+
+                if recent_chapters:
+                    context_parts.append("\nRecent Chapter Summaries:")
+                    for chapter in recent_chapters:
+                        chap_num = chapter.get('chapter_number', 'N/A')
+                        chap_title = chapter.get('title', f'Chapter {chap_num}')
+                        content = chapter.get('content', '')
+                        # Summarize if long
+                        if self.estimate_token_count(content) > 1000: # Summarize if > 1k tokens
+                             docs_to_summarize = [Document(page_content=content)]
+                             summary_result = await state['summarize_chain'].arun(docs_to_summarize)
+                             context_parts.append(f"- Ch {chap_num} ({chap_title}): {summary_result}")
+                        else:
+                             context_parts.append(f"- Ch {chap_num} ({chap_title}): {content[:2100]}...") # Truncate short ones
+            except Exception as e:
+                self.logger.warning(f"Could not fetch/process previous chapters: {e}")
+
+
+            # Fetch relevant codex items from Vector Store
+            try:
+                # More specific query for relevance
+                query_text = f"Details relevant to plot: {plot}"
+                # Filter out chapters explicitly
+                codex_filter = { "type": {"$nin": ["chapter", "relationship", "character_backstory"]} } # Example filter
+
+                relevant_docs = await vector_store.similarity_search(
+                    query_text=query_text,
+                    k=20, # Fetch more potentially relevant items
+                    filter=codex_filter
+                )
+
+                if relevant_docs:
+                    context_parts.append("\nRelevant World Information (from Knowledge Base):")
+                    items_by_type = {}
+                    for doc in relevant_docs:
+                        item_type = doc.metadata.get('type', 'other')
+                        if item_type not in items_by_type: items_by_type[item_type] = []
+                        # Limit context per item to avoid excessive length
+                        name = doc.metadata.get('name', doc.metadata.get('title', 'Unnamed'))
+                        content_preview = doc.page_content[:300] # Limit length
+                        items_by_type[item_type].append(f"{name}: {content_preview}...")
+
+                    for item_type, items in items_by_type.items():
+                        context_parts.append(f"\n{item_type.title()}:")
+                        context_parts.extend([f"- {item}" for item in items])
+
+            except Exception as e:
+                self.logger.warning(f"Could not fetch relevant documents from vector store: {e}")
+
+            final_context = "\n".join(context_parts)
+
+            # Truncate context if it exceeds limits (leaving room for prompt template)
+            max_context_tokens = self.MAX_INPUT_TOKENS - 1000 # Reserve 1k for prompt itself
+            context_tokens = self.estimate_token_count(final_context)
+            if context_tokens > max_context_tokens:
+                self.logger.warning(f"Context ({context_tokens} tokens) exceeds limit ({max_context_tokens}). Truncating.")
+                # Simple truncation - smarter truncation might be needed
+                # This requires knowing token counts accurately, which is hard without the LLM call
+                # A simple character-based approximation:
+                ratio = max_context_tokens / context_tokens
+                final_context = final_context[:int(len(final_context) * ratio)]
+                self.logger.warning(f"Context truncated to approx {self.estimate_token_count(final_context)} tokens.")
+
+
+            return {"context": final_context}
+
+        except Exception as e:
+            self.logger.error(f"Error in _construct_context_node: {e}", exc_info=True)
+            return {"error": f"Failed to construct context: {e}"}
+
+    def _create_chapter_prompt(self, instructions: Dict[str, Any], context: str) -> ChatPromptTemplate:
+        """Helper to create the chapter generation prompt."""
+        system_template = """You are a skilled author writing a chapter ({chapter_number}) for a novel. Adhere STRICTLY to all requirements.
+
+        **CONTEXT:**
+        {context}
+
+        **WRITING REQUIREMENTS (MANDATORY):**
+        1.  **Plot/Setting:** {plot}
+        2.  **Writing Style:** {writing_style} (Apply this style METICULOUSLY to every sentence.)
+        3.  **Style Guide:** {style_guide} (Follow this guide EXACTLY.)
+        4.  **Additional Instructions:** {additional_instructions} (Incorporate these precisely.)
+        5.  **Approximate Word Count Target:** {word_count_target} words. Aim for this length naturally.
+
+        **FORMATTING (MANDATORY):**
+        *   Use clear paragraphs with double line breaks between them.
+        *   Start new paragraphs for scene/time shifts, speaker changes (dialogue), location changes, perspective shifts, new ideas.
+        *   Format dialogue correctly (new paragraph per speaker, quotation marks, tags/actions).
+        *   Vary paragraph length.
+        *   Use "***" for major scene breaks if appropriate.
+
+        **CRITICAL RULES:**
+        *   NEVER write the word "Codex".
+        *   Follow the specified Writing Style and Style Guide WITHOUT FAIL.
+        *   Stay EXACTLY true to the Plot/Setting.
+        *   Incorporate ALL requirements.
+        *   If specific sentence structures or endings are required, apply them CONSISTENTLY.
+
+        Begin writing Chapter {chapter_number} immediately. Do not include a chapter heading like "Chapter X: Title".
+        """
+        human_template = "Write the chapter following all system instructions precisely."
+
+        return ChatPromptTemplate.from_messages([
+            ("system", system_template),
+            ("human", human_template)
+        ])
+
+    async def _generate_initial_chapter_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Generates the initial draft of the chapter."""
+        self.logger.debug(f"Node: Generating Initial Chapter {state['chapter_number']}")
+        if state.get("error"): return {} # Skip if error occurred previously
+
+        try:
+            instructions = state['instructions']
+            context = state['context']
+            llm = state['llm']
+
+            prompt = self._create_chapter_prompt(instructions, context)
+            chain = prompt | llm | StrOutputParser()
+
+            target_word_count = instructions.get('wordCount', 0) # Get target WC from instructions
+
+            chapter_content = await chain.ainvoke({
+                "chapter_number": state['chapter_number'],
+                "context": context,
+                "plot": state['plot'],
+                "writing_style": state['writing_style'],
+                "style_guide": instructions.get('styleGuide', ''),
+                "additional_instructions": instructions.get('additionalInstructions', ''),
+                "word_count_target": target_word_count,
+            })
+
+            if not chapter_content or not chapter_content.strip():
+                 raise ValueError("LLM returned empty chapter content.")
+
+            current_word_count = len(chapter_content.split())
+            self.logger.info(f"Initial chapter generated. Word count: {current_word_count}")
+
+            return {
+                "initial_chapter_content": chapter_content,
+                "current_word_count": current_word_count,
+                "target_word_count": target_word_count # Pass target along
+            }
+        except Exception as e:
+            self.logger.error(f"Error in _generate_initial_chapter_node: {e}", exc_info=True)
+            return {"error": f"Failed to generate initial chapter: {e}"}
+
+    async def _extend_chapter_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Extends the chapter if it's too short."""
+        self.logger.debug(f"Node: Extending Chapter {state['chapter_number']}")
+        if state.get("error"): return {}
+
+        try:
+            # Use the most recent content (either initial or previously extended)
+            previous_content = state.get("extended_chapter_content") or state["initial_chapter_content"]
+            current_word_count = state["current_word_count"]
+            target_word_count = state["target_word_count"]
+            words_to_add = target_word_count - current_word_count
+
+            self.logger.info(f"Extending chapter. Current: {current_word_count}, Target: {target_word_count}, Need: {words_to_add}")
+
+            extend_prompt = ChatPromptTemplate.from_template(
+                """You are an author continuing a chapter. Your task is to seamlessly extend the following chapter text while STRICTLY maintaining the established writing style, tone, and plot progression. Add approximately {words_to_add} words.
+
+                **EXISTING CHAPTER TEXT (Continue From Here):**
+                {previous_content}
+
+                **ORIGINAL WRITING REQUIREMENTS (Maintain These):**
+                *   **Writing Style:** {writing_style}
+                *   **Style Guide:** {style_guide}
+                *   **Plot to follow:** {plot}
+                *   **Overall Context:** {context}
+
+                **EXTENSION GUIDELINES (MANDATORY):**
+                1.  Write ONLY the additional text needed to continue the story naturally.
+                2.  DO NOT repeat the existing text provided above.
+                3.  The new text MUST perfectly match the style, tone, vocabulary, and sentence structure of the existing text.
+                4.  Continue plot points, character interactions, or descriptions logically.
+                5.  Ensure the transition from the existing text to your new text is smooth and invisible.
+                6.  Aim to add roughly {words_to_add} words.
+
+                Start writing the additional text immediately.
+                """
+            )
+
+            chain = extend_prompt | state['llm'] | StrOutputParser()
+
+            extension_text = await chain.ainvoke({
+                "previous_content": previous_content,
+                "words_to_add": words_to_add,
+                "writing_style": state['writing_style'],
+                "style_guide": state['instructions'].get('styleGuide', ''),
+                "plot": state['plot'],
+                "context": state['context'] # Provide context again for consistency
+            })
+
+            if not extension_text or not extension_text.strip():
+                self.logger.warning("LLM returned empty extension text. Stopping extension.")
+                # Return state without updating content, letting the condition proceed
+                return {"extended_chapter_content": previous_content, "current_word_count": current_word_count}
+
+
+            # Combine and update word count
+            # Ensure a space or newline separates the parts if needed
+            separator = "\n\n" if "\n\n" in previous_content else " "
+            full_content = previous_content.strip() + separator + extension_text.strip()
+            new_word_count = len(full_content.split())
+
+            self.logger.info(f"Chapter extended. New word count: {new_word_count}")
+
+            return {
+                "extended_chapter_content": full_content,
+                "current_word_count": new_word_count,
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in _extend_chapter_node: {e}", exc_info=True)
+            # Return error but also the content we had before the failed extension attempt
+            return {
+                 "error": f"Failed to extend chapter: {e}",
+                 "extended_chapter_content": state.get("extended_chapter_content") or state["initial_chapter_content"],
+                 "current_word_count": state["current_word_count"]
+            }
+
+    async def _generate_title_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Generates the chapter title."""
+        self.logger.debug(f"Node: Generating Title for Chapter {state['chapter_number']}")
+        if state.get("error"): return {}
+
+        try:
+            # Use the final content after potential extension
+            final_content = state.get("extended_chapter_content") or state["initial_chapter_content"]
+            chapter_number = state["chapter_number"]
+            llm = state["check_llm"] # Use check LLM for smaller tasks
+
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the following chapter content and generate a compelling, concise (2-6 words) title that captures its essence without spoilers. Maintain professional novel chapter naming conventions.
+
+            Chapter Number: {chapter_number}
+            Chapter Content Snippet:
+            {chapter_content_snippet}
+
+            Return ONLY the title text. Do not include "Chapter X:".
+            """)
+
+            chain = prompt | llm | StrOutputParser()
+
+            # Provide a snippet to avoid large context for title gen
+            content_snippet = final_content[:1500] + "..." if len(final_content) > 1500 else final_content
+
+            title_text = await chain.ainvoke({
+                "chapter_number": chapter_number,
+                "chapter_content_snippet": content_snippet
+            })
+
+            cleaned_title = title_text.strip().replace("\"", "")
+            # Basic length check/truncation
+            if len(cleaned_title) > 100: cleaned_title = cleaned_title[:97]+"..."
+            if not cleaned_title: cleaned_title = f"Chapter {chapter_number} Untitled"
+
+            final_title = f"Chapter {chapter_number}: {cleaned_title}"
+
+            return {"chapter_title": final_title}
+        except Exception as e:
+            self.logger.error(f"Error in _generate_title_node: {e}", exc_info=True)
+            # Return a default title if generation fails
+            return {
+                "error": f"Failed to generate title: {e}",
+                "chapter_title": f"Chapter {state['chapter_number']}"
+            }
+
+    async def _extract_codex_items_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Extracts new codex items from the chapter."""
+        self.logger.debug(f"Node: Extracting Codex Items for Chapter {state['chapter_number']}")
+        if state.get("error"): return {}
+
+        try:
+            final_content = state.get("extended_chapter_content") or state["initial_chapter_content"]
+            vector_store = state['vector_store']
+            check_llm = state['check_llm']
+
+            # Get existing codex item names for filtering
+            existing_items = await vector_store.similarity_search(
+                query_text="*", # Broad query to get items
+                filter={"type": {"$in": [t.value for t in CodexExtractionTypes]}},
+                k=200 # Fetch a good number of existing items
+            )
+            existing_names = {doc.metadata.get('name', '').lower() for doc in existing_items if doc.metadata.get('name')}
+            self.logger.debug(f"Found {len(existing_names)} existing codex item names for filtering.")
+
+            parser = PydanticOutputParser(pydantic_object=CodexExtraction)
+            # Use JsonOutputParser as a fallback if Pydantic fails hard
+            # fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=check_llm)
+
+            prompt = ChatPromptTemplate.from_template("""
+                Analyze the chapter content below. Identify NEW entities (characters, items, lore, factions, worldbuilding details) introduced that are NOT in the 'Existing Item Names' list.
+
+                Valid Types: {valid_types}
+                Valid Worldbuilding Subtypes: {valid_subtypes}
+
+                For each NEW item:
+                1. Extract its Name.
+                2. Write a brief Description based ONLY on the chapter text.
+                3. Assign its Type (from Valid Types).
+                4. Assign a Subtype (from Valid Subtypes) ONLY if Type is 'worldbuilding'.
+
+                Chapter Content:
+                {chapter_content}
+
+                Existing Item Names (IGNORE THESE):
+                {existing_names}
+
+                Respond in JSON format matching the following schema:
+                {format_instructions}
+
+                If no new items are found, return an empty list for "new_items".
+                """)
+
+            chain = prompt | check_llm | JsonOutputParser(pydantic_object=CodexExtraction) # Try JSON parser first
+
+            # Process in chunks if content is very large (optional, might be complex)
+            # chunks = self.chunk_content(final_content, self.MAX_INPUT_TOKENS // 2)
+            # all_new_items_raw = []
+            # for chunk in chunks: ... invoke chain ... all_new_items_raw.extend(result['new_items'])
+
+            try:
+                result_dict = await chain.ainvoke({
+                    "chapter_content": final_content, # Process full content for now
+                    "existing_names": ", ".join(list(existing_names)) if existing_names else "None",
+                    "valid_types": ", ".join([t.value for t in CodexExtractionTypes]),
+                    "valid_subtypes": ", ".join([t.value for t in WorldbuildingSubtype]),
+                    "format_instructions": parser.get_format_instructions() # Still use Pydantic for instructions
+                })
+                # Validate with Pydantic after JSON parsing
+                validated_result = CodexExtraction.model_validate(result_dict)
+                all_new_items_raw = validated_result.new_items
+            except (json.JSONDecodeError, ValidationError) as parse_error:
+                self.logger.warning(f"JSON/Pydantic parsing failed for codex extraction: {parse_error}. Attempting fix.")
+                # Fallback to OutputFixingParser
+                fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=check_llm)
+                fix_chain = prompt | check_llm | fixing_parser
+                validated_result = await fix_chain.ainvoke({
+                    "chapter_content": final_content,
+                    "existing_names": ", ".join(list(existing_names)) if existing_names else "None",
+                    "valid_types": ", ".join([t.value for t in CodexExtractionTypes]),
+                    "valid_subtypes": ", ".join([t.value for t in WorldbuildingSubtype]),
+                    "format_instructions": parser.get_format_instructions()
+                })
+                all_new_items_raw = validated_result.new_items
+            except Exception as invoke_error:
+                 self.logger.error(f"Codex extraction LLM call failed: {invoke_error}", exc_info=True)
+                 all_new_items_raw = [] # Assume no items found on error
+
+
+            # Deduplicate based on name (case-insensitive) and ensure valid types/subtypes
+            unique_items_dict = {}
+            final_new_items = []
+            valid_types_set = {t.value for t in CodexItemType}
+            valid_subtypes_set = {s.value for s in WorldbuildingSubtype}
+
+            for item in all_new_items_raw:
+                 item_name_lower = item.name.strip().lower()
+                 if not item_name_lower: continue # Skip empty names
+
+                 # Validate Type
+                 try:
+                     item_type_enum = CodexItemType(item.type)
+                 except ValueError:
+                     self.logger.warning(f"Invalid codex type '{item.type}' for item '{item.name}'. Skipping.")
+                     continue
+
+                 # Validate Subtype if present
+                 item_subtype_enum = None
+                 if item.subtype:
+                     try:
+                         item_subtype_enum = WorldbuildingSubtype(item.subtype)
+                         if item_type_enum != CodexItemType.WORLDBUILDING:
+                              self.logger.warning(f"Subtype '{item.subtype}' provided for non-worldbuilding type '{item.type}' on item '{item.name}'. Ignoring subtype.")
+                              item_subtype_enum = None # Clear invalid subtype
+                     except ValueError:
+                         self.logger.warning(f"Invalid worldbuilding subtype '{item.subtype}' for item '{item.name}'. Skipping subtype.")
+                         # Keep item, but without subtype
+
+                 # Check uniqueness
+                 if item_name_lower not in unique_items_dict:
+                      item_dict = {
+                          "name": item.name.strip(),
+                          "description": item.description.strip(),
+                          "type": item_type_enum.value, # Store validated enum value
+                          "subtype": item_subtype_enum.value if item_subtype_enum else None,
+                      }
+                      unique_items_dict[item_name_lower] = item_dict
+                      final_new_items.append(item_dict)
+
+
+            self.logger.info(f"Extracted {len(final_new_items)} unique new codex items.")
+            return {"new_codex_items": final_new_items}
+
+        except Exception as e:
+            self.logger.error(f"Error in _extract_codex_items_node: {e}", exc_info=True)
+            return {
+                "error": f"Failed to extract codex items: {e}",
+                "new_codex_items": [] # Default to empty list on error
+            }
+
+    async def _validate_chapter_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Validates the generated chapter."""
+        self.logger.debug(f"Node: Validating Chapter {state['chapter_number']}")
+        if state.get("error"): return {}
+
+        try:
+            final_content = state.get("extended_chapter_content") or state["initial_chapter_content"]
+            instructions = state['instructions']
+            check_llm = state['check_llm']
+            vector_store = state['vector_store']
+            plot = state['plot']
+
+            # Fetch limited context for validation (e.g., plot + maybe previous chapter summary)
+            # Re-using full context might be too much for validation LLM
+            validation_context_docs = await vector_store.similarity_search(plot, k=3) # Get relevant docs
+            validation_context = f"Plot: {plot}\nInstructions: {json.dumps(instructions)}\nRelevant Info:\n" + "\n".join([f"- {doc.page_content[:200]}..." for doc in validation_context_docs])
+
+
+            parser = PydanticOutputParser(pydantic_object=ChapterValidation)
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=check_llm)
+
+            prompt = ChatPromptTemplate.from_template("""
+            You are an expert editor evaluating a novel chapter based on provided criteria and context.
+
+            **Chapter Content:**
+            {chapter_content}
+
+            **Evaluation Context & Instructions:**
+            {validation_context}
+
+            **Evaluation Criteria:**
+            Plot Consistency, Character Development, Pacing, Dialogue Quality, Setting Description, Writing Style Adherence, Emotional Impact, Conflict/Tension, Theme Exploration, Grammar/Syntax.
+
+            **Task:**
+            1.  Score each criterion from 1-10 (1=Poor, 10=Excellent) with a brief explanation.
+            2.  Assess overall validity (true/false).
+            3.  Provide an overall score (0-10).
+            4.  Give scores/explanations specifically for Style Guide Adherence and Continuity.
+            5.  List specific Areas for Improvement.
+            6.  Write concise General Feedback.
+
+            **Output Format (JSON):**
+            {format_instructions}
+            """)
+
+            chain = prompt | check_llm | fixing_parser # Use fixing parser as fallback
+
+            result = await chain.ainvoke({
+                "chapter_content": final_content,
+                "validation_context": validation_context,
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            # Convert Pydantic result to simple dict for state
+            validity_check_dict = {
+                'is_valid': result.is_valid,
+                'overall_score': result.overall_score,
+                'criteria_scores': {k: v.model_dump() for k, v in result.criteria_scores.items()}, # Store nested models as dicts
+                'style_guide_adherence_score': result.style_guide_adherence.score,
+                'style_guide_adherence_explanation': result.style_guide_adherence.explanation,
+                'continuity_score': result.continuity.score,
+                'continuity_explanation': result.continuity.explanation,
+                'areas_for_improvement': result.areas_for_improvement,
+                'general_feedback': result.general_feedback
+            }
+
+            self.logger.info(f"Chapter validation completed. Overall Score: {result.overall_score}/10")
+            return {"validity_check": validity_check_dict}
+
+        except (ValidationError, json.JSONDecodeError) as e:
+             self.logger.error(f"Validation output parsing error: {e}", exc_info=True)
+             return {"error": f"Failed to parse validation output: {e}"}
+        except Exception as e:
+            self.logger.error(f"Error in _validate_chapter_node: {e}", exc_info=True)
+            return {"error": f"Failed during chapter validation: {e}"}
+
+    async def _finalize_output_node(self, state: ChapterGenerationState) -> Dict[str, Any]:
+        """Assembles the final output dictionary."""
+        self.logger.debug(f"Node: Finalizing Output for Chapter {state['chapter_number']}")
+        if state.get("error"):
+            # Handle final error state
+            return {"final_output": {"error": state["error"]}}
+
+        final_content = state.get("extended_chapter_content") or state["initial_chapter_content"]
+
+        final_output = {
+            "content": final_content,
+            "chapter_title": state.get("chapter_title", f"Chapter {state['chapter_number']}"),
+            "new_codex_items": state.get("new_codex_items", []),
+            "validity_check": state.get("validity_check", {"error": "Validation skipped or failed."}),
+            "word_count": state.get("current_word_count", 0)
+        }
+        return {"final_output": final_output}
+
+    # --- LangGraph Conditional Edges ---
+
+    def _should_extend_chapter(self, state: ChapterGenerationState) -> str:
+        """Determines if the chapter needs extension based on word count."""
+        if state.get("error"):
+             self.logger.warning("Error detected, skipping extension check.")
+             return "proceed_to_title" # Go to final steps even if error occurred
+
+        current_wc = state['current_word_count']
+        target_wc = state['target_word_count']
+        initial_content = state['initial_chapter_content']
+        extended_content = state.get('extended_chapter_content')
+
+        # Safety check: if initial generation failed, don't try to extend.
+        if not initial_content:
+             self.logger.error("Initial chapter generation failed, cannot extend.")
+             return "proceed_to_title"
+
+        # If we already tried extending and failed (e.g., empty response), don't loop infinitely.
+        # Check if extension was attempted but didn't increase word count significantly.
+        if extended_content is not None and len(extended_content.split()) <= current_wc + 10: # Allowance for minor variations
+             self.logger.warning("Extension attempt did not significantly increase word count. Proceeding.")
+             return "proceed_to_title"
+
+        # Check if target word count is set and if current count is significantly lower
+        # Use a threshold (e.g., 90%) to avoid unnecessary extensions for minor differences
+        if target_wc > 0 and current_wc < target_wc * 0.9:
+            self.logger.info(f"Word count {current_wc} is less than 90% of target {target_wc}. Extending.")
+            return "extend_chapter"
+        else:
+            self.logger.info(f"Word count {current_wc} is sufficient (Target: {target_wc}). Proceeding.")
+            return "proceed_to_title"
+
+    # --- Graph Builder ---
+
+    def _build_chapter_generation_graph(self) -> StateGraph:
+        """Builds the LangGraph StateMachine for chapter generation."""
+        graph = StateGraph(ChapterGenerationState)
+
+        # Define nodes
+        graph.add_node("construct_context", self._construct_context_node)
+        graph.add_node("generate_initial_chapter", self._generate_initial_chapter_node)
+        graph.add_node("extend_chapter", self._extend_chapter_node)
+        graph.add_node("generate_title", self._generate_title_node)
+        graph.add_node("extract_codex_items", self._extract_codex_items_node)
+        graph.add_node("validate_chapter", self._validate_chapter_node)
+        graph.add_node("finalize_output", self._finalize_output_node)
+
+        # Define edges
+        graph.set_entry_point("construct_context")
+        graph.add_edge("construct_context", "generate_initial_chapter")
+
+        # Conditional edge for extension
+        graph.add_conditional_edges(
+            "generate_initial_chapter",
+            self._should_extend_chapter,
+            {
+                "extend_chapter": "extend_chapter",
+                "proceed_to_title": "generate_title"
+            }
+        )
+        # Loop back after extension attempt OR proceed if extension didn't work/isn't needed
+        graph.add_conditional_edges(
+            "extend_chapter",
+             self._should_extend_chapter, # Check again after extension
+             {
+                "extend_chapter": "extend_chapter", # Loop if still too short and extension added words
+                "proceed_to_title": "generate_title" # Proceed if count is okay or extension failed
+            }
+        )
+
+        graph.add_edge("generate_title", "extract_codex_items")
+        graph.add_edge("extract_codex_items", "validate_chapter")
+        graph.add_edge("validate_chapter", "finalize_output")
+        graph.add_edge("finalize_output", END)
+
+        # Compile the graph
+        compiled_graph = graph.compile()
+        self.logger.info("Chapter generation graph compiled.")
+        return compiled_graph
+
+    # --- Public Methods ---
 
     async def generate_chapter(
         self,
@@ -337,1554 +986,1087 @@ class AgentManager:
         writing_style: str,
         instructions: Dict[str, Any]
     ) -> Dict[str, Any]:
-        try:
-            self.logger.info("Entering generate_chapter...")
-            self.logger.info(f"Expected word count from instructions: {instructions.get('wordCount')}")
+        """Generates a chapter using the LangGraph workflow."""
+        self.logger.info(f"Starting chapter generation process for Chapter {chapter_number}...")
 
-            # Construct context
-            context = await self._construct_context(
-                plot, 
-                writing_style,
-                self.vector_store,
-            )
-            
-            # Use our existing _construct_prompt method
-            prompt_template = self._construct_prompt(instructions, context)
-            
-            # Create the chain
-            chain = (
-                prompt_template | 
-                self.llm | 
-                StrOutputParser()
-            )
+        if not self.chapter_generation_graph:
+             self.logger.error("Chapter generation graph is not initialized.")
+             raise RuntimeError("AgentManager not properly initialized.")
 
-            chat_history = ChatMessageHistory()
-            chain = RunnableWithMessageHistory(
-                chain,
-                lambda session_id: chat_history,
-                input_messages_key="context",
-                history_messages_key="chat_history",
-            )
-
-            # Generate the chapter content
-            chapter_content = await chain.ainvoke(
-                {
-                    "chapter_number": chapter_number,
-                    "chapter_title_placeholder": f"Chapter {chapter_number}",
-                    "plot": plot,
-                    "writing_style": writing_style,
-                    "word_count_target": instructions.get('wordCount', 0),
-                    "style_guide": instructions.get('styleGuide', ''),
-                    "additional_instructions": instructions.get('additionalInstructions', ''),
-                    "context": context
-                },
-                config={"configurable": {"session_id": f"chapter_{chapter_number}"}}
-            )
-
-            if not chapter_content:
-                raise ValueError("No chapter content was generated")
-
-            current_word_count = len(chapter_content.split())
-            self.logger.info(f"Generated chapter content. Word count: {current_word_count}")
-
-            # Check and extend chapter if needed
-            expected_word_count = instructions.get('wordCount', 0)
-            if expected_word_count > 0:
-                self.logger.info(f"Word count check: Current word count ({current_word_count}) vs Expected word count ({expected_word_count})")
-                if current_word_count < expected_word_count:
-                    self.logger.info("Chapter is shorter than expected, calling check_and_extend_chapter...")
-                    chapter_content = await self.check_and_extend_chapter(
-                        chapter_content,
-                        writing_style,
-                        context,
-                        expected_word_count,
-                        instructions.get('styleGuide', ''))
-
-            # Generate title
-            chapter_title = await self.generate_title(chapter_content, chapter_number)
-
-            # Check and extract codex items
-            new_codex_items = await self.check_and_extract_new_codex_items(chapter_content)
-
-            # Perform validity check
-            validity_check = await self.check_chapter(
-                chapter_content,
-                instructions,
-                await self.vector_store.similarity_search(plot, k=3)
-            )
-
-            # Return the complete result
-            return {
-                "content": chapter_content,
-                "chapter_title": chapter_title,
-                "new_codex_items": new_codex_items,
-                "validity_check": validity_check
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error in generate_chapter: {str(e)}", exc_info=True)
-            raise
-
-    def _construct_prompt(self, instructions: Dict[str, Any], context: str) -> ChatPromptTemplate:
-        system_template = """You are a skilled author tasked with writing a chapter for a novel. Follow these instructions EXACTLY:
-
-        Context:
-        {context}
-
-        Writing Requirements (YOU MUST FOLLOW ALL OF THESE):
-        1. Setting/Plot: {plot}
-        2. Writing Style: {writing_style}
-           IMPORTANT: This is a STRICT requirement. Every single sentence MUST follow this style exactly.
-        3. Style Guide: {style_guide}
-           IMPORTANT: This is a STRICT requirement. The entire text MUST follow this guide exactly.
-        4. Additional Requirements: {additional_instructions}
-           IMPORTANT: This is a STRICT requirement. The text MUST incorporate these instructions exactly.
-        
-        FORMATTING REQUIREMENTS (MANDATORY):
-        - Divide the chapter into clear, logical paragraphs
-        - Use proper spacing between paragraphs (double line breaks)
-        - Start new paragraphs for:
-            * New scenes or time shifts
-            * Changes in speaker during dialogue
-            * Changes in location
-            * Shifts in perspective
-            * New ideas or topics
-        - Format dialogue properly:
-            * Each speaker gets a new paragraph
-            * Use proper quotation marks
-            * Include dialogue tags and actions
-        - Vary paragraph length for rhythm and pacing
-        - Use scene breaks (three asterisks: ***) for major scene changes
-        
-        CRITICAL RULES:
-        - NEVER use the word "Codex" in the story - this is a technical term
-        - Follow the writing style EXACTLY as specified - no exceptions
-        - Stay true to the specified setting/plot - no deviations
-        - Every single requirement must be followed precisely
-        - If asked to end sentences with specific words or phrases, EVERY sentence must end that way
-        - If asked to write in a specific style, maintain it consistently throughout
-        
-        Write Chapter {chapter_number} of the novel. Start writing immediately without any preamble or chapter heading."""
-
-        human_template = "Please write the chapter following the above requirements."
-        
-        return ChatPromptTemplate.from_messages([
-            ("system", system_template),
-            ("human", human_template)
-        ])
-
-    async def _construct_context(self, plot: str, writing_style: str, vector_store: VectorStore) -> str:
-        try:
-            self.logger.info("Starting context construction...")
-            
-            context_parts = []
-            context_parts.append(f"Plot: {plot}\n")
-            context_parts.append(f"Writing Style: {writing_style}\n")
-            
-            # Get all previous chapters in chronological order
-            self.logger.info("Fetching previous chapters from database...")
-            previous_chapters = await db_instance.get_all_chapters(self.user_id, self.project_id)
-            
-            # Sort chapters by chapter number
-            if previous_chapters:
-                previous_chapters.sort(key=lambda x: x.get('chapter_number', 0))
-                self.logger.info("Previous chapters sorted by chapter number.")
-            
-            # Get all codex items except chapters from vector store
-            self.logger.info("Fetching codex items...")
-            try:
-                # Updated filter format for Qdrant
-                codex_items = await vector_store.similarity_search(
-                    query_text=plot,
-                    k=30,
-                    filter={
-                        "type": {
-                            "$nin": ["chapter"]
-                        }
-                    }
-                )
-            except Exception as e:
-                self.logger.warning(f"Error during similarity search: {str(e)}. Trying without filter.")
-                # Fallback to search without filter if the filter format causes issues
-                codex_items = await vector_store.similarity_search(
-                    query_text=plot,
-                    k=30
-                )
-                # Filter out chapters manually
-                codex_items = [item for item in codex_items if item.metadata.get('type') != 'chapter']
-            
-            # Add codex items to context, grouped by type
-            if codex_items:
-                context_parts.append("\nRelevant World Information:")
-                
-                # Group items by type
-                items_by_type = {}
-                for item in codex_items:
-                    item_type = item.metadata.get('type', 'other')
-                    if item_type not in items_by_type:
-                        items_by_type[item_type] = []
-                    items_by_type[item_type].append(item)
-                
-                # Add each type of item to context
-                for item_type, items in items_by_type.items():
-                    context_parts.append(f"\n{item_type.title()}:")
-                    for item in items:
-                        name = item.metadata.get('name', 'Unnamed')
-                        context_parts.append(f"- {name}: {item.page_content}")
-            
-            # Add previous chapters in chronological order
-            self.logger.info("Adding previous chapters to context...")
-            if previous_chapters:
-                context_parts.append("\nPrevious Chapters:")
-                for chapter in previous_chapters:
-                    chapter_number = chapter.get('chapter_number', 'Unknown')
-                    chapter_title = chapter.get('title', f'Chapter {chapter_number}')
-                    content = chapter.get('content', '')
-                    self.logger.debug(f"Processing chapter for context: {chapter_title}")
-
-                    # Create a summary for long chapters
-                    self.logger.debug(f"Chapter word count: {len(content.split())}")
-                    context_parts.append(f"\nChapter {chapter_number} - {chapter_title}\nContent: {content}")
-
-            final_context = "\n".join(context_parts)
-            self.logger.info("Context construction completed.")
-            return final_context
-            
-        except Exception as e:
-            self.logger.error(f"Error constructing context: {str(e)}", exc_info=True)
-            raise
-
-    def estimate_token_count(self, text: str) -> int:
-        if not text or not text.strip():
-            return 0
-        return self.llm.get_num_tokens(text)
-
-    async def check_chapter(self, chapter: str, instructions: Dict[str, Any], 
-                        previous_chapters: List[Document]) -> Dict[str, Any]:
-        async with self._lock:
-            try:
-                truncated_previous_chapters = self._truncate_previous_chapters(previous_chapters)
-                
-                evaluation_criteria = [
-                    "Plot Consistency",
-                    "Character Development",
-                    "Pacing",
-                    "Dialogue Quality",
-                    "Setting Description",
-                    "Adherence to Writing Style",
-                    "Emotional Impact",
-                    "Conflict and Tension",
-                    "Theme Exploration",
-                    "Grammar and Syntax"
-                ]
-
-                prompt = ChatPromptTemplate.from_template("""
-                You are an expert editor tasked with evaluating the quality and consistency of a novel chapter. Analyze the following chapter thoroughly:
-
-                Chapter:
-                {chapter}
-
-                Instructions:
-                {instructions}
-
-                Previous Chapters:
-                {truncated_previous_chapters}
-                
-                Chapter words: {chapter_word_count}
-
-                Evaluate the chapter based on the following criteria:
-                {evaluation_criteria}
-
-                For each criterion, provide a score from 1 to 10 and a brief explanation, never give a score of 0.
-
-                Additionally, assess the following:
-                1. Overall validity (Is the chapter acceptable?)
-                2. Style guide adherence
-                3. Continuity with previous chapters
-                4. Areas for improvement
-
-                Provide your analysis in the following format:
-                {format_instructions}
-                """)
-
-                parser = PydanticOutputParser(pydantic_object=ChapterValidation)
-                fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
-                
-                chain = prompt | self.check_llm | fixing_parser
-                
-                result = await chain.ainvoke({
-                    "chapter": chapter,
-                    "instructions": json.dumps(instructions),
-                    "truncated_previous_chapters": truncated_previous_chapters,
-                    "chapter_word_count": len(chapter.split()),
-                    "evaluation_criteria": "\n".join(evaluation_criteria),
-                    "format_instructions": parser.get_format_instructions()
-                })
-
-                # Convert the result to a dictionary format matching the database schema
-                validity_check = {
-                    'is_valid': result.is_valid,
-                    'overall_score': result.overall_score,
-                    'general_feedback': result.general_feedback,
-                    'style_guide_adherence_score': result.style_guide_adherence.score,
-                    'style_guide_adherence_explanation': result.style_guide_adherence.explanation,
-                    'continuity_score': result.continuity.score,
-                    'continuity_explanation': result.continuity.explanation,
-                    'areas_for_improvement': result.areas_for_improvement
-                }
-
-                return validity_check
-
-            except ValidationError as e:
-                self.logger.error(f"Validation error in check_chapter: {e}")
-                return self._create_error_response("Invalid output format from validity check.")
-            except Exception as e:
-                self.logger.error(f"An error occurred in check_chapter: {str(e)}", exc_info=True)
-                return self._create_error_response("An error occurred during validity check.")
-
-    def _create_error_response(self, message: str) -> Dict[str, Any]:
-        """Create a standardized error response dictionary"""
-        return {
-            'is_valid': False,
-            'overall_score': 0,
-            'general_feedback': message,
-            'style_guide_adherence_score': 0,
-            'style_guide_adherence_explanation': 'Error occurred during validation',
-            'continuity_score': 0,
-            'continuity_explanation': 'Error occurred during validation',
-            'areas_for_improvement': ['Unable to complete validation']
+        initial_state: ChapterGenerationState = {
+            "user_id": self.user_id,
+            "project_id": self.project_id,
+            "chapter_number": chapter_number,
+            "plot": plot,
+            "writing_style": writing_style,
+            "instructions": instructions,
+            "llm": self.llm,
+            "check_llm": self.check_llm,
+            "vector_store": self.vector_store,
+            "summarize_chain": self.summarize_chain,
+            # Initialize others to None/default
+            "context": None,
+            "initial_chapter_content": None,
+            "extended_chapter_content": None,
+            "current_word_count": 0,
+            "target_word_count": instructions.get('wordCount', 0),
+            "chapter_title": None,
+            "new_codex_items": None,
+            "validity_check": None,
+            "error": None,
+            "final_chapter_content": None,
+            "final_output": None,
         }
 
-    async def save_validity_feedback(self, result: Dict[str, Any], chapter_number: int, chapter_id: str):
         try:
-            # Get chapter title
-            chapter = await db_instance.get_chapter(chapter_id, self.user_id, self.project_id)  # Add await here
-            chapter_title = chapter.get('title', f'Chapter {chapter_number}') if chapter else f'Chapter {chapter_number}'
+            # Stream the graph execution (or use ainvoke for final result)
+            # Using ainvoke for simplicity here, streaming requires more complex handling
+            final_state = await self.chapter_generation_graph.ainvoke(initial_state)
 
-            # Save validity check with all required parameters
+            if final_state.get("error"):
+                 self.logger.error(f"Chapter generation failed with error: {final_state['error']}")
+                 # Return a structured error response
+                 return {
+                     "error": final_state["error"],
+                     "content": None,
+                     "chapter_title": f"Chapter {chapter_number} (Failed)",
+                     "new_codex_items": [],
+                     "validity_check": None,
+                 }
+
+            if not final_state.get("final_output"):
+                raise ValueError("Graph execution finished without final output.")
+
+            self.logger.info(f"Chapter generation process completed for Chapter {chapter_number}.")
+            return final_state["final_output"]
+
+        except Exception as e:
+            self.logger.error(f"Error invoking chapter generation graph: {e}", exc_info=True)
+            raise # Re-raise the exception
+
+
+    async def save_validity_feedback(self, result: Dict[str, Any], chapter_number: int, chapter_id: str):
+        """Saves validity feedback to the database."""
+        # This method remains largely the same, just ensure data format matches.
+        try:
+            # Get chapter title if needed (though often passed in result now)
+            # chapter = await db_instance.get_chapter(chapter_id, self.user_id, self.project_id)
+            chapter_title = f"Chapter {chapter_number}" # Get from state if possible later
+
+            # Adjust keys based on the structure from _validate_chapter_node
             await db_instance.save_validity_check(
                 chapter_id=chapter_id,
-                chapter_title=chapter_title,
+                chapter_title=chapter_title, # Or fetch dynamically
                 is_valid=result['is_valid'],
                 overall_score=result['overall_score'],
                 general_feedback=result['general_feedback'],
+                # Assuming criteria_scores is not directly saved, but specific scores are
                 style_guide_adherence_score=result['style_guide_adherence_score'],
                 style_guide_adherence_explanation=result['style_guide_adherence_explanation'],
                 continuity_score=result['continuity_score'],
                 continuity_explanation=result['continuity_explanation'],
-                areas_for_improvement=result['areas_for_improvement'],
+                areas_for_improvement=result['areas_for_improvement'], # Should be List[str]
                 user_id=self.user_id,
                 project_id=self.project_id
             )
+            self.logger.info(f"Validity feedback saved for chapter ID: {chapter_id}")
         except Exception as e:
-            self.logger.error(f"Error saving validity feedback: {str(e)}")
-            raise
+            self.logger.error(f"Error saving validity feedback for chapter {chapter_id}: {e}", exc_info=True)
+            # Don't raise, as saving feedback is secondary to generation
 
-    async def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> str:
+
+    async def add_to_knowledge_base(self, content_type: str, content: str, metadata: Dict[str, Any]) -> Optional[str]:
+        """Adds content to the vector store."""
         try:
-            if self.vector_store is None:
-                await self.initialize()
+            if not self.vector_store:
+                self.logger.error("Vector store not initialized.")
+                return None
 
-            # Ensure metadata includes the content type
+            # Ensure mandatory metadata
             metadata['type'] = content_type
+            metadata['user_id'] = self.user_id
+            metadata['project_id'] = self.project_id
+            metadata['created_at'] = datetime.now(timezone.utc).isoformat()
 
-            filtered_metadata = {k: v for k, v in metadata.items() if v is not None}
+            # Clean metadata (remove None values, ensure JSON serializable types)
+            clean_metadata = {}
+            for k, v in metadata.items():
+                if v is not None:
+                    if isinstance(v, (str, int, float, bool, list)):
+                         clean_metadata[k] = v
+                    elif isinstance(v, datetime):
+                         clean_metadata[k] = v.isoformat()
+                    # Add other serializable types if needed
+                    else:
+                         self.logger.warning(f"Skipping non-serializable metadata key '{k}' of type {type(v)}")
 
-            # Batch embeddings if multiple items need to be added
-            if not hasattr(self, '_embedding_batch'):
-                self._embedding_batch = []
-            
-            self._embedding_batch.append((content, filtered_metadata))
-            
-            # Process immediately if batch is full
-            if len(self._embedding_batch) >= 10:  # Process in batches of 10
-                await self._process_embedding_batch()
-                return filtered_metadata.get('id', 'batch_processed')  # Return an identifier
-            
-            # Otherwise, process the current item directly
-            embedding_id = await self.vector_store.add_to_knowledge_base(content, metadata=filtered_metadata)
-            
-            # Remove the item from the batch since we processed it directly
-            self._embedding_batch.pop()
-            
-            return embedding_id
+
+            # Use add_texts for simplicity, VectorStore handles batching if implemented
+            ids = await self.vector_store.add_texts([content], [clean_metadata])
+            if ids:
+                 embedding_id = ids[0]
+                 self.logger.debug(f"Added '{content_type}' item to KB. Embedding ID: {embedding_id}")
+                 return embedding_id
+            else:
+                 self.logger.error("Failed to add item to knowledge base, no ID returned.")
+                 return None
+
         except Exception as e:
-            self.logger.error(f"Error adding to knowledge base: {str(e)}", exc_info=True)
-            raise
-    
+            self.logger.error(f"Error adding to knowledge base: {e}", exc_info=True)
+            return None # Return None on error
+
 
     async def update_or_remove_from_knowledge_base(self, identifier: Union[str, Dict[str, str]], action: str, new_content: str = None, new_metadata: Dict[str, Any] = None):
+        """Updates or removes an item from the vector store by embedding ID or item details."""
+        # This method interacts directly with VectorStore, no major changes needed unless VS API changes.
+        if not self.vector_store:
+            self.logger.error("Vector store not initialized.")
+            return
+
         try:
-            # Handle both string embedding_id and dictionary identifier
-            embedding_id = identifier if isinstance(identifier, str) else await self.vector_store.get_embedding_id(
-                item_id=identifier['item_id'],
-                item_type=identifier['item_type']
-            )
-            
-            if embedding_id is None:
-                self.logger.warning(f"No embedding found for identifier: {identifier}")
-                return
-                
+            embedding_id = None
+            if isinstance(identifier, str):
+                embedding_id = identifier
+            elif isinstance(identifier, dict) and 'item_id' in identifier and 'item_type' in identifier:
+                # Find embedding ID based on item_id and item_type
+                embedding_id = await self.vector_store.get_embedding_id(
+                    item_id=identifier['item_id'],
+                    item_type=identifier['item_type']
+                )
+                if not embedding_id:
+                     self.logger.warning(f"Could not find embedding ID for item: {identifier}. Cannot {action}.")
+                     return
+            else:
+                raise ValueError("Invalid identifier provided. Must be embedding ID string or dict with item_id and item_type.")
+
             if action == "delete":
                 await self.vector_store.delete_from_knowledge_base(embedding_id)
+                self.logger.info(f"Deleted item with embedding ID: {embedding_id}")
             elif action == "update":
                 if new_content is None and new_metadata is None:
                     raise ValueError("Either new_content or new_metadata must be provided for update action")
+
+                # Ensure user/project IDs are in metadata if provided
+                if new_metadata:
+                    new_metadata['user_id'] = self.user_id
+                    new_metadata['project_id'] = self.project_id
+                    new_metadata['updated_at'] = datetime.now(timezone.utc).isoformat()
+
                 await self.vector_store.update_in_knowledge_base(embedding_id, new_content, new_metadata)
+                self.logger.info(f"Updated item with embedding ID: {embedding_id}")
             else:
-                raise ValueError(f"Invalid action: {action}. Must be either 'delete' or 'update'")
-                
+                raise ValueError(f"Invalid action: {action}. Must be 'delete' or 'update'.")
+
         except Exception as e:
-            self.logger.error(f"Error in update_or_remove_from_knowledge_base: {str(e)}")
-            raise
+            self.logger.error(f"Error in update_or_remove_from_knowledge_base (ID: {identifier}, Action: {action}): {e}", exc_info=True)
+            # Avoid raising here to prevent breaking callers if KB update fails
+
 
     async def query_knowledge_base(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
+        """Queries the knowledge base using RAG."""
+        # This method can remain largely the same, using the initialized components.
+        if not self.vector_store or not self.model_settings:
+             raise RuntimeError("AgentManager not initialized properly.")
+
         try:
+            qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
 
-            docs = await self.vector_store.similarity_search(
-                query_text=query,
-                k=20  # Increased from 5 to 20 as per recommendation
-            )
-            
-            if not docs:
-                return "I don't have enough information to answer that question."
-
-            # Include metadata in context
-            context_parts = []
-            for doc in docs:
-                content = doc.page_content
-                metadata = doc.metadata
-                
-                # Add document type and name if available
-                doc_type = metadata.get('type', 'Unknown')
-                doc_name = metadata.get('name', '')
-                if doc_name:
-                    context_parts.append(f"\n{doc_type.capitalize()}: {doc_name}")
-                
-                # Add summary if available
-                summary = metadata.get('summary', '')
-                if summary:
-                    context_parts.append(f"Summary: {summary}")
-                
-                # Add rules if available
-                rules = metadata.get('rules', [])
-                if rules:
-                    context_parts.append("Rules:")
-                    for rule in rules:
-                        context_parts.append(f"- {rule}")
-                
-                # Add relationships if available
-                relationships = metadata.get('relationships', {})
-                if relationships:
-                    context_parts.append("Related Items:")
-                    for rel_type, rel_items in relationships.items():
-                        context_parts.append(f"- {rel_type}: {', '.join(rel_items)}")
-                
-                # Add the main content
-                context_parts.append(content)
-                context_parts.append("---")
-
-            context = "\n".join(context_parts)
-
-            messages = []
+            # 1. Condense Question (if history exists)
+            standalone_question = query
+            history_messages: List[BaseMessage] = []
             if chat_history:
                 for msg in chat_history:
-                    if msg["type"] == "human":
-                        messages.append(HumanMessage(content=msg["content"]))
-                    else:
-                        messages.append(AIMessage(content=msg["content"]))
+                    if msg["type"] == "human": history_messages.append(HumanMessage(content=msg["content"]))
+                    elif msg["type"] == "ai": history_messages.append(AIMessage(content=msg["content"]))
 
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are a helpful AI assistant answering questions about a story. 
-                Use the provided context to answer questions. The context includes various types of information:
-                - Document content
-                - Summaries
-                - Rules and constraints
-                - Relationships between items
-                
-                Use all available information to provide comprehensive answers.
-                If you cannot answer based on the context, say so.
-                
-                Context: {context}"""),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{question}")
+                if history_messages:
+                    condense_prompt = ChatPromptTemplate.from_messages([
+                        MessagesPlaceholder(variable_name="chat_history"),
+                        ("human", "Given the chat history and the follow up question, rephrase the follow up question to be a standalone question.\n\nFollow Up Question: {question}\nStandalone question:")
+                    ])
+                    condense_chain = condense_prompt | qa_llm | StrOutputParser()
+                    standalone_question = await condense_chain.ainvoke({"chat_history": history_messages, "question": query})
+                    self.logger.debug(f"Original Query: {query}, Standalone Query: {standalone_question}")
+
+
+            # 2. Retrieve Documents
+            retrieved_docs = await self.vector_store.similarity_search(standalone_question, k=5) # Reduced k for smaller context
+
+            if not retrieved_docs:
+                return "I couldn't find relevant information in the knowledge base to answer that question."
+
+            # 3. Generate Answer using LLM with Context
+            context_str = "\n\n---\n\n".join([f"Source {i+1} ({doc.metadata.get('type', 'doc')} - {doc.metadata.get('name', 'unnamed')}):\n{doc.page_content}" for i, doc in enumerate(retrieved_docs)])
+
+            answer_prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an assistant answering questions based SOLELY on the provided context. If the answer isn't in the context, say you don't know. Be concise."),
+                ("human", "Context:\n{context}\n\nQuestion: {question}\n\nAnswer:")
             ])
 
-            llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
-            chain = prompt | llm | StrOutputParser()
-            
-            return await chain.ainvoke({
-                "context": context,
-                "chat_history": messages,
-                "question": query
-            })
+            answer_chain = answer_prompt | qa_llm | StrOutputParser()
+            answer = await answer_chain.ainvoke({"context": context_str, "question": standalone_question})
+
+            # Include sources (optional, can be done client-side too)
+            # sources_info = "\n\nSources Used:\n" + "\n".join([f"- {doc.metadata.get('type', 'doc')}: {doc.metadata.get('name', doc.metadata.get('title', 'Unnamed'))}" for doc in retrieved_docs])
+            # return answer + sources_info
+
+            return answer
 
         except Exception as e:
-            self.logger.error(f"Error in query_knowledge_base: {str(e)}", exc_info=True)
-            raise
+            self.logger.error(f"Error in query_knowledge_base: {e}", exc_info=True)
+            return f"An error occurred while querying the knowledge base: {e}" # Return error message
 
-
-    def _truncate_previous_chapters(self, previous_chapters: List[Document]) -> str:
-        """Truncate previous chapters to fit within token limit"""
-        try:
-            truncated_content = []
-            total_tokens = 0
-            max_tokens = self.MAX_INPUT_TOKENS // 2  # Use half of max tokens for previous chapters
-            
-            for i, chapter in enumerate(previous_chapters):
-                chapter_num = chapter.metadata.get('chapter_number', i + 1)  # Use metadata, fallback to index+1
-                chapter_content = chapter.page_content
-                
-                # Estimate tokens for this chapter
-                chapter_tokens = self.estimate_token_count(chapter_content)
-                
-                if total_tokens + chapter_tokens > max_tokens:
-                    # If adding this chapter would exceed limit, summarize it
-                    summary = self.summarize_content(chapter_content)
-                    truncated_content.append(f"Chapter {chapter_num} (Summary): {summary}")
-                    total_tokens += self.estimate_token_count(summary)
-                else:
-                    # Add full chapter if within limit
-                    truncated_content.append(f"Chapter {chapter_num}: {chapter_content}")
-                    total_tokens += chapter_tokens
-                
-                # Stop if we've reached token limit
-                if total_tokens >= max_tokens:
-                    break
-            
-            return "\n\n".join(truncated_content)
-            
-        except Exception as e:
-            self.logger.error(f"Error truncating previous chapters: {str(e)}")
-            raise
-
-    async def generate_title(self, chapter_content: str, chapter_number: int) -> str:
-        try:
-            prompt = ChatPromptTemplate.from_template("""
-            You are a master storyteller tasked with creating the perfect chapter title. Analyze the following chapter and create a compelling, memorable title that:
-
-            1. Captures the chapter's main theme, conflict, or pivotal moment
-            2. Creates intrigue without spoiling major revelations
-            3. Maintains consistency with professional novel chapter naming conventions
-            4. Uses literary devices (alliteration, metaphor, etc.) when appropriate
-            5. Keeps length between 2-6 words
-            6. Avoids clichés and generic phrasing
-
-            Chapter Number: {chapter_number}
-
-            Chapter Content:
-            {chapter_content}
-
-            Return ONLY the title without "Chapter X:" prefix or any other text.
-            The title should be memorable and make readers eager to begin the chapter.
-            """)
-            
-            llm = await self._get_llm(self.model_settings['titleGenerationLLM']) 
-            chain = prompt | llm | StrOutputParser()
-            
-            title = await chain.ainvoke({
-                "chapter_number": chapter_number,
-                "chapter_content": chapter_content
-            })
-            
-            # Clean and format the title
-            title = title.strip()
-            if len(title) > 200:
-                title = title[:197] + "..."
-                
-            return f"Chapter {chapter_number}: {title}"
-            
-        except Exception as e:
-            self.logger.error(f"Error generating title: {str(e)}")
-            return f"Chapter {chapter_number}"
-
-    async def get_knowledge_base_content(self):
-        return await self.vector_store.get_knowledge_base_content()
-
-    async def reset_memory(self):
-        self.chat_history = []
-        await db_instance.delete_chat_history(self.user_id, self.project_id)
-        #self.logger.info("Chat history has been reset.")
-
-    async def get_chat_history(self):
-        return await db_instance.get_chat_history(self.user_id, self.project_id)
-
-    def chunk_content(self, content: str, max_tokens: int) -> List[str]:
-        if not content or not content.strip():
-            return []
-        
-        chunks = []
-        current_chunk = ""
-        current_tokens = 0
-        
-        # Split by sentences but filter out empty ones
-        sentences = [s.strip() for s in content.split('.') if s.strip()]
-        
-        for sentence in sentences:
-            # Add the period back since we split it off
-            sentence = sentence + '.'
-            try:
-                sentence_tokens = self.estimate_token_count(sentence)
-                if current_tokens + sentence_tokens > max_tokens:
-                    if current_chunk:  # Only append non-empty chunks
-                        chunks.append(current_chunk.strip())
-                    current_chunk = sentence
-                    current_tokens = sentence_tokens
-                else:
-                    current_chunk += ' ' + sentence if current_chunk else sentence
-                    current_tokens += sentence_tokens
-            except ValueError:
-                # Skip empty sentences that might cause token counting errors
-                continue
-        
-        # Add the last chunk if it exists
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        
-        return chunks
-
-    async def check_and_extract_new_codex_items(self, chapter: str) -> List[Dict[str, str]]:
-        """Extract new codex items from a chapter"""
-        try:
-            if not chapter or not chapter.strip():
-                self.logger.warning("Empty chapter content provided to check_and_extract_new_codex_items")
-                return []
-
-            # Get existing codex items from vector store for comparison
-            existing_items = await self.vector_store.similarity_search(
-                query_text=chapter,
-                filter={"type": {"$in": [t.value for t in CodexExtractionTypes]}},
-                k=50
-            )
-            
-            existing_names = {doc.metadata.get('name') for doc in existing_items if doc.metadata.get('name')}
-            
-            chunks = self.chunk_content(chapter, self.MAX_INPUT_TOKENS // 2)
-            all_new_items = []
-            
-            for chunk in chunks:
-                parser = PydanticOutputParser(pydantic_object=CodexExtraction)
-                fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
-                
-                prompt = ChatPromptTemplate.from_template("""
-                    You are an expert at identifying new codex items in a story. Your task is to analyze 
-                    the following chapter and identify ANY new codex items that are not in the provided 
-                    list of existing codex items.
-
-                    Valid types are: {valid_types}
-                    For worldbuilding items, valid subtypes are: {valid_subtypes}
-
-                    For each new codex item you find:
-                    1. Provide its name
-                    2. Write a brief description based on information in the chapter
-                    3. Determine the type from the valid types listed above
-                    4. If the type is "worldbuilding", determine the subtype from the valid subtypes listed above
-
-                    Chapter:
-                    {chapter}
-
-                    Existing Item Names:
-                    {existing_names}
-
-                    Remember to include ANY new codex item not in the existing names list.
-                    Be thorough and precise in your analysis.
-
-                    {format_instructions}
-                    """)
-
-                codex_llm = await self._get_llm(self.model_settings['extractionLLM'])
-                extraction_chain = prompt | codex_llm | fixing_parser
-                
-                result = await extraction_chain.ainvoke({
-                    "chapter": chunk,
-                    "existing_names": ", ".join(existing_names),
-                    "valid_types": ", ".join([t.value for t in CodexExtractionTypes]),  # Use CodexExtractionTypes
-                    "valid_subtypes": ", ".join([t.value for t in WorldbuildingSubtype]),
-                    "format_instructions": parser.get_format_instructions()
-                })
-                
-                all_new_items.extend(result.new_items)
-
-            # Remove duplicates based on name
-            seen_names = set()
-            unique_items = []
-            for item in all_new_items:
-                if item.name not in seen_names:
-                    seen_names.add(item.name)
-                    unique_items.append(item)
-
-            return [item.dict() for item in unique_items]
-            
-        except Exception as e:
-            self.logger.error(f"Error in check_and_extract_new_codex_items: {str(e)}")
-            raise
-
-    async def analyze_character_relationships(self, characters: List[Dict[str, Any]]) -> List[RelationshipAnalysis]:
-        """Analyze relationships between the provided characters"""
-        try:
-            # Get story context from chapters
-            context = await db_instance.get_all_chapters(self.project_id, self.user_id)
-
-            # Summarize context if it's too large
-            if self.estimate_token_count(json.dumps(context)) > self.MAX_INPUT_TOKENS // 4:
-                context = self.summarize_context(json.dumps(context))
-
-            saved_relationships = []
-            batch_size = 10  # Process 10 character pairs at a time
-            
-            for i in range(0, len(characters), batch_size):
-                batch_characters = characters[i:i+batch_size]
-
-                
-                prompt = ChatPromptTemplate.from_template("""
-                Analyze the relationships between these specific characters:
-
-                Characters:
-                {characters}
-
-                Story Context:
-                {context}
-
-                For each pair of characters, provide:
-                1. The names of both characters
-                2. The type of relationship (family, friend, enemy, mentor, etc.)
-                3. A detailed description of their relationship and interactions
-
-                {format_instructions}
-                """)
-
-                parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
-                llmRelationship = await self._get_llm(self.model_settings['extractionLLM'])
-                chain = prompt | llmRelationship | parser
-
-                result = await chain.ainvoke({
-                    "characters": json.dumps(batch_characters, indent=2),
-                    "context": context,
-                    "format_instructions": parser.get_format_instructions()
-                })
-
-
-                if hasattr(result, 'relationships'):
-                    for relationship in result.relationships:
-                        # Verify both characters exist and are of type CHARACTER
-                        char1 = next((c for c in characters 
-                                    if c.get('name') == relationship.character1 
-                                    and c['type'] == CodexItemType.CHARACTER.value), None)
-                        char2 = next((c for c in characters 
-                                    if c.get('name') == relationship.character2 
-                                    and c['type'] == CodexItemType.CHARACTER.value), None)
-                        
-                        if char1 and char2:
-                            # Create the relationship in the database
-                            relationship_id = await db_instance.create_character_relationship(
-                                character_id=char1['id'],
-                                related_character_id=char2['id'],
-                                relationship_type=relationship.relationship_type,
-                                project_id=self.project_id,
-                                description=relationship.description
-                            )
-
-                            # Add relationship info to knowledge base
-                            relationship_content = (
-                                f"Relationship between {relationship.character1} and {relationship.character2}: "
-                                f"{relationship.relationship_type}. {relationship.description}"
-                            )
-
-                            await self.add_to_knowledge_base(
-                                "relationship",
-                                relationship_content,
-                                {
-                                    "name": f"{relationship.character1}-{relationship.character2} relationship",
-                                    "type": "relationship",
-                                    "relationship_id": relationship_id
-                                }
-                            )
-
-                            saved_relationships.append(relationship)
-
-            return saved_relationships
-
-        except Exception as e:
-            self.logger.error(f"Error analyzing character relationships: {str(e)}")
-            raise
+    # --- Other Methods (Keep as needed, ensure they use async/await and initialized components) ---
 
     async def generate_codex_item(self, codex_type: str, subtype: Optional[str], description: str) -> Dict[str, str]:
+        """Generates details for a new codex item based on a description."""
+        # This can remain a separate utility, doesn't need full graph
+        self.logger.debug(f"Generating codex item: Type={codex_type}, Subtype={subtype}")
         try:
             parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
-            llm = await self._get_llm(self.model_settings['mainLLM'])
+            llm = await self._get_llm(self.model_settings['extractionLLM']) # Use extraction LLM
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=llm)
-            
-            # Fetch all existing codex items for the user and project
-            existing_codex_items = await db_instance.get_all_codex_items(self.user_id, self.project_id)
-            
-            # Get relevant chapters from vector store
-            relevant_chapters = await self.vector_store.similarity_search(
-                query_text=description,
-                filter={"type": "chapter"},
-                k=15
-            )
 
-            # Format chapter context
+            # Fetch relevant context (existing items, chapters)
+            existing_items = await db_instance.get_all_codex_items(self.user_id, self.project_id)
+            existing_items_str = json.dumps([{"name": i.get('name'), "type": i.get('type'), "desc_snippet": i.get('description', '')[:50]+"..."} for i in existing_items[:20]], indent=2) # Snippets only
+
+            relevant_chapters = await self.vector_store.similarity_search(
+                query_text=description, filter={"type": "chapter"}, k=5
+            )
             chapter_context = "\n\n".join(
-                f"Chapter {doc.metadata.get('chapter_number', 'N/A')}: {doc.page_content[:500]}..."
+                f"Ch {doc.metadata.get('chapter_number', 'N/A')} Snippet: {doc.page_content[:300]}..."
                 for doc in relevant_chapters
             )
 
-            # Update prompt template
-            prompt = ChatPromptTemplate.from_template("""Create rich, detailed codex items for an immersive narrative universe.
+            prompt = ChatPromptTemplate.from_template("""
+            Generate a name and detailed description for a new codex item.
 
-            Relevant Story Chapters:
-            {chapter_context}
+            **Item Specifications:**
+            *   Type: {codex_type}
+            *   Subtype: {subtype}
+            *   Initial Description Idea: {description}
 
-            Create a new codex item based on the following specifications:
+            **Context:**
+            *   Relevant Chapter Snippets: {chapter_context}
+            *   Some Existing Codex Items: {existing_codex_items}
 
-            Type: {codex_type}
-            Subtype: {subtype}
-            Initial Description: {description}
+            **Task:**
+            1.  Create a concise, evocative Name.
+            2.  Write a comprehensive Description, expanding on the initial idea with depth and vivid details, consistent with the context.
+            3.  Ensure consistency with the specified type/subtype and existing items/chapters. DO NOT contradict existing info.
+            4.  Follow specific guidelines for the type (Character: appearance, personality, role; Item: origin, properties; Lore: date, impact; Worldbuilding: details based on subtype).
 
-            Existing Codex Items:
-            {existing_codex_items}
-
-            Your task:
-            1. Devise a concise, evocative name for the codex item that captures its essence.
-            2. Craft a comprehensive description that expands significantly on the initial description, adding depth, context, and vivid details.
-            3. Ensure perfect consistency between the name, description, and the specified type and subtype.
-            4. Make sure the new codex item is consistent with and complements the existing codex items. Do not contradict or duplicate information from existing items.
-
-            Specific guidelines based on codex type:
-            - Lore: Include a precise date or time period for the event. Describe its historical significance and lasting impact on the world.
-            - Character: Detail the character's age, gender, physical appearance, personality traits, motivations, and role in the story world.
-            - Item: Elaborate on the item's appearance, materials, origin, magical or technological properties, cultural significance, and any legends associated with it.
-            - Worldbuilding: 
-              * History: Describe key events, eras, or figures that shaped this aspect of the world.
-              * Culture: Detail customs, beliefs, social structures, or artistic expressions.
-              * Geography: Paint a vivid picture of the landscape, climate, flora, fauna, and how it influences the inhabitants.
-
-            Remember to interweave the codex item seamlessly with existing world elements, hinting at connections to other potential codex items. Your description should ignite curiosity and invite further exploration of the story world.
-
-            Types: worldbuilding, character, item, lore
-            Subtypes (for worldbuilding only): history, culture, geography
-            - Carefully align with events and descriptions from the Relevant Story Chapters above
-            - Reference chapter content where appropriate without contradicting established facts
-            - Maintain continuity with both existing codex items AND chapter content
+            **Output Format (JSON):**
             {format_instructions}
             """)
-            
+
             chain = prompt | llm | fixing_parser
-            
+
             result = await chain.ainvoke({
                 "codex_type": codex_type,
                 "subtype": subtype or "N/A",
                 "description": description,
-                "existing_codex_items": json.dumps(existing_codex_items, indent=2),
+                "existing_codex_items": existing_items_str,
                 "chapter_context": chapter_context,
                 "format_instructions": parser.get_format_instructions()
             })
-            
-            
-            if not isinstance(result, GeneratedCodexItem):
-                raise ValueError("Invalid result type from chain.invoke")
-            
+
             return {"name": result.name, "description": result.description}
 
         except Exception as e:
-            self.logger.error(f"Error generating codex item: {str(e)}", exc_info=True)
-            return {
-                "name": "Error generating codex item",
-                "description": f"An error occurred: {str(e)}"
-            }
+            self.logger.error(f"Error generating codex item: {e}", exc_info=True)
+            return {"name": "Error", "description": f"Failed to generate: {e}"}
+        
 
+    async def analyze_character_relationships(self, characters: List[Dict[str, Any]]) -> List[RelationshipAnalysis]:
+        """Analyzes and potentially saves relationships between the provided characters based on project context."""
+        self.logger.info(f"Analyzing relationships for {len(characters)} characters.")
+        if not characters or len(characters) < 2:
+            self.logger.warning("Need at least two characters to analyze relationships.")
+            return []
 
-
-    async def extract_character_backstory(self, character_id: str, chapter_id: str):
         try:
-            character = await db_instance.get_characters(self.user_id, self.project_id, character_id=character_id)
-            
-            # Get all unprocessed chapters
-            chapters_data = await db_instance.get_latest_unprocessed_chapter_content(
+            # Get story context (consider summarizing or selecting relevant parts if too large)
+            all_chapters_data = await db_instance.get_all_chapters(self.user_id, self.project_id)
+            context_content = "\n\n".join([f"Chapter {c.get('chapter_number', 'N/A')}: {c.get('content', '')[:2000]}..." for c in all_chapters_data]) # Snippets
+
+            context_tokens = self.estimate_token_count(context_content)
+            max_context_tokens = self.MAX_INPUT_TOKENS // 3 # Allocate portion for context
+            if context_tokens > max_context_tokens:
+                self.logger.warning(f"Relationship analysis context too large ({context_tokens} tokens). Summarizing.")
+                # Summarize context (or use vector search for relevance)
+                docs_to_summarize = [Document(page_content=context_content)]
+                context_content = await self.summarize_chain.arun(docs_to_summarize) # Use initialized summarize chain
+
+            parser = PydanticOutputParser(pydantic_object=RelationshipAnalysisList)
+            # Use check_llm or extractionLLM as configured
+            relationship_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=relationship_llm)
+
+
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the relationships between the provided characters based on the story context. Focus ONLY on pairs involving the listed characters.
+
+            Characters to Analyze:
+            {characters_json}
+
+            Story Context (Summaries/Snippets):
+            {context}
+
+            For each significant relationship pair found between the specified characters:
+            1. Identify the names of both characters (character1, character2).
+            2. Determine the relationship type (e.g., friend, enemy, rival, family, mentor, romantic interest, etc.).
+            3. Provide a concise description summarizing their interactions and feelings towards each other based *only* on the context.
+
+            Return ONLY the relationships between pairs of characters from the provided list. Do not infer relationships not present in the context.
+
+            Format your response as JSON:
+            {format_instructions}
+            """)
+
+            chain = prompt | relationship_llm | fixing_parser # Use fixing parser as fallback
+
+            character_list_json = json.dumps([{"id": c.get('id'), "name": c.get('name')} for c in characters], indent=2)
+
+            result = await chain.ainvoke({
+                "characters_json": character_list_json,
+                "context": context_content,
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            saved_relationships_output = []
+            processed_pairs = set() # To avoid duplicate db entries for A-B and B-A
+
+            if hasattr(result, 'relationships'):
+                for rel in result.relationships:
+                    # Find the actual character dicts from the input list
+                    char1_dict = next((c for c in characters if c.get('name') == rel.character1), None)
+                    char2_dict = next((c for c in characters if c.get('name') == rel.character2), None)
+
+                    if char1_dict and char2_dict:
+                        # Ensure pair uniqueness (regardless of order)
+                        pair_key = tuple(sorted([char1_dict['id'], char2_dict['id']]))
+                        if pair_key not in processed_pairs:
+                            processed_pairs.add(pair_key)
+                            try:
+                                # Save to database (assuming create_character_relationship exists)
+                                # Note: Original method saved to db, decide if that's desired here or just return analysis
+                                relationship_id = await db_instance.create_character_relationship(
+                                    character_id=char1_dict['id'],
+                                    related_character_id=char2_dict['id'],
+                                    relationship_type=rel.relationship_type,
+                                    project_id=self.project_id,
+                                    description=rel.description
+                                )
+                                self.logger.debug(f"Saved relationship between {rel.character1} and {rel.character2} (ID: {relationship_id})")
+
+                                # Optionally add relationship info to knowledge base
+                                relationship_content = f"Relationship between {rel.character1} and {rel.character2}: {rel.relationship_type}. {rel.description}"
+                                await self.add_to_knowledge_base(
+                                    "relationship",
+                                    relationship_content,
+                                    {
+                                        "name": f"{rel.character1}-{rel.character2} relationship",
+                                        "type": "relationship",
+                                        "relationship_id": relationship_id, # Link to DB entry
+                                        "character1_id": char1_dict['id'],
+                                        "character2_id": char2_dict['id'],
+                                    }
+                                )
+                                # Add the Pydantic model directly to the output list
+                                saved_relationships_output.append(rel)
+
+                            except Exception as db_error:
+                                self.logger.error(f"Failed to save relationship between {rel.character1} and {rel.character2}: {db_error}")
+                                # Continue processing other relationships
+            else:
+                self.logger.warning("Relationship analysis LLM call returned no 'relationships' field.")
+
+
+            return saved_relationships_output
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing character relationships: {e}", exc_info=True)
+            raise # Re-raise the error
+
+
+    async def extract_character_backstory(self, character_id: str) -> Optional[CharacterBackstoryExtraction]:
+        """Extracts new backstory for a character from unprocessed chapters."""
+        self.logger.info(f"Extracting backstory for character ID: {character_id}")
+        try:
+            character_data = await db_instance.get_characters(self.user_id, self.project_id, character_id=character_id)
+            if not character_data or character_data['type'] != CodexItemType.CHARACTER.value:
+                self.logger.error(f"Character {character_id} not found or not a character.")
+                return None
+
+            # Get all chapters not yet processed for backstory
+            chapters_to_process = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
-                PROCESS_TYPES['BACKSTORY']
+                PROCESS_TYPES['BACKSTORY'] # Use constant
             )
-            
-            # If no unprocessed chapters, return early
-            if not chapters_data:
-                return CharacterBackstoryExtraction(
-                    character_id=character_id,
-                    new_backstory=""
-                )
 
-            all_backstory = []
-            # Process each chapter
-            for chapter in chapters_data:
+            if not chapters_to_process:
+                self.logger.info(f"No unprocessed chapters found for backstory extraction for character {character_id}.")
+                return CharacterBackstoryExtraction(character_id=character_id, new_backstory="")
+
+            self.logger.info(f"Processing {len(chapters_to_process)} chapters for backstory of {character_data['name']}.")
+
+            parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
+            backstory_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=backstory_llm)
+
+
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the chapter content below specifically for new backstory information about the character "{character_name}".
+            Backstory includes past events, history, motivations revealed, origins, significant past relationships, or past experiences mentioned or strongly implied *for the first time in this chapter*.
+
+            Character Information:
+            Name: {character_name}
+            Existing Description/Backstory: {existing_backstory}
+
+            Chapter Content:
+            {chapter_content}
+
+            Extract ONLY the new backstory details revealed in this specific chapter content.
+            Summarize the new findings concisely. If no new backstory is found in this chapter, return an empty string for "new_backstory".
+
+            Respond in JSON format:
+            {format_instructions}
+            """)
+
+            all_new_backstory_parts = []
+            processed_chapter_ids = []
+
+            for chapter in chapters_to_process:
                 chapter_id = chapter['id']
                 chapter_content = chapter['content']
 
-                prompt = ChatPromptTemplate.from_template("""
-                Given the following information about a character and a new chapter, extract any new backstory information for the character.
-                Only include information that is explicitly mentioned or strongly implied in the chapter.
+                try:
+                    chain = prompt | backstory_llm | fixing_parser
 
-                Character Information:
-                {character_info}
+                    result = await chain.ainvoke({
+                        "character_name": character_data['name'],
+                        "existing_backstory": character_data.get('backstory', 'None provided yet.'),
+                        "chapter_content": chapter_content,
+                        "format_instructions": parser.get_format_instructions()
+                    })
 
-                Chapter Content:
-                {chapter_content}
+                    if result and result.new_backstory and result.new_backstory.strip():
+                         all_new_backstory_parts.append(result.new_backstory.strip())
+                         processed_chapter_ids.append(chapter_id)
+                         self.logger.debug(f"Found new backstory in chapter {chapter_id} for {character_data['name']}")
+                    # else: Chapter had no new info, implicitly processed
 
-                Extract new backstory information for the character, their history, and their background. Provide their journey over the course of the story. If no new information is found, return an empty string.
+                except Exception as chapter_error:
+                     self.logger.error(f"Error processing chapter {chapter_id} for backstory: {chapter_error}", exc_info=True)
+                     # Optionally decide whether to mark as processed even on error
+                     # processed_chapter_ids.append(chapter_id) # Mark even if error?
 
-                Use the following format for your response:
-                {format_instructions}
-                """)
-                
-                parser = PydanticOutputParser(pydantic_object=CharacterBackstoryExtraction)
-                llmBackstory = await self._get_llm(self.model_settings['extractionLLM'])
-                chain = prompt | llmBackstory | parser
-                
-                result = await chain.ainvoke({
-                    "character_info": json.dumps(character),
-                    "chapter_content": chapter_content,
-                    "format_instructions": parser.get_format_instructions()
-                })
+            # Mark successfully processed chapters in DB
+            for ch_id in processed_chapter_ids:
+                 await db_instance.mark_chapter_processed(ch_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
 
-                if result.new_backstory:
-                    all_backstory.append(result.new_backstory)
-                    # Mark each chapter as processed
-                    await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['BACKSTORY'])
+            combined_backstory = "\n\n".join(all_new_backstory_parts)
 
-            # Combine all backstory information
+            # Optionally save combined backstory to character's main backstory field
+            if combined_backstory:
+                 await db_instance.save_character_backstory(character_id, combined_backstory, self.user_id, self.project_id)
+                 # Also update/add to knowledge base if needed
+                 await self.add_to_knowledge_base(
+                      "character_backstory",
+                      combined_backstory,
+                      {"character_id": character_id, "type": "character_backstory"}
+                 )
+                 self.logger.info(f"Updated backstory for character {character_id} with new info.")
+
+
             return CharacterBackstoryExtraction(
                 character_id=character_id,
-                new_backstory="\n\n".join(all_backstory)
+                new_backstory=combined_backstory
             )
+
         except Exception as e:
-            self.logger.error(f"Error extracting character backstory: {str(e)}")
+            self.logger.error(f"Error extracting character backstory for {character_id}: {e}", exc_info=True)
             raise
 
 
-    async def check_and_extend_chapter(
-        self,
-        chapter_content: str,
-        writing_style: str,
-        context: str,
-        expected_word_count: int,
-        style_guide: str
-    ) -> str:
-        """Checks and extends chapter content if it's shorter than expected,
-        ensuring that the original writing style is maintained."""
-        self.logger.info("Entering check_and_extend_chapter...")
-        try:
-            current_word_count = len(chapter_content.split())
-            self.logger.info(f"Current word count: {current_word_count}, Expected word count: {expected_word_count}")
-            if current_word_count >= expected_word_count:
-                self.logger.info("Chapter word count is sufficient, no extension needed.")
-                return chapter_content
-
-            self.logger.info("Chapter word count is less than expected, proceeding with extension...")
-
-            max_attempts = 3
-            attempts = 0
-            extended_content = chapter_content
-
-            while current_word_count < expected_word_count and attempts < max_attempts:
-                attempts += 1
-                self.logger.info(f"Extension attempt {attempts} of {max_attempts}...")
-
-
-                prompt = ChatPromptTemplate.from_template(""" Your Task is to seamlessly expand the narrative while preserving the exact narrative voice, tone, vocabulary, and sentence structure found in the original chapter excerpt provided below. Study the style of the original text carefully and extend the chapter in a way that integrates naturally with its existing style.
-
-                    Original Chapter Content (for style reference):
-                    {chapter_content}
-
-                    Context and Additional Requirements:
-                    {context}
-
-                    Writing Style to Match Exactly:
-                    {writing_style}
-
-                    Style Guide:
-                    {style_guide}
-
-                    Current word count: {current_word_count}
-                    Target word count: {target_word_count}
-                    Words needed: {words_to_add}
-
-                    Extension Guidelines:
-                    1. Retain the original narrative voice, tone, and writing style.
-                    2. Extend plot points and character interactions without introducing stylistic changes.
-                    3. Ensure the new text flows naturally from the original chapter.
-                    4. Do not alter key details or change vocabulary patterns.
-                    
-                    Return the complete extended chapter as one cohesive piece.
-                """)
-
-                words_to_add = expected_word_count - current_word_count
-                chain = prompt | self.llm | StrOutputParser()
-
-                extended_content = await chain.ainvoke({
-                    "chapter_content": extended_content,
-                    "context": context,
-                    "writing_style": writing_style,
-                    "style_guide": style_guide,
-                    "current_word_count": current_word_count,
-                    "target_word_count": expected_word_count,
-                    "words_to_add": words_to_add
-                })
-
-                current_word_count = len(extended_content.split())
-                self.logger.info(f"After attempt {attempts}, word count: {current_word_count}/{expected_word_count}")
-                
-                # If we're within 95% of target, consider it sufficient
-                if current_word_count >= expected_word_count * 0.95:
-                    self.logger.info("Chapter extension reached at least 95% of target word count, considering it sufficient.")
-                    break
-
-            self.logger.info("Chapter extension process completed.")
-
-            if current_word_count < expected_word_count:
-                self.logger.warning(f"Chapter extension didn't reach target word count. Got {current_word_count}, expected {expected_word_count}")
-            self.logger.info(f"Extended chapter word count: {current_word_count}")
-
-            return extended_content
-
-        except Exception as e:
-            self.logger.error(f"Error in check_and_extend_chapter: {str(e)}", exc_info=True)
-            return chapter_content  # Return original content if extension fails
-
-
     async def analyze_unprocessed_chapter_locations(self) -> List[Dict[str, Any]]:
+        """Identifies and saves new locations from unprocessed chapters."""
+        self.logger.info("Analyzing unprocessed chapters for new locations...")
         try:
-            # Get unprocessed chapters
-            unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
+            # Get unprocessed chapters for 'locations' type
+            chapters_to_process = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
                 PROCESS_TYPES['LOCATIONS']
             )
-            
-            if not unprocessed_chapters:
+
+            if not chapters_to_process:
+                self.logger.info("No unprocessed chapters found for location analysis.")
                 return []
 
-            existing_locations = await db_instance.get_locations(self.user_id, self.project_id)
-            # Create set of existing location names for faster lookup
-            existing_names = {loc['name'].lower() for loc in existing_locations}
-
-            # Create the prompt
-            prompt = ChatPromptTemplate.from_template("""
-                Analyze the following chapter and identify all NEW locations mentioned that are not in the existing locations list.
-
-                EXISTING Locations (DO NOT recreate these):
-                {existing_locations}
-
-                Chapter:
-                {chapter_content}
-
-                For each NEW location (not in existing list) provide:
-                1. A unique identifier (location_id)
-                2. The name of the location (location_name)
-                3. An analysis of its significance to the story
-                4. Any connected locations
-                5. Notable events that occurred there
-                6. Characters associated with this location
-
-                Only return locations that are NOT in the existing locations list.
-                If all locations mentioned already exist, return an empty locations list.
-
-                {format_instructions}
-            """)
+            existing_locations_data = await db_instance.get_locations(self.user_id, self.project_id)
+            existing_location_names = {loc['name'].lower() for loc in existing_locations_data}
+            self.logger.debug(f"Found {len(existing_location_names)} existing locations.")
 
             parser = PydanticOutputParser(pydantic_object=LocationAnalysisList)
-            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
+            location_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=location_llm)
 
-            chain = prompt | self.llm | fixing_parser
 
-            locations = []
-            for chapter in unprocessed_chapters:
-                result = await chain.ainvoke({
-                    "chapter_content": chapter['content'],
-                    "existing_locations": json.dumps(existing_locations, indent=2),
-                    "format_instructions": parser.get_format_instructions()
-                })
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the following chapter content and identify all NEW locations mentioned that are NOT in the 'Existing Location Names' list.
 
-                # Process each location
-                for location in result.locations:
-                    # Skip if location already exists
-                    if location.location_name.lower() in existing_names:
-                        existing_location = next(
-                            loc for loc in existing_locations 
-                            if loc['name'].lower() == location.location_name.lower()
-                        )
-                        locations.append({
-                            **existing_location,
-                            'connected_locations': location.connected_locations,
-                            'notable_events': location.notable_events,
-                            'character_associations': location.character_associations
-                        })
-                        continue
+            Chapter Content:
+            {chapter_content}
 
-                    # Create new location if it doesn't exist
-                    location_id = await db_instance.create_location(
-                        name=location.location_name,
-                        description=location.significance_analysis,
-                        coordinates=None,
-                        user_id=self.user_id,
-                        project_id=self.project_id
-                    )
+            Existing Location Names (IGNORE THESE):
+            {existing_location_names_str}
 
-                    locations.append({
-                        'id': location_id,
-                        'name': location.location_name,
-                        'description': location.significance_analysis,
-                        'coordinates': None,
-                        'connected_locations': location.connected_locations,
-                        'notable_events': location.notable_events,
-                        'character_associations': location.character_associations
+            For each NEW location found:
+            1. Provide a unique identifier (can be generated later, just make sure output format expects `location_id` string field, maybe set to "NEW").
+            2. Extract the location's name (`location_name`).
+            3. Write a brief analysis of its significance based *only* on the chapter content (`significance_analysis`).
+            4. List names of any other locations it seems connected to based on the text (`connected_locations`).
+            5. List names of notable events occurring there in the chapter (`notable_events`).
+            6. List names of characters associated with it in the chapter (`character_associations`).
+
+            Return ONLY new locations. If all mentioned locations are in the existing list, return an empty "locations" list.
+
+            Format response as JSON:
+            {format_instructions}
+            """)
+
+            all_new_locations = []
+            processed_chapter_ids = []
+
+            existing_names_str = ", ".join(list(existing_location_names)) if existing_location_names else "None"
+
+            for chapter in chapters_to_process:
+                chapter_id = chapter['id']
+                chapter_content = chapter['content']
+                new_locations_in_chapter = []
+
+                try:
+                    chain = prompt | location_llm | fixing_parser
+                    result = await chain.ainvoke({
+                        "chapter_content": chapter_content,
+                        "existing_location_names_str": existing_names_str,
+                        "format_instructions": parser.get_format_instructions()
                     })
 
-                # Mark chapter as processed for locations
-                await db_instance.mark_chapter_processed(
-                    chapter['id'],
-                    self.user_id,
-                    PROCESS_TYPES['LOCATIONS']
-                )
+                    if result and hasattr(result, 'locations'):
+                        for loc_analysis in result.locations:
+                            loc_name_lower = loc_analysis.location_name.lower()
+                            # Double check against existing names (case-insensitive)
+                            if loc_name_lower not in existing_location_names:
+                                try:
+                                    # Create new location in DB
+                                    db_location_id = await db_instance.create_location(
+                                        name=loc_analysis.location_name,
+                                        description=loc_analysis.significance_analysis,
+                                        coordinates=None, # Coordinates not extracted here
+                                        user_id=self.user_id,
+                                        project_id=self.project_id
+                                    )
 
-            return locations
+                                    # Add to knowledge base
+                                    await self.add_to_knowledge_base(
+                                        "location",
+                                        f"{loc_analysis.location_name}: {loc_analysis.significance_analysis}",
+                                        {
+                                            "id": db_location_id, # Use actual DB ID
+                                            "name": loc_analysis.location_name,
+                                            "type": "location", # Ensure type is set correctly
+                                            # Optionally add extracted connections/events/chars as metadata
+                                            "connected_locations_mentioned": loc_analysis.connected_locations,
+                                            "notable_events_mentioned": loc_analysis.notable_events,
+                                            "character_associations_mentioned": loc_analysis.character_associations,
+                                        }
+                                    )
+
+                                    # Prepare dict to return (using actual DB ID)
+                                    location_dict = loc_analysis.model_dump()
+                                    location_dict['id'] = db_location_id # Update dict with real ID
+                                    location_dict['description'] = loc_analysis.significance_analysis # Align field name if needed
+                                    new_locations_in_chapter.append(location_dict)
+
+                                    # Add to set for checks within this run
+                                    existing_location_names.add(loc_name_lower)
+
+                                except Exception as db_kb_error:
+                                    self.logger.error(f"Error saving/adding new location '{loc_analysis.location_name}': {db_kb_error}")
+                                    # Continue processing other locations in the chapter
+
+                        if new_locations_in_chapter:
+                             all_new_locations.extend(new_locations_in_chapter)
+                             self.logger.info(f"Found {len(new_locations_in_chapter)} new locations in chapter {chapter_id}.")
+
+                        processed_chapter_ids.append(chapter_id) # Mark chapter as processed for locations
+
+                except Exception as chapter_error:
+                     self.logger.error(f"Error processing chapter {chapter_id} for locations: {chapter_error}", exc_info=True)
+                     # Optionally mark as processed on error?
+
+            # Mark successfully processed chapters
+            for ch_id in processed_chapter_ids:
+                 await db_instance.mark_chapter_processed(ch_id, self.user_id, PROCESS_TYPES['LOCATIONS'])
+
+            self.logger.info(f"Location analysis complete. Found {len(all_new_locations)} new locations total.")
+            return all_new_locations
 
         except Exception as e:
-            self.logger.error(f"Error analyzing locations: {str(e)}")
+            self.logger.error(f"Error analyzing chapter locations: {e}", exc_info=True)
             raise
 
 
-    async def analyze_unprocessed_chapter_events(self):
+    async def analyze_unprocessed_chapter_events(self) -> List[Dict[str, Any]]:
+        """Identifies and saves new events from unprocessed chapters."""
+        self.logger.info("Analyzing unprocessed chapters for new events...")
         try:
-            chapters_data = await db_instance.get_latest_unprocessed_chapter_content(
+            # Get unprocessed chapters for 'events' type
+            chapters_to_process = await db_instance.get_latest_unprocessed_chapter_content(
                 self.project_id,
                 self.user_id,
                 PROCESS_TYPES['EVENTS']
             )
-            if not chapters_data:
-                raise ValueError("No unprocessed chapters found for events analysis")
 
-            existing_events = await db_instance.get_events(self.project_id, self.user_id)
-            existing_titles = {event['title'].lower() for event in existing_events}
+            if not chapters_to_process:
+                self.logger.info("No unprocessed chapters found for event analysis.")
+                return []
 
-            all_events = []
-            for chapter in chapters_data:
+            existing_events_data = await db_instance.get_events(self.project_id, self.user_id)
+            existing_event_titles = {event['title'].lower() for event in existing_events_data}
+            self.logger.debug(f"Found {len(existing_event_titles)} existing events.")
+
+            parser = PydanticOutputParser(pydantic_object=EventAnalysis)
+            event_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=event_llm)
+
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the following chapter content and identify all significant NEW events described that are NOT in the 'Existing Event Titles' list.
+            A significant event is something that happens which impacts the plot, characters, or world state.
+
+            Chapter Content:
+            {chapter_content}
+
+            Existing Event Titles (IGNORE THESE):
+            {existing_event_titles_str}
+
+            For each NEW event found:
+            1. Create a concise Title summarizing the event.
+            2. Write a Description detailing what happened based *only* on the chapter.
+            3. Describe the Impact of the event on the story or characters.
+            4. List the names of characters directly involved (`involved_characters`).
+            5. Identify the Location where the event primarily takes place, if mentioned (`location`).
+
+            Return ONLY new events. If all mentioned events seem to match existing titles, return an empty "events" list.
+
+            Format response as JSON:
+            {format_instructions}
+            """)
+
+            all_new_events = []
+            processed_chapter_ids = []
+
+            existing_titles_str = ", ".join(list(existing_event_titles)) if existing_event_titles else "None"
+
+            for chapter in chapters_to_process:
                 chapter_id = chapter['id']
                 chapter_content = chapter['content']
+                new_events_in_chapter = []
 
-                # Use chunking for large chapters
-                chunks = self.chunk_content(chapter_content, self.MAX_INPUT_TOKENS // 2)
-                chapter_events = []
+                # Chunking for large chapters might be needed here
+                # chunks = self.chunk_content(chapter_content, self.MAX_INPUT_TOKENS // 2)
+                # for chunk in chunks: ... process chunk ...
 
-                for chunk in chunks:
-                    parser = PydanticOutputParser(pydantic_object=EventAnalysis)
-                    fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=self.check_llm)
-                    
-                    prompt = ChatPromptTemplate.from_template("""
-                    Analyze the following chapter content and identify all significant events. For each event, provide:
-                    1. A title
-                    2. A description
-                    3. The impact on the story or characters
-                    4. List of involved characters
-                    5. Location where it takes place (if mentioned)
-                                                              
-                    Existing Events (DO NOT recreate these):
-                    {existing_events}
-
-                    Chapter Content:
-                    {chapter_content}
-
-                    Format your response as a dictionary with a single key 'events' containing a list of events.
-                    {format_instructions}
-                    """)
-
-                    llmAnalysis = await self._get_llm(self.model_settings['extractionLLM'])
-                    chain = prompt | llmAnalysis | fixing_parser
-
+                try:
+                    chain = prompt | event_llm | fixing_parser
                     result = await chain.ainvoke({
-                        "chapter_content": chunk,
-                        "existing_events": json.dumps(existing_events, indent=2),
+                        "chapter_content": chapter_content, # Use full chapter content for now
+                        "existing_event_titles_str": existing_titles_str,
                         "format_instructions": parser.get_format_instructions()
                     })
 
-                    # Process events from this chunk
-                    for event in result.events:
-                        # Skip if event already exists
-                        if event.title.lower() in existing_titles:
-                            existing_event = next(
-                                e for e in existing_events 
-                                if e['title'].lower() == event.title.lower()
-                            )
-                            chapter_events.append({"id": existing_event['id'], **event.dict()})
-                            continue
+                    if result and hasattr(result, 'events'):
+                        for event_desc in result.events:
+                            event_title_lower = event_desc.title.lower()
+                            # Double check against existing titles
+                            if event_title_lower not in existing_event_titles:
+                                try:
+                                    # Resolve character/location IDs (optional, could be done later)
+                                    character_id = None
+                                    if event_desc.involved_characters:
+                                        # Basic: find first character, could be more complex
+                                        char_data = await db_instance.get_characters(self.user_id, self.project_id, name=event_desc.involved_characters[0])
+                                        if char_data: character_id = char_data['id']
 
-                        # Get character ID for the first involved character (if any)
-                        character_id = None
-                        if event.involved_characters:
-                            character = await db_instance.get_characters(
-                                self.user_id, 
-                                self.project_id, 
-                                name=event.involved_characters[0]
-                            )
-                            if character:
-                                character_id = character['id']
+                                    location_id = None
+                                    if event_desc.location:
+                                        loc_data = await db_instance.get_location_by_name(event_desc.location, self.user_id, self.project_id)
+                                        if loc_data: location_id = loc_data['id']
 
-                        # Get location ID if location is specified
-                        location_id = None
-                        if event.location:
-                            location = await db_instance.get_location_by_name(
-                                event.location, 
-                                self.user_id, 
-                                self.project_id
-                            )
-                            if location:
-                                location_id = location['id']
+                                    # Create event in DB
+                                    db_event_id = await db_instance.create_event(
+                                        title=event_desc.title,
+                                        description=event_desc.description,
+                                        date=datetime.now(timezone.utc), # Placeholder date, needs better handling
+                                        project_id=self.project_id,
+                                        user_id=self.user_id,
+                                        character_id=character_id,
+                                        location_id=location_id
+                                    )
 
-                        event_id = await db_instance.create_event(
-                            title=event.title,
-                            description=event.description,
-                            date=datetime.now(),
-                            project_id=self.project_id,
-                            user_id=self.user_id,
-                            character_id=character_id,
-                            location_id=location_id
-                        )
-                        chapter_events.append({
-                            "id": event_id,
-                            **event.dict()
-                        })
+                                    # Add to knowledge base
+                                    kb_metadata = {
+                                         "id": db_event_id,
+                                         "title": event_desc.title,
+                                         "type": "event",
+                                         "impact": event_desc.impact,
+                                         "involved_characters": event_desc.involved_characters,
+                                         "location_name": event_desc.location, # Store name from extraction
+                                         "location_id": location_id # Store resolved ID if found
+                                    }
+                                    await self.add_to_knowledge_base(
+                                        "event",
+                                        event_desc.description,
+                                        kb_metadata
+                                    )
 
-                if chapter_events:
-                    all_events.extend(chapter_events)
-                    await db_instance.mark_chapter_processed(chapter_id, self.user_id, PROCESS_TYPES['EVENTS'])
+                                    event_dict = event_desc.model_dump()
+                                    event_dict['id'] = db_event_id # Add real ID
+                                    new_events_in_chapter.append(event_dict)
 
-            return all_events
+                                    existing_event_titles.add(event_title_lower)
+
+                                except Exception as db_kb_error:
+                                    self.logger.error(f"Error saving/adding new event '{event_desc.title}': {db_kb_error}")
+
+                        if new_events_in_chapter:
+                             all_new_events.extend(new_events_in_chapter)
+                             self.logger.info(f"Found {len(new_events_in_chapter)} new events in chapter {chapter_id}.")
+
+                        processed_chapter_ids.append(chapter_id) # Mark chapter processed
+
+                except Exception as chapter_error:
+                     self.logger.error(f"Error processing chapter {chapter_id} for events: {chapter_error}", exc_info=True)
+
+            # Mark successfully processed chapters
+            for ch_id in processed_chapter_ids:
+                 await db_instance.mark_chapter_processed(ch_id, self.user_id, PROCESS_TYPES['EVENTS'])
+
+            self.logger.info(f"Event analysis complete. Found {len(all_new_events)} new events total.")
+            return all_new_events
+
         except Exception as e:
-            self.logger.error(f"Error analyzing events: {str(e)}")
+            self.logger.error(f"Error analyzing chapter events: {e}", exc_info=True)
             raise
+
 
     async def analyze_event_connections(self) -> List[EventConnection]:
+        """Analyzes and saves connections between existing events."""
+        self.logger.info("Analyzing connections between existing events...")
         try:
-            events = await db_instance.get_events(self.project_id, self.user_id, limit=100)
-            characters = await db_instance.get_characters(self.user_id, self.project_id)
-            locations = await db_instance.get_locations(self.user_id, self.project_id)
-            existing_connections = await db_instance.get_event_connections(self.project_id, self.user_id)
+            events = await db_instance.get_events(self.project_id, self.user_id, limit=100) # Limit scope
+            if len(events) < 2:
+                self.logger.info("Not enough events to analyze connections.")
+                return []
 
-            # Early return if all possible connections exist
-            if len(existing_connections) >= (len(events) * (len(events) - 1)) / 2:
-                self.logger.info("All possible event connections already exist")
-                return existing_connections
+            existing_connections_data = await db_instance.get_event_connections(self.project_id, self.user_id)
+            existing_keys = {tuple(sorted([c['event1_id'], c['event2_id']])) for c in existing_connections_data}
+            self.logger.debug(f"Found {len(existing_keys)} existing event connections.")
 
-            saved_connections = []
-            batch_size = 10
+            # Early exit if all possible pairs are connected (N*(N-1)/2)
+            max_possible_connections = (len(events) * (len(events) - 1)) / 2
+            if len(existing_keys) >= max_possible_connections:
+                 self.logger.info("All possible event connections seem to exist.")
+                 # Convert existing data to EventConnection model if needed for return type consistency
+                 # return [EventConnection(**conn_data) for conn_data in existing_connections_data]
+                 return [] # Or return empty list as no NEW connections can be found
 
-            # Convert existing connections to a set of keys for faster lookup
-            existing_keys = {
-                tuple(sorted([conn['event1_id'], conn['event2_id']])) 
-                for conn in existing_connections
-            }
+            parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
+            connection_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=connection_llm)
 
-            for i in range(0, len(events), batch_size):
-                batch_events = events[i:i+batch_size]
-                
-                prompt = ChatPromptTemplate.from_template("""
-                Analyze ONLY NEW connections between events that are not in the existing connections list.
 
-                Characters:
-                {characters}
-                                                   
-                Locations:
-                {locations}
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the list of events below. Identify plausible NEW causal, consequential, thematic, or temporal connections between pairs of events that are NOT already listed in 'Existing Connections'.
 
-                Events to Analyze:
-                {events}
+            Events:
+            {events_json}
 
-                EXISTING Connections (DO NOT recreate these):
-                {existing_connections}
+            Existing Connections (Ignore pairs present here):
+            {existing_connections_json}
 
-                For each NEW connection between events, provide:
-                1. Event_1_ID and Event_2_ID (must not match any existing connection pairs)
-                2. Connection_Type (cause_effect, parallel, contrast, etc.)
-                3. Description of how they are connected
-                4. Impact this connection has on the story
-                5. Characters_Involved (as a comma-separated string)
-                6. Location_Relation describing where these events occur
+            For each NEW connection found between two events:
+            1. Provide the IDs of both events (`event1_id`, `event2_id`). Ensure this pair is new.
+            2. Determine the connection type (e.g., 'cause_effect', 'leads_to', 'contrast', 'parallel', 'foreshadows', 'temporal_sequence').
+            3. Describe the nature of the connection.
+            4. Explain the impact or significance of this connection to the overall narrative or character arcs.
+            5. (Optional) List characters involved in linking the events (`characters_involved` as string).
+            6. (Optional) Describe any spatial relationship (`location_relation`).
 
-                Only return connections that are NOT in the existing connections list.
-                If all possible connections already exist, return an empty connections list.
+            Focus on meaningful connections. Do not create trivial links. Return ONLY new connections.
 
-                {format_instructions}
-                """)
+            Format response as JSON:
+            {format_instructions}
+            """)
 
-                parser = PydanticOutputParser(pydantic_object=EventConnectionAnalysis)
-                llmEvent = await self._get_llm(self.model_settings['extractionLLM'])
-                chain = prompt | llmEvent | parser
+            # Process events in batches if list is very long (simplified: process all for now)
+            events_json = json.dumps([{ "id": e['id'], "title": e['title'], "desc_snippet": e['description'][:100]+"..."} for e in events], indent=2)
+            existing_connections_json = json.dumps([{"e1": c['event1_id'], "e2": c['event2_id'], "type": c['connection_type']} for c in existing_connections_data], indent=2)
 
-                result = await chain.ainvoke({
-                    "events": json.dumps(batch_events, indent=2),
-                    "characters": json.dumps(characters, indent=2),
-                    "locations": json.dumps(locations, indent=2),
-                    "existing_connections": json.dumps(existing_connections, indent=2),
-                    "format_instructions": parser.get_format_instructions()
-                })
-
-                if result.connections:
-                    # Deduplicate connections
-                    deduped_result = result.deduplicate_connections()
-                    
-                    for connection in deduped_result.connections:
-                        # Skip if connection already exists
-                        conn_key = tuple(sorted([connection.event1_id, connection.event2_id]))
-                        if conn_key in existing_keys:
-                            continue
-
-                        # Create new connection
-                        connection_id = await db_instance.create_event_connection(
-                            event1_id=connection.event1_id,
-                            event2_id=connection.event2_id,
-                            connection_type=connection.connection_type,
-                            description=connection.description,
-                            impact=connection.impact,
-                            project_id=self.project_id,
-                            user_id=self.user_id
-                        )
-
-                        saved_connection = EventConnection(
-                            id=connection_id,
-                            **connection.dict()
-                        )
-                        saved_connections.append(saved_connection)
-
-            return saved_connections
-        except ValidationError as e:
-            self.logger.error(f"Error analyzing event connections: {str(e)}")
-            return []
-        except Exception as e:
-            self.logger.error(f"Error analyzing event connections: {str(e)}")
-            raise
-
-    async def analyze_location_connections(self) -> List[LocationConnection]:
-        try:
-            locations = await db_instance.get_locations(self.user_id, self.project_id)
-            existing_connections = await db_instance.get_location_connections(self.project_id, self.user_id)
-
-            # Early return if all possible connections exist
-            if len(existing_connections) >= (len(locations) * (len(locations) - 1)) / 2:
-                self.logger.info("All possible location connections already exist")
-                return existing_connections
-
-            # Convert existing connections to a set of keys for faster lookup
-            existing_keys = {
-                tuple(sorted([conn['location1_id'], conn['location2_id']])) 
-                for conn in existing_connections
-            }
-
-            saved_connections = []
-            batch_size = 10
-
-            for i in range(0, len(locations), batch_size):
-                batch_locations = locations[i:i+batch_size]
-                
-                prompt = ChatPromptTemplate.from_template("""
-                    Analyze ONLY NEW connections between locations that are not in the existing connections list.
-
-                    Locations to Analyze:
-                    {locations}
-
-                    EXISTING Connections (DO NOT recreate these):
-                    {existing_connections}
-
-                    For each NEW connection between locations, provide:
-                    1. The IDs and names of the two connected locations (must not match any existing connection pairs)
-                    2. The type of connection (physical, cultural, historical)
-                    3. A description of how they are connected
-                    4. Any notable travel routes between them
-                    5. Any cultural exchanges or relationships
-
-                    Only return connections that are NOT in the existing connections list.
-                    If all possible connections already exist, return an empty connections list.
-
-                    {format_instructions}
-                """)
-
-                parser = PydanticOutputParser(pydantic_object=LocationConnectionAnalysis)
-                chain = prompt | self.llm | parser
-
-                result = await chain.ainvoke({
-                    "locations": json.dumps(batch_locations, indent=2),
-                    "existing_connections": json.dumps(existing_connections, indent=2),
-                    "format_instructions": parser.get_format_instructions()
-                })
-
-                if result.connections:
-                    # Deduplicate connections
-                    deduped_result = result.deduplicate_connections()
-                    
-                    for connection in deduped_result.connections:
-                        # Skip if connection already exists
-                        conn_key = tuple(sorted([connection.location1_id, connection.location2_id]))
-                        if conn_key in existing_keys:
-                            continue
-
-                        # Create new connection
-                        connection_id = await db_instance.create_location_connection(
-                            location1_id=connection.location1_id,
-                            location2_id=connection.location2_id,
-                            location1_name=connection.location1_name,
-                            location2_name=connection.location2_name,
-                            connection_type=connection.connection_type,
-                            description=connection.description,
-                            travel_route=connection.travel_route,
-                            cultural_exchange=connection.cultural_exchange,
-                            project_id=self.project_id,
-                            user_id=self.user_id
-                        )
-
-                        saved_connection = LocationConnection(
-                            id=connection_id,
-                            **connection.dict()
-                        )
-                        saved_connections.append(saved_connection)
-
-            return saved_connections
-
-        except Exception as e:
-            self.logger.error(f"Error analyzing location connections: {str(e)}")
-            return []
-
-    async def _process_embedding_batch(self):
-        """Process a batch of embeddings and add them to the vector store."""
-        try:
-            if not self._embedding_batch:
-                return
-            
-            self.logger.debug(f"Processing batch of {len(self._embedding_batch)} embeddings")
-            
-            # Extract texts and metadatas for batch processing
-            texts = []
-            metadatas = []
-            
-            for content, metadata in self._embedding_batch:
-                texts.append(content)
-                metadatas.append(metadata)
-            
-            # Use add_texts for batch processing instead of individual calls
-            try:
-                await self.vector_store.add_texts(texts, metadatas)
-            except Exception as batch_error:
-                self.logger.error(f"Batch processing failed: {str(batch_error)}. Falling back to individual processing.")
-                # Fallback to individual processing if batch fails
-                for content, metadata in self._embedding_batch:
-                    try:
-                        await self.vector_store.add_to_knowledge_base(content, metadata=metadata)
-                    except Exception as individual_error:
-                        self.logger.error(f"Failed to add item to vector store: {str(individual_error)}")
-            
-            # Clear the batch after processing
-            self._embedding_batch = []
-            
-        except Exception as e:
-            self.logger.error(f"Error processing embedding batch: {str(e)}")
-            # Clear the batch even if there's an error to prevent getting stuck
-            self._embedding_batch = []
-            raise
-
-    async def generate_with_retrieval(self, query: str, chat_history: List[Dict[str, str]]) -> str:
-        try:
-            qa_llm = await self._get_llm(self.model_settings['knowledgeBaseQueryLLM'])
-            
-            # Create a history-aware retriever function
-            async def retrieve_with_history(query: str) -> List[Document]:
-                # Use the condense question prompt to get the standalone question
-                condense_question_prompt = ChatPromptTemplate.from_messages([
-                    ("human", "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
-                    MessagesPlaceholder(variable_name="chat_history"),
-                    ("human", "{input}"),
-                ])
-                
-                # Prepare chat history - ensure alternating human/ai messages
-                messages = []
-                for i, message in enumerate(chat_history):
-                    if isinstance(message, dict):
-                        if message.get('type') == 'human':
-                            messages.append(HumanMessage(content=message['content']))
-                        elif message.get('type') == 'ai':
-                            # Only add AI message if previous message was human
-                            if messages and isinstance(messages[-1], HumanMessage):
-                                messages.append(AIMessage(content=message['content']))
-                    elif isinstance(message, (HumanMessage, AIMessage)):
-                        if isinstance(message, HumanMessage) or (messages and isinstance(messages[-1], HumanMessage)):
-                            messages.append(message)
-                    
-                # Get the standalone question
-                chain = condense_question_prompt | qa_llm | StrOutputParser()
-                standalone_question = await chain.ainvoke({
-                    "input": query,
-                    "chat_history": messages
-                })
-                
-                # Use similarity search instead of retriever
-                return await self.vector_store.similarity_search(standalone_question, k=5)
-
-            # Create the QA chain with proper message ordering
-            qa_prompt = ChatPromptTemplate.from_messages([
-                ("human", "You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know. Use three sentences maximum and keep the answer concise."),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{input}"),
-                ("human", "Context: {context}"),
-            ])
-            
-            # Get relevant documents using our history-aware retriever
-            documents = await retrieve_with_history(query)
-            
-            # Format documents for the context
-            context = "\n\n".join(doc.page_content for doc in documents)
-            
-            # Prepare chat history for QA
-            messages = []
-            for message in chat_history:
-                if isinstance(message, dict):
-                    if message.get('type') == 'human':
-                        messages.append(HumanMessage(content=message['content']))
-                    elif message.get('type') == 'ai':
-                        messages.append(AIMessage(content=message['content']))
-                elif isinstance(message, (HumanMessage, AIMessage)):
-                    messages.append(message)
-            
-            # Get the answer
-            chain = qa_prompt | qa_llm | StrOutputParser()
-            answer = await chain.ainvoke({
-                "input": query,
-                "chat_history": messages,
-                "context": context
+            chain = prompt | connection_llm | fixing_parser
+            result = await chain.ainvoke({
+                "events_json": events_json,
+                "existing_connections_json": existing_connections_json,
+                "format_instructions": parser.get_format_instructions()
             })
 
-            # Format the response with source information
-            response = f"{answer}\n\nSources:\n"
-            for i, doc in enumerate(documents, 1):
-                source_info = f"Type: {doc.metadata.get('type', 'Unknown')}"
-                if 'name' in doc.metadata:
-                    source_info += f", Name: {doc.metadata['name']}"
-                response += f"{i}. {source_info}\n"
+            saved_connections_output = []
+            if result and hasattr(result, 'connections'):
+                # Deduplicate connections found by the LLM within this run
+                deduped_result = result.deduplicate_connections()
 
-            return response
+                for conn in deduped_result.connections:
+                    # Final check against existing DB keys
+                    if not conn.event1_id or not conn.event2_id: continue # Skip if LLM hallucinated IDs
+                    conn_key = tuple(sorted([conn.event1_id, conn.event2_id]))
+                    if conn_key not in existing_keys:
+                        try:
+                             # Create connection in DB
+                             db_conn_id = await db_instance.create_event_connection(
+                                 event1_id=conn.event1_id,
+                                 event2_id=conn.event2_id,
+                                 connection_type=conn.connection_type,
+                                 description=conn.description,
+                                 impact=conn.impact,
+                                 project_id=self.project_id,
+                                 user_id=self.user_id
+                                 # Add characters_involved, location_relation if saving them
+                             )
+
+                             # Add to KB (optional)
+                             kb_content = f"Connection ({conn.connection_type}) between Event {conn.event1_id} and Event {conn.event2_id}: {conn.description}. Impact: {conn.impact}"
+                             await self.add_to_knowledge_base(
+                                 "event_connection",
+                                 kb_content,
+                                 {
+                                     "id": db_conn_id,
+                                     "type": "event_connection",
+                                     "event1_id": conn.event1_id,
+                                     "event2_id": conn.event2_id,
+                                     "connection_type": conn.connection_type
+                                 }
+                             )
+
+                             # Prepare output model
+                             conn.id = db_conn_id # Add the generated ID
+                             saved_connections_output.append(conn)
+                             existing_keys.add(conn_key) # Add to set for this run
+
+                        except Exception as db_kb_error:
+                             self.logger.error(f"Error saving/adding event connection between {conn.event1_id} and {conn.event2_id}: {db_kb_error}")
+
+            self.logger.info(f"Event connection analysis complete. Found {len(saved_connections_output)} new connections.")
+            return saved_connections_output
 
         except Exception as e:
-            self.logger.error(f"Error in generate_with_retrieval: {str(e)}")
-            return f"An error occurred while processing your query: {str(e)}"
+            self.logger.error(f"Error analyzing event connections: {e}", exc_info=True)
+            raise
+
+
+    async def analyze_location_connections(self) -> List[LocationConnection]:
+        """Analyzes and saves connections between existing locations."""
+        self.logger.info("Analyzing connections between existing locations...")
+        try:
+            locations = await db_instance.get_locations(self.user_id, self.project_id)
+            if len(locations) < 2:
+                self.logger.info("Not enough locations to analyze connections.")
+                return []
+
+            existing_connections_data = await db_instance.get_location_connections(self.project_id, self.user_id)
+            existing_keys = {tuple(sorted([c['location1_id'], c['location2_id']])) for c in existing_connections_data}
+            self.logger.debug(f"Found {len(existing_keys)} existing location connections.")
+
+            max_possible_connections = (len(locations) * (len(locations) - 1)) / 2
+            if len(existing_keys) >= max_possible_connections:
+                 self.logger.info("All possible location connections seem to exist.")
+                 return []
+
+            parser = PydanticOutputParser(pydantic_object=LocationConnectionAnalysis)
+            connection_llm = await self._get_llm(self.model_settings['extractionLLM'])
+            # Note: Using base self.llm here from original code, could switch to extractionLLM
+            fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=connection_llm)
+
+
+            prompt = ChatPromptTemplate.from_template("""
+            Analyze the list of locations below. Identify plausible NEW connections (physical adjacency, cultural links, historical ties, trade routes, travel paths) between pairs of locations that are NOT already listed in 'Existing Connections'.
+
+            Locations:
+            {locations_json}
+
+            Existing Connections (Ignore pairs present here):
+            {existing_connections_json}
+
+            For each NEW connection found between two locations:
+            1. Provide the IDs and Names of both locations (`location1_id`, `location1_name`, `location2_id`, `location2_name`). Ensure this pair is new.
+            2. Determine the connection type (e.g., 'physical', 'cultural', 'historical', 'trade_route', 'travel_path').
+            3. Describe the nature of the connection.
+            4. Mention any notable travel routes, if applicable (`travel_route`).
+            5. Describe any cultural exchanges or relationships, if applicable (`cultural_exchange`).
+
+            Focus on meaningful connections based on potential proximity, shared history, or narrative function implied by their descriptions. Return ONLY new connections.
+
+            Format response as JSON:
+            {format_instructions}
+            """)
+
+            locations_json = json.dumps([{ "id": loc['id'], "name": loc['name'], "desc_snippet": loc['description'][:100]+"..."} for loc in locations], indent=2)
+            existing_connections_json = json.dumps([{"loc1": c['location1_id'], "loc2": c['location2_id'], "type": c['connection_type']} for c in existing_connections_data], indent=2)
+
+            chain = prompt | connection_llm | fixing_parser
+            result = await chain.ainvoke({
+                "locations_json": locations_json,
+                "existing_connections_json": existing_connections_json,
+                "format_instructions": parser.get_format_instructions()
+            })
+
+            saved_connections_output = []
+            if result and hasattr(result, 'connections'):
+                # Deduplicate connections found by the LLM within this run
+                deduped_result = result.deduplicate_connections()
+
+                for conn in deduped_result.connections:
+                    # Final check against existing DB keys
+                    if not conn.location1_id or not conn.location2_id: continue
+                    conn_key = tuple(sorted([conn.location1_id, conn.location2_id]))
+                    if conn_key not in existing_keys:
+                        try:
+                             # Ensure names are present (LLM might forget)
+                             loc1 = next((l for l in locations if l['id'] == conn.location1_id), None)
+                             loc2 = next((l for l in locations if l['id'] == conn.location2_id), None)
+                             if not loc1 or not loc2:
+                                 self.logger.warning(f"Could not find location data for IDs {conn.location1_id} or {conn.location2_id}. Skipping connection.")
+                                 continue
+                             conn.location1_name = loc1['name'] # Ensure correct names
+                             conn.location2_name = loc2['name']
+
+                             # Create connection in DB
+                             db_conn_id = await db_instance.create_location_connection(
+                                 location1_id=conn.location1_id,
+                                 location2_id=conn.location2_id,
+                                 location1_name=conn.location1_name,
+                                 location2_name=conn.location2_name,
+                                 connection_type=conn.connection_type,
+                                 description=conn.description,
+                                 travel_route=conn.travel_route,
+                                 cultural_exchange=conn.cultural_exchange,
+                                 project_id=self.project_id,
+                                 user_id=self.user_id
+                             )
+
+                             # Add to KB (optional)
+                             kb_content = f"Connection ({conn.connection_type}) between {conn.location1_name} and {conn.location2_name}: {conn.description}."
+                             if conn.travel_route: kb_content += f" Travel: {conn.travel_route}."
+                             if conn.cultural_exchange: kb_content += f" Culture: {conn.cultural_exchange}."
+
+                             await self.add_to_knowledge_base(
+                                 "location_connection",
+                                 kb_content,
+                                 {
+                                     "id": db_conn_id,
+                                     "type": "location_connection",
+                                     "location1_id": conn.location1_id,
+                                     "location2_id": conn.location2_id,
+                                     "location1_name": conn.location1_name,
+                                     "location2_name": conn.location2_name,
+                                     "connection_type": conn.connection_type
+                                 }
+                             )
+
+                             # Prepare output model
+                             conn.id = db_conn_id # Add the generated ID
+                             saved_connections_output.append(conn)
+                             existing_keys.add(conn_key)
+
+                        except Exception as db_kb_error:
+                             self.logger.error(f"Error saving/adding location connection between {conn.location1_id} and {conn.location2_id}: {db_kb_error}")
+
+
+            self.logger.info(f"Location connection analysis complete. Found {len(saved_connections_output)} new connections.")
+            return saved_connections_output
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing location connections: {e}", exc_info=True)
+            raise
+
+
+    async def get_chat_history(self) -> List[Dict[str, Any]]:
+        """Retrieves the chat history from the database."""
+        self.logger.debug(f"Retrieving chat history for project {self.project_id}")
+        try:
+            # Directly call the database instance method
+            history = await db_instance.get_chat_history(self.user_id, self.project_id)
+            # Ensure it returns a list (db method should handle None case)
+            return history if isinstance(history, list) else []
+        except Exception as e:
+            self.logger.error(f"Error retrieving chat history: {e}", exc_info=True)
+            # Return empty list on error to avoid breaking chat interfaces
+            return []
+
+
+    async def reset_memory(self):
+         # This only affects the RunnableWithMessageHistory if used.
+         # For the graph, state is passed explicitly.
+         # If DB stores history, delete it there.
+        await db_instance.delete_chat_history(self.user_id, self.project_id)
+        self.logger.info(f"Chat history deleted for project {self.project_id}")
+
+
+    async def get_knowledge_base_content(self):
+        """Gets all content from the vector store for this project."""
+        if not self.vector_store: raise RuntimeError("Vector store not initialized.")
+        return await self.vector_store.get_knowledge_base_content()
 
     async def reset_knowledge_base(self):
-        """Delete and recreate the collection."""
+        """Resets the vector store collection for the project."""
+        if not self.vector_store: raise RuntimeError("Vector store not initialized.")
+        self.logger.info(f"Resetting knowledge base for project {self.project_id}")
+        restored_items = await self.vector_store.reset_knowledge_base()
+        self.logger.info(f"Knowledge base reset complete. Restored {len(restored_items)} items from backup.")
+        return restored_items
+
+    # --- Utility Methods ---
+    def chunk_content(self, content: str, max_chunk_size: int) -> List[str]:
+        """Splits text into chunks based on estimated token count (simple version)."""
+        if not content: return []
+        # This is complex to do accurately without the tokenizer.
+        # Simple splitting by paragraphs or sentences is often sufficient.
+        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+        chunks = []
+        current_chunk = ""
+        for p in paragraphs:
+            if not current_chunk:
+                current_chunk = p
+            elif self.estimate_token_count(current_chunk + "\n\n" + p) <= max_chunk_size:
+                current_chunk += "\n\n" + p
+            else:
+                chunks.append(current_chunk)
+                current_chunk = p
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+
+# --- Global Cleanup ---
+async def close_all_agent_managers():
+    """Closes all active AgentManager instances."""
+    managers_to_close = list(agent_managers.values())
+    for manager in managers_to_close:
         try:
-            # Process any pending batched items first
-            if hasattr(self, '_embedding_batch') and self._embedding_batch:
-                self.logger.info(f"Processing {len(self._embedding_batch)} pending batched items before reset")
-                await self._process_embedding_batch()
-            
-            self.logger.info("Starting knowledge base reset...")
-            restored_items = await self.vector_store.reset_knowledge_base()
-            count = len(restored_items) if isinstance(restored_items, (list, set)) else 0
-            self.logger.info(f"Knowledge base reset complete. Restored {count} items from backup.")
-            return restored_items
+            await manager.close()
         except Exception as e:
-            self.logger.error(f"Error resetting knowledge base: {str(e)}")
-            raise
+            logging.getLogger(__name__).error(f"Error closing manager for user {manager.user_id}: {e}")

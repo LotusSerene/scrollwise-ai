@@ -27,4 +27,5 @@ prometheus-client==0.21.1
 supabase==2.10.0
 email-validator==2.2.0
 psutil==6.1.0
+langgraph
 
