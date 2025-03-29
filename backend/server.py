@@ -133,118 +133,7 @@ logger = logging.getLogger(__name__)  # Use standard logger setup from previous 
 # --- Global Variables ---
 shutdown_event = asyncio.Event()
 
-
-async def cleanup_sessions():
-    while True:
-        current_time = datetime.now(timezone.utc)
-        expired_sessions = [
-            sid
-            for sid, session in session_manager.sessions.items()
-            if (current_time - session["last_activity"]).total_seconds()
-            > MAX_INACTIVITY
-        ]
-        for sid in expired_sessions:
-            await session_manager.remove_session(sid)
-        await asyncio.sleep(300)  # Check every 5 minutes
-
-
-# Pydantic models
-
-
-class SessionManager:
-    def __init__(self):
-        self.sessions = {}
-        self.sessions_file = "sessions.json"  # Add this line to define the file path
-        self._load_sessions()
-
-    def _load_sessions(self):
-        try:
-            if (
-                os.path.exists(self.sessions_file)
-                and os.path.getsize(self.sessions_file) > 0
-            ):
-                with open(self.sessions_file, "r") as f:
-                    loaded_sessions = json.load(f)
-                    # Convert ISO format strings back to datetime objects
-                    self.sessions = {
-                        sid: {
-                            "user_id": session["user_id"],
-                            "created_at": datetime.fromisoformat(session["created_at"]),
-                            "last_activity": datetime.fromisoformat(
-                                session["last_activity"]
-                            ),
-                        }
-                        for sid, session in loaded_sessions.items()
-                    }
-            else:
-                self.sessions = {}
-        except Exception as e:
-            logger.error(f"Error loading sessions: {str(e)}")
-            self.sessions = {}
-
-    def _save_sessions(self):
-        try:
-            # Convert datetime objects to ISO format strings for JSON serialization
-            sessions_to_save = {
-                sid: {
-                    "user_id": session["user_id"],
-                    "created_at": session["created_at"].isoformat(),
-                    "last_activity": session["last_activity"].isoformat(),
-                }
-                for sid, session in self.sessions.items()
-            }
-            with open(self.sessions_file, "w") as f:
-                json.dump(sessions_to_save, f)
-        except Exception as e:
-            logger.error(f"Error saving sessions: {str(e)}")
-
-    async def create_session(self, user_id: str) -> str:
-        session_id = str(uuid.uuid4())
-        current_time = datetime.now(timezone.utc)  # Ensure UTC timezone
-        self.sessions[session_id] = {
-            "user_id": user_id,
-            "created_at": current_time,  # Store as datetime object
-            "last_activity": current_time,  # Store as datetime object
-        }
-        self._save_sessions()
-        return session_id
-
-    async def validate_session(self, session_id: str) -> Optional[str]:
-        session = self.sessions.get(session_id)
-        if session:
-            # Convert stored datetime to UTC if not already
-            last_activity = session["last_activity"]
-            if not last_activity.tzinfo:
-                last_activity = last_activity.replace(tzinfo=timezone.utc)
-
-            if (
-                datetime.now(timezone.utc) - last_activity
-            ).total_seconds() > MAX_INACTIVITY:
-                await self.remove_session(session_id)
-                return None
-
-            # Update last activity with timezone-aware datetime
-            session["last_activity"] = datetime.now(timezone.utc)
-            self._save_sessions()
-            return session["user_id"]
-        return None
-
-    async def remove_session(self, session_id: str):
-        self.sessions.pop(session_id, None)
-        self._save_sessions()
-
-    async def extend_session(self, session_id: str) -> bool:
-        session = self.sessions.get(session_id)
-        if session:
-            session["last_activity"] = datetime.now(timezone.utc)
-            self._save_sessions()
-            return True
-        return False
-
-
-# Initialize session manager
-session_manager = SessionManager()
-
+# --- Removed SessionManager and related cleanup task ---
 
 # AgentManagerStore
 
@@ -272,6 +161,11 @@ class AgentManagerStore:
                     self._managers[key] = manager
             yield manager
         finally:
+            # Note: Closing the manager immediately after use might be inefficient
+            # if the same user/project makes multiple requests quickly.
+            # Consider a different strategy like timed cleanup or reference counting
+            # if performance becomes an issue.
+            # For now, keeping the original logic:
             if manager:
                 await manager.close()
                 async with self._lock:
@@ -286,7 +180,6 @@ logger = setup_logging()  # Initialize logger
 async def lifespan(app: FastAPI):
     # Setup
     logger.info("Starting up server...")
-    cleanup_task = None
 
     try:
         # Initialize database
@@ -298,26 +191,7 @@ async def lifespan(app: FastAPI):
         qdrant_path.mkdir(exist_ok=True)
         logger.info(f"Qdrant data directory: {qdrant_path.absolute()}")
 
-        # Start session cleanup task
-        async def cleanup_sessions():
-            try:
-                while getattr(app.state, "keep_alive", True):
-                    current_time = datetime.now(timezone.utc)
-                    expired_sessions = [
-                        sid
-                        for sid, session in session_manager.sessions.items()
-                        if (current_time - session["last_activity"]).total_seconds()
-                        > MAX_INACTIVITY
-                    ]
-                    for sid in expired_sessions:
-                        await session_manager.remove_session(sid)
-                    await asyncio.sleep(300)  # Run every 5 minutes
-            except asyncio.CancelledError:
-                logger.info("Session cleanup task cancelled")
-            except Exception as e:
-                logger.error(f"Error in cleanup task: {str(e)}")
-
-        cleanup_task = asyncio.create_task(cleanup_sessions())
+        # --- Removed session cleanup task ---
 
         yield
 
@@ -328,23 +202,23 @@ async def lifespan(app: FastAPI):
         # Cleanup
         logger.info("Shutting down server...")
 
-        # Cancel cleanup task
-        if cleanup_task:
-            cleanup_task.cancel()
-            try:
-                await cleanup_task
-            except asyncio.CancelledError:
-                pass
+        # --- Removed session cleanup task cancellation ---
 
         # Close all agent managers to properly close vector stores
-        for key, manager in list(agent_manager_store._managers.items()):
-            try:
-                await manager.close()
-                logger.info(
-                    f"Closed agent manager for user {key[0][:8]}, project {key[1][:8]}"
-                )
-            except Exception as e:
-                logger.error(f"Error closing agent manager: {str(e)}")
+        logger.info("Closing active agent managers...")
+        # Create a copy of keys to avoid modification during iteration issues
+        manager_keys = list(agent_manager_store._managers.keys())
+        for key in manager_keys:
+            manager = agent_manager_store._managers.pop(key, None)
+            if manager:
+                try:
+                    await manager.close()
+                    user_id_part, project_id_part = key.split("_", 1)
+                    logger.info(
+                        f"Closed agent manager for user {user_id_part[:8]}, project {project_id_part[:8]}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error closing agent manager for key {key}: {str(e)}")
 
         # Close database connection
         try:
@@ -374,12 +248,10 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type"], # Ensure Authorization is allowed
 )
 
-MAX_INACTIVITY = 7 * 24 * 3600  # 1 week in seconds
-ACTIVE_SESSION_EXTEND = 3600  # 1 hour extension when active
-
+# --- Removed MAX_INACTIVITY and ACTIVE_SESSION_EXTEND ---
 
 security_manager = SecurityManager()
 api_key_manager = ApiKeyManager(security_manager)
@@ -387,31 +259,31 @@ agent_manager_store = AgentManagerStore(api_key_manager)
 
 
 async def get_current_user(
-    session_id: str = Header(None, alias="X-Session-ID"),
-    authorization: str = Header(None),
+    authorization: str = Header(None), # Only depend on Authorization header
 ):
     try:
-        if not authorization or not session_id:
+        if not authorization:
             raise HTTPException(
-                status_code=401, detail="Missing authentication credentials"
+                status_code=401, detail="Missing authentication credentials (Authorization header)"
             )
 
         # Extract token from Authorization header
+        if not authorization.startswith("Bearer "):
+             raise HTTPException(
+                status_code=401, detail="Invalid Authorization header format. Expected 'Bearer <token>'."
+            )
         token = authorization.replace("Bearer ", "")
 
         # Get user from Supabase token
         try:
+            # Use the provided token to get the user
             user_response = db_instance.supabase.auth.get_user(token)
         except Exception as e:
-            # Try to refresh the token if possible
-            try:
-                refresh_response = await db_instance.supabase.auth.refresh_session()
-                if refresh_response and refresh_response.user:
-                    return refresh_response.user
-            except:
-                pass
+            # Log the specific Supabase error if possible
+            logger.warning(f"Supabase auth.get_user failed: {e}")
+            # Don't attempt refresh here, let the client handle token expiry/refresh
             raise HTTPException(
-                status_code=401, detail="Session expired. Please login again."
+                status_code=401, detail="Invalid or expired token. Please login again."
             )
 
         if not user_response or not user_response.user:
@@ -419,55 +291,67 @@ async def get_current_user(
                 status_code=401, detail="Invalid authentication credentials"
             )
 
-        # Check if user exists in local database
+        # Check if user exists in local database (optional, but good for consistency)
+        # This ensures that a user authenticated via Supabase also has a record
+        # in our local DB for storing app-specific data like API keys, settings etc.
         local_user = await db_instance.get_user_by_email(user_response.user.email)
         if not local_user:
-            # Only create new user if they don't exist
+            # If user is authenticated via Supabase but not in local DB, create them.
+            # This handles cases where a user might have been deleted locally but still has a valid Supabase session,
+            # or initial signup race conditions.
             try:
+                logger.info(f"User {user_response.user.email} authenticated via Supabase but not found locally. Creating local record.")
                 local_user = await db_instance.sign_up(
                     email=user_response.user.email,
                     supabase_id=user_response.user.id,
-                    password=None,  # We don't need password here as user is already authenticated
+                    password=None, # No password needed, already authenticated
                 )
                 if not local_user:
-                    raise Exception("Failed to create local user")
+                    # This case should ideally not happen if sign_up works correctly
+                    raise Exception("Failed to create local user record after Supabase authentication.")
             except Exception as e:
-                # If creation fails (e.g. due to race condition), try getting the user again
-                local_user = await db_instance.get_user_by_email(
-                    user_response.user.email
-                )
-                if not local_user:
-                    raise e
+                logger.error(f"Failed to create local user record for {user_response.user.email}: {e}", exc_info=True)
+                # If creation fails, we might still proceed if local user data isn't strictly required for the endpoint,
+                # but it's safer to deny access as the system state is inconsistent.
+                raise HTTPException(status_code=500, detail="Failed to synchronize user data. Please try again later.")
 
-        # Validate session
-        session_user_id = await session_manager.validate_session(session_id)
-        if not session_user_id or session_user_id != user_response.user.id:
-            raise HTTPException(status_code=401, detail="Invalid session")
 
+        # --- Removed custom session validation ---
+
+        # Return the Supabase user object
         return user_response.user
 
+    except HTTPException as he:
+        # Re-raise HTTPExceptions directly
+        raise he
     except Exception as e:
-        logger.error(f"Error validating token: {str(e)}")
+        logger.error(f"Error validating token in get_current_user: {str(e)}", exc_info=True)
         raise HTTPException(status_code=401, detail="Authentication failed")
 
 
-async def get_current_active_user(current_user=Depends(get_current_user)):
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
+    # This function remains largely the same, ensuring the user fetched by get_current_user is valid and active.
     try:
-        # Check if user exists
         if not current_user:
+            # This case should technically be caught by get_current_user raising an exception,
+            # but kept for robustness.
             raise HTTPException(
                 status_code=401, detail="Could not validate credentials"
             )
 
-        # Check if user is active
+        # Check if user is active (e.g., email confirmed in Supabase)
+        # Adjust this check based on your definition of "active"
         if not current_user.email_confirmed_at:
             raise HTTPException(status_code=403, detail="Email not verified")
 
         return current_user
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Error validating active user: {str(e)}")
-        raise HTTPException(status_code=401, detail="Authentication failed")
+        # Ensure we return a 401 or appropriate error if activation check fails
+        raise HTTPException(status_code=401, detail="User validation failed")
 
 
 async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
@@ -862,44 +746,31 @@ async def register(user: UserCreate):
             logger.warning(f"Email already registered: {user.email}")
             raise HTTPException(status_code=400, detail="Email already registered")
 
-        # Register using database method
+        # Register using database method (which now handles Supabase interaction implicitly or explicitly)
+        # Ensure db_instance.sign_up creates both Supabase user and local user record
         user_response = await db_instance.sign_up(
-            email=user.email, password=user.password, supabase_id=user.supabase_id
+            email=user.email, password=user.password, supabase_id=user.supabase_id # Pass supabase_id if available from client
         )
 
-        if not user_response:
-            logger.error("Registration failed: No user response")
+        if not user_response or not user_response.get('id'):
+            logger.error("Registration failed: No user response or ID")
             raise HTTPException(status_code=400, detail="Registration failed")
 
         logger.info(f"Registration successful for user ID: {user_response['id']}")
+        # Return only success message, no tokens or session IDs here. Client should sign in separately.
         return {
-            "message": "User registered successfully",
+            "message": "User registered successfully. Please sign in.",
             "user_id": user_response["id"],
         }
+    except HTTPException as he:
+        raise he # Re-raise specific HTTP exceptions (like 400 for existing user)
     except Exception as e:
         logger.error(f"Registration error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        # Provide a more generic error message to the client
+        raise HTTPException(status_code=500, detail="Registration failed due to an internal error.")
 
 
-@app.post("/auth/extend-session")
-async def extend_session(
-    current_user: User = Depends(get_current_user),
-    session_id: str = Header(None, alias="X-Session-ID"),
-):
-    try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="No session ID provided")
-
-        # Extend the session
-        success = await session_manager.extend_session(session_id)
-        if not success:
-            raise HTTPException(status_code=401, detail="Invalid session")
-
-        return {"message": "Session extended", "session_id": session_id}
-
-    except Exception as e:
-        logger.error(f"Error extending session: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error extending session")
+# --- Removed /auth/extend-session endpoint ---
 
 
 @auth_router.post("/signin")
@@ -909,67 +780,89 @@ async def sign_in(
     )
 ):
     try:
-        if not credentials.get("email") or not credentials.get("password"):
+        email = credentials.get("email")
+        password = credentials.get("password")
+        if not email or not password:
             raise HTTPException(
                 status_code=400, detail="Email and password are required"
             )
 
         try:
+            # db_instance.sign_in should interact with Supabase
             auth_result = await db_instance.sign_in(
-                email=credentials["email"], password=credentials["password"]
+                email=email, password=password
             )
 
-            if not auth_result or not auth_result.get("user"):
+            if not auth_result or not auth_result.get("user") or not auth_result.get("session"):
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
-            # Remove approval check - all users can sign in
-            session_id = await session_manager.create_session(auth_result["user"].id)
+            # --- Removed custom session creation ---
 
+            # Return Supabase access token and user info
             return {
                 "access_token": auth_result["session"].access_token,
-                "session_id": session_id,
+                # Optionally return refresh token if client needs to handle refresh:
+                # "refresh_token": auth_result["session"].refresh_token,
                 "user": {
                     "id": auth_result["user"].id,
                     "email": auth_result["user"].email,
+                    # Add any other relevant user details needed by the client
                 },
             }
 
         except HTTPException:
+            # Re-raise 401 if db_instance.sign_in raises it
             raise
         except Exception as e:
-            logger.error(f"Authentication error: {str(e)}")
-            raise HTTPException(status_code=401, detail="Authentication failed")
+            # Catch potential errors from Supabase client interaction
+            logger.error(f"Supabase sign-in error: {str(e)}", exc_info=True)
+            # Map common Supabase errors to HTTP 401
+            if "Invalid login credentials" in str(e):
+                 raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise HTTPException(status_code=500, detail="Authentication failed due to an internal error.")
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Sign in error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Sign in endpoint error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during sign in.")
 
 
 @auth_router.post("/signout")
 async def sign_out(
-    current_user: User = Depends(get_current_active_user),
-    session_id: str = Header(None, alias="X-Session-ID"),
+    # Depends on get_current_user to ensure a valid token is provided for sign-out
+    current_user: User = Depends(get_current_user),
+    authorization: str = Header(None), # Need the token to sign out from Supabase
 ):
     try:
-        if not session_id:
-            raise HTTPException(status_code=400, detail="No session ID provided")
+        if not authorization or not authorization.startswith("Bearer "):
+             raise HTTPException(
+                status_code=401, detail="Valid Authorization header required for sign out."
+            )
+        token = authorization.replace("Bearer ", "")
 
-        # First remove the session
-        await session_manager.remove_session(session_id)
+        # --- Removed custom session removal ---
 
-        # Then sign out from Supabase
-        success = await db_instance.sign_out(session_id)
+        # Sign out from Supabase using the provided token
+        # Note: Supabase sign_out might be synchronous depending on the library version
+        try:
+            # Pass the JWT to sign out the specific session
+            await db_instance.supabase.auth.sign_out(token)
+            logger.info(f"User {current_user.email} signed out from Supabase.")
+        except Exception as e:
+            logger.error(f"Supabase sign out error: {str(e)}", exc_info=True)
+            # Even if Supabase signout fails, proceed, but log the error.
+            # Client should still discard the token.
+            # Consider if a 500 error is appropriate here. Maybe just log and return success.
+            # For now, let's return success but log the error.
 
-        if not success:
-            raise HTTPException(status_code=500, detail="Sign out failed")
+        # No custom session to remove
 
         return {"message": "Successfully signed out"}
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Sign out error: {str(e)}")
+        logger.error(f"Sign out endpoint error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred during sign out")
 
 
@@ -2673,6 +2566,10 @@ async def health_check():
                 content={"status": "error", "message": "Database not initialized"},
             )
 
+        # Add a simple check to Supabase connection if possible (e.g., get service status)
+        # For now, just check local DB init status
+        # await db_instance.supabase.rpc('health_check', {}).execute() # Example if Supabase had such a function
+
         return JSONResponse(
             status_code=200,
             content={"status": "healthy", "message": "Server is running"},
@@ -2700,12 +2597,10 @@ async def graceful_shutdown():
     try:
         logger.info("Starting graceful shutdown...")
 
-        # Close all active sessions
-        for session_id in list(session_manager.sessions.keys()):
-            await session_manager.remove_session(session_id)
+        # --- Removed session cleanup ---
 
         # Close all agent managers
-        await close_all_agent_managers()
+        await close_all_agent_managers() # Assuming this function exists and works with the store
 
         # Close database connections
         await db_instance.dispose()
@@ -2718,14 +2613,17 @@ async def graceful_shutdown():
     except Exception as e:
         logger.error(f"Error during graceful shutdown: {str(e)}")
     finally:
-        # Stop the server
+        # Stop the server process
+        # Use a more graceful exit if possible, but os._exit ensures termination
+        logger.info("Exiting server process.")
         os._exit(0)
 
 
 # Signal handlers
 def handle_sigterm(signum, frame):
-    logger.info("SIGTERM received")
-    asyncio.create_task(graceful_shutdown())
+    logger.info(f"Received signal {signum}, initiating graceful shutdown.")
+    # Ensure shutdown runs in the event loop
+    asyncio.ensure_future(graceful_shutdown())
 
 
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -3659,19 +3557,19 @@ async def delete_validity_check(
 app.include_router(auth_router)
 app.include_router(
     chapter_router, prefix="/projects/{project_id}"
-)  # Add project_id prefix if needed
+)
 app.include_router(codex_item_router, prefix="/projects/{project_id}")
 app.include_router(event_router, prefix="/projects/{project_id}")
 app.include_router(location_router, prefix="/projects/{project_id}")
 app.include_router(knowledge_base_router, prefix="/projects/{project_id}")
-app.include_router(settings_router)  # Settings usually user-global
+app.include_router(settings_router)
 app.include_router(
     preset_router, prefix="/projects/{project_id}"
-)  # Presets per project? Check logic
+)
 app.include_router(universe_router)
 app.include_router(codex_router, prefix="/projects/{project_id}")
 app.include_router(relationship_router, prefix="/projects/{project_id}")
-app.include_router(project_router)  # No prefix for /projects/ endpoint itself
+app.include_router(project_router)
 app.include_router(validity_router, prefix="/projects/{project_id}")
 
 
@@ -3683,26 +3581,22 @@ if __name__ == "__main__":
         app_instance = app
 
         config = uvicorn.Config(
-            app_instance,  # <--- CORRECTED: Pass the actual app object
+            app_instance,
             host="localhost",
             port=8080,
-            log_level="info",  # Keep info or change to debug if needed
-            reload=False,
-            workers=1,
-            # access_log=True, # Consider enabling if needed
+            log_level="info",
+            reload=False, # Disable reload for production/stable runs
+            workers=1, # Adjust workers based on CPU cores if needed, but start with 1
         )
         server = uvicorn.Server(config)
 
-        signal.signal(
-            signal.SIGTERM,
-            lambda signum, frame: asyncio.create_task(graceful_shutdown()),
-        )
-        signal.signal(
-            signal.SIGINT,
-            lambda signum, frame: asyncio.create_task(graceful_shutdown()),
-        )
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGTERM, handle_sigterm)
+        signal.signal(signal.SIGINT, handle_sigterm)
 
+        logger.info("Starting Uvicorn server...")
         server.run()
+
     except Exception as e:
         # Use logger if setup succeeded, otherwise print
         try:
@@ -3710,3 +3604,4 @@ if __name__ == "__main__":
         except NameError:  # If logger setup failed very early
             print(f"CRITICAL: Server failed to start: {str(e)}", file=sys.stderr)
         sys.exit(1)
+
