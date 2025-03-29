@@ -20,3 +20,4 @@ uvicorn
 langchain-qdrant
 psutil
 qdrant-client
+python-multipart
