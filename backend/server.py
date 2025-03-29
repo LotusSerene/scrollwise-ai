@@ -2272,8 +2272,8 @@ async def query_knowledge_base(
         async with agent_manager_store.get_or_create_manager(
             current_user.id, project_id
         ) as agent_manager:
-            # Ensure chat history items are dicts if needed by agent method
-            chat_history_dicts = [item.model_dump() for item in query_data.chatHistory]
+            # chatHistory items are already dicts from the Pydantic model parsing
+            chat_history_dicts = query_data.chatHistory
             result = await agent_manager.query_knowledge_base(
                 query_data.query, chat_history_dicts
             )
