@@ -1003,7 +1003,7 @@ async def generate_chapters(
                 result = await agent_manager.generate_chapter(
                     chapter_number=chapter_number,
                     plot=gen_request.plot,
-                    writing_style=gen_request.writing_style,
+                    writing_style=gen_request.writingStyle, # Use camelCase
                     instructions=gen_request.instructions,
                 )
 

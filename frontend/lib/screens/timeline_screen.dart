@@ -381,11 +381,26 @@ class _TimelineScreenState extends State<TimelineScreen>
         headers: headers,
       );
       if (response.statusCode == 200) {
-        final List<dynamic> data =
-            json.decode(response.body)['location_connections'];
+        final decodedBody = json.decode(response.body);
+        // Check if the body is a map and contains the key before accessing
+        if (decodedBody is Map<String, dynamic> && decodedBody.containsKey('location_connections')) {
+          final List<dynamic> data = decodedBody['location_connections'];
+          setState(() {
+            locationConnections =
+                data.map((json) => LocationConnection.fromJson(json)).toList();
+          });
+        } else {
+          // Handle cases where the key is missing or body is not a map
+          _showError('Invalid response format for location connections.');
+          setState(() {
+            locationConnections = []; // Clear existing connections on error
+          });
+        }
+      } else {
+        // Handle non-200 status codes
+        _showError('Failed to load location connections: Status code ${response.statusCode}');
         setState(() {
-          locationConnections =
-              data.map((json) => LocationConnection.fromJson(json)).toList();
+          locationConnections = []; // Clear existing connections on error
         });
       }
     } catch (e) {
