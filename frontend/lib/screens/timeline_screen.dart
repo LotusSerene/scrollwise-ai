@@ -389,11 +389,16 @@ class _TimelineScreenState extends State<TimelineScreen>
             locationConnections =
                 data.map((json) => LocationConnection.fromJson(json)).toList();
           });
-        } else {
-          // Handle cases where the key is missing or body is not a map
-          _showError('Invalid response format for location connections.');
+        } else if (decodedBody is! Map<String, dynamic>) {
+          _showError('Error loading location connections: Response body is not a Map.');
           setState(() {
-            locationConnections = []; // Clear existing connections on error
+            locationConnections = [];
+          });
+        } else {
+          // Handle cases where the key is missing (since it passed the Map check but failed the containsKey check)
+          _showError('Error loading location connections: "location_connections" key missing in response.');
+          setState(() {
+            locationConnections = [];
           });
         }
       } else {
