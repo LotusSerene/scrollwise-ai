@@ -90,8 +90,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
     try {
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/'),
         headers: await getAuthHeaders(),
       );
 
@@ -214,8 +213,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           } else {
             final request = http.MultipartRequest(
               'POST',
-              Uri.parse(
-                  '$apiUrl/documents/extract?project_id=${widget.projectId}'),
+              Uri.parse('$apiUrl/documents/extract'),
             );
 
             request.headers.addAll(await getAuthHeaders());
@@ -339,8 +337,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   Future<void> _handleDelete(String embeddingId) async {
     try {
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/$embeddingId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/$embeddingId'),
         headers: await getAuthHeaders(),
       );
       final jsonResponse = json.decode(response.body);

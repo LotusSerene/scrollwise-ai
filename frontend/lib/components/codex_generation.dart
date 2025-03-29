@@ -71,7 +71,7 @@ class _CodexGenerationState extends State<CodexGeneration> {
         };
 
         final response = await http.post(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/codex/generate?project_id=${widget.projectId}'),
+          Uri.parse('$apiUrl/projects/${widget.projectId}/codex/generate'),
           headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );

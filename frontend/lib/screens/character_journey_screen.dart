@@ -47,7 +47,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -82,8 +82,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
       for (var character in characters) {
         if (!ignoredCharacters.contains(character.id)) {
           final response = await http.post(
-            Uri.parse(
-                '$apiUrl/projects/${widget.projectId}/codex/characters/${character.id}/extract-backstory?project_id=${widget.projectId}'),
+            Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters/${character.id}/extract-backstory'),
             headers: headers,
             body: json.encode({
               'character_id': character.id,
@@ -144,8 +143,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/codex-items/characters/$characterId/backstory?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/characters/$characterId/backstory'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -210,8 +208,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
         final headers = await getAuthHeaders();
         headers['Content-Type'] = 'application/json';
         final response = await http.put(
-          Uri.parse(
-              '$apiUrl/projects/${widget.projectId}/codex-items/characters/${character.id}/backstory?project_id=${widget.projectId}'),
+          Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/characters/${character.id}/backstory'),
           headers: headers,
           body: json.encode(result), // Change this line
         );

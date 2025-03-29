@@ -33,7 +33,7 @@ class PresetProvider with ChangeNotifier {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$_currentProjectId/presets?project_id=$_currentProjectId'),
+        Uri.parse('$apiUrl/projects/$_currentProjectId/presets'),
         headers: await getAuthHeaders(),
       );
 
@@ -64,8 +64,7 @@ class PresetProvider with ChangeNotifier {
     }
     try {
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}?project_id=$_currentProjectId'),
+        Uri.parse('$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
         headers: await getAuthHeaders(),
       );
 
@@ -91,7 +90,7 @@ class PresetProvider with ChangeNotifier {
       }
 
       final response = await http.post(
-        Uri.parse('$apiUrl/projects/$_currentProjectId/presets?project_id=$_currentProjectId'),
+        Uri.parse('$apiUrl/projects/$_currentProjectId/presets'),
         headers: {
           ...await getAuthHeaders(),
           'Content-Type': 'application/json',
@@ -122,8 +121,7 @@ class PresetProvider with ChangeNotifier {
       }
 
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}?project_id=$_currentProjectId'),
+        Uri.parse('$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
         headers: await getAuthHeaders(),
       );
 

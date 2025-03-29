@@ -85,7 +85,7 @@ class _ValidityState extends State<Validity> {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/validity-checks/?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/validity-checks/'),
         headers: await getAuthHeaders(),
       );
 
@@ -124,8 +124,7 @@ class _ValidityState extends State<Validity> {
   Future<void> _handleDeleteCheck(String checkId) async {
     try {
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/validity-checks/$checkId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/validity-checks/$checkId'),
         headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {

@@ -148,8 +148,7 @@ class _EditorState extends State<Editor> {
       try {
         final headers = await getAuthHeaders();
         final response = await http.get(
-          Uri.parse(
-              '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
+          Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
           headers: headers,
         );
         if (response.statusCode == 200) {
@@ -181,8 +180,7 @@ class _EditorState extends State<Editor> {
       if (!mounted) return;
 
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
         headers: headers,
       );
 
@@ -230,8 +228,7 @@ class _EditorState extends State<Editor> {
       if (!mounted) return;
 
       final response = await http.delete(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
         headers: headers,
       );
 
@@ -288,10 +285,8 @@ class _EditorState extends State<Editor> {
 
       // Create the initial request
       var uri = _selectedChapter != null
-          ? Uri.parse(
-              '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}')
-          : Uri.parse(
-              '$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
+          ? Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId')
+          : Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/');
 
       var request =
           http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
@@ -431,8 +426,7 @@ class _EditorState extends State<Editor> {
             } else {
               final request = http.MultipartRequest(
                 'POST',
-                Uri.parse(
-                    '$apiUrl/documents/extract?project_id=${widget.projectId}'),
+                Uri.parse('$apiUrl/documents/extract'),
               );
 
               request.headers.addAll(await getAuthHeaders());
@@ -507,8 +501,7 @@ class _EditorState extends State<Editor> {
   Future<void> _createChapterFromContent(String title, String content) async {
     final client = http.Client();
     try {
-      var uri = Uri.parse(
-          '$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
+      var uri = Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/');
       var request = http.Request('POST', uri);
       request.headers.addAll(await getAuthHeaders());
       request.body = json.encode({
@@ -981,8 +974,7 @@ class _EditorState extends State<Editor> {
         try {
           // Fetch full chapter content if needed
           final response = await http.get(
-            Uri.parse(
-                '$apiUrl/chapters/${chapter['id']}?project_id=${widget.projectId}'),
+            Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
             headers: headers,
           );
 

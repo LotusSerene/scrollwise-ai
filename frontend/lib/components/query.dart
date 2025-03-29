@@ -41,8 +41,7 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -61,9 +60,9 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
+      // Use the non-prefixed route as defined in server.py
       await http.post(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/chat-history'),
         headers: headers,
         body: utf8.encode(json.encode({
           'chatHistory': appState.queryState['chatHistory'],
@@ -93,8 +92,7 @@ class _QueryState extends State<Query> {
       final headers = await getAuthHeaders();
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/query?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/query'),
         headers: headers,
         body: utf8.encode(json.encode({
           'query': _queryController.text,
@@ -151,8 +149,7 @@ class _QueryState extends State<Query> {
     try {
       final headers = await getAuthHeaders();
       await http.post(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history'),
         headers: headers,
       );
       appState.updateQueryProgress(

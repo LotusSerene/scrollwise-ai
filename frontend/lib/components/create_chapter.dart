@@ -191,8 +191,7 @@ class _CreateChapterState extends State<CreateChapter> {
         };
 
         final response = await http.post(
-          Uri.parse(
-              '$apiUrl/projects/${widget.projectId}/chapters/generate?project_id=${widget.projectId}'),
+          Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/generate'),
           headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );
@@ -246,8 +245,7 @@ class _CreateChapterState extends State<CreateChapter> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse(
-            '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
         headers: headers,
       );
 

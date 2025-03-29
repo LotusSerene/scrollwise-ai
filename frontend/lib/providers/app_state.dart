@@ -198,7 +198,7 @@ class AppState extends ChangeNotifier {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/chapters?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/chapters/'),
         headers: headers,
       );
 
@@ -223,7 +223,7 @@ class AppState extends ChangeNotifier {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/codex-items?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/codex-items/'),
         headers: headers,
       );
 
@@ -247,7 +247,7 @@ class AppState extends ChangeNotifier {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/validity-checks?project_id=$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId/validity-checks/'),
         headers: headers,
       );
 
