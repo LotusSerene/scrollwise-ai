@@ -56,6 +56,24 @@ class _QueryState extends State<Query> {
     }
   }
 
+  Future<void> _saveChatHistory() async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+      await http.post(
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history?project_id=${widget.projectId}'),
+        headers: headers,
+        body: utf8.encode(json.encode({
+          'chatHistory': appState.queryState['chatHistory'],
+        })),
+      );
+    } catch (error) {
+      // Handle error
+    }
+  }
+
   Future<void> _submitQuery() async {
     if (_queryController.text.isEmpty) return;
 
@@ -127,14 +145,14 @@ class _QueryState extends State<Query> {
     }
   }
 
-
   Future<void> _resetChatHistory() async {
     final appState = Provider.of<AppState>(context, listen: false);
 
     try {
       final headers = await getAuthHeaders();
       await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history?project_id=${widget.projectId}'),
         headers: headers,
       );
       appState.updateQueryProgress(

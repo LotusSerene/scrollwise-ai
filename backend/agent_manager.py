@@ -28,7 +28,7 @@ from database import db_instance
 from vector_store import VectorStore
 from models import (
     ChapterValidation, CodexItem, WorldbuildingSubtype, CodexItemType, CodexExtractionTypes,
-    GeneratedCodexItem, CharacterBackstoryExtraction, RelationshipAnalysis, EventDescription,
+    CodexItem, CharacterBackstoryExtraction, RelationshipAnalysis, EventDescription,
     RelationshipAnalysisList, EventAnalysis, LocationConnection, LocationConnectionAnalysis,
     LocationAnalysis, LocationAnalysisList, EventConnection, EventConnectionAnalysis
 )
@@ -1223,7 +1223,7 @@ class AgentManager:
         # This can remain a separate utility, doesn't need full graph
         self.logger.debug(f"Generating codex item: Type={codex_type}, Subtype={subtype}")
         try:
-            parser = PydanticOutputParser(pydantic_object=GeneratedCodexItem)
+            parser = PydanticOutputParser(pydantic_object=CodexItem)
             llm = await self._get_llm(self.model_settings['extractionLLM']) # Use extraction LLM
             fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=llm)
 

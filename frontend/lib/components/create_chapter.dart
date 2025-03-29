@@ -191,7 +191,8 @@ class _CreateChapterState extends State<CreateChapter> {
         };
 
         final response = await http.post(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/generate?project_id=${widget.projectId}'),
+          Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/chapters/generate?project_id=${widget.projectId}'),
           headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );
@@ -245,7 +246,8 @@ class _CreateChapterState extends State<CreateChapter> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -276,7 +278,6 @@ class _CreateChapterState extends State<CreateChapter> {
       await _fetchChapterContent(_generatedChapterIds[newIndex]);
     }
   }
-
 
   void _handlePresetChange(String? newValue) {
     final presetProvider = Provider.of<PresetProvider>(context, listen: false);
@@ -762,32 +763,20 @@ class _CreateChapterState extends State<CreateChapter> {
                                 ),
                                 const SizedBox(height: 20),
                                 if (_isGenerating)
-                                  Column(
+                                  const Column(
                                     children: [
-                                      const LinearProgressIndicator(
+                                      LinearProgressIndicator(
                                         value: 1,
                                         backgroundColor: Color(0xFF343a40),
                                         valueColor:
                                             AlwaysStoppedAnimation<Color>(
                                                 Color(0xFF007bff)),
                                       ),
-                                      const SizedBox(height: 10),
-                                      const Text(
+                                      SizedBox(height: 10),
+                                      Text(
                                         'Generating chapter...',
                                         style:
                                             TextStyle(color: Color(0xFFf8f9fa)),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      ElevatedButton(
-                                        onPressed: _handleCancel,
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.red,
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 20, vertical: 10),
-                                          textStyle:
-                                              const TextStyle(fontSize: 18),
-                                        ),
-                                        child: const Text('Cancel'),
                                       ),
                                     ],
                                   )

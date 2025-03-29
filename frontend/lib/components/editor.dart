@@ -230,7 +230,8 @@ class _EditorState extends State<Editor> {
       if (!mounted) return;
 
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -289,7 +290,8 @@ class _EditorState extends State<Editor> {
       var uri = _selectedChapter != null
           ? Uri.parse(
               '$apiUrl/projects/${widget.projectId}/chapters/$chapterId?project_id=${widget.projectId}')
-          : Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
+          : Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
 
       var request =
           http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
@@ -505,7 +507,8 @@ class _EditorState extends State<Editor> {
   Future<void> _createChapterFromContent(String title, String content) async {
     final client = http.Client();
     try {
-      var uri = Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}');
+      var uri = Uri.parse(
+          '$apiUrl/projects/${widget.projectId}/chapters/?project_id=${widget.projectId}');
       var request = http.Request('POST', uri);
       request.headers.addAll(await getAuthHeaders());
       request.body = json.encode({

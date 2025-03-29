@@ -90,7 +90,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/?project_id=${widget.projectId}'),
         headers: await getAuthHeaders(),
       );
 
@@ -149,7 +150,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
           'documents': text,
           'metadata_str':
               json.encode({'type': 'text', 'project_id': widget.projectId}),
-          'project_id': widget.projectId,
         },
       );
       final jsonResponse = json.decode(response.body);

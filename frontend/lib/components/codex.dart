@@ -363,7 +363,8 @@ class _CodexState extends State<Codex> {
     try {
       final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/$itemId?project_id=${widget.projectId}'),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/codex-items/$itemId?project_id=${widget.projectId}'),
         headers: headers,
       );
 
@@ -435,7 +436,8 @@ class _CodexState extends State<Codex> {
       try {
         final response = await client
             .post(
-              Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
+              Uri.parse(
+                  '$apiUrl/projects/${widget.projectId}/codex-items/?project_id=${widget.projectId}'),
               headers: headers,
               body: body,
             )
