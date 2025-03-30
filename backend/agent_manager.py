@@ -14,7 +14,8 @@ from cachetools import TTLCache
 import json
 import asyncio
 from asyncio import Lock
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.api_core.exceptions import ResourceExhausted # Import for rate limit errors
 from langgraph.graph import StateGraph, END
 from langchain.chains.summarize import load_summarize_chain
 from langchain.callbacks.base import BaseCallbackHandler
@@ -293,9 +294,13 @@ class AgentManager:
         self.logger.info(f"AgentManager closed for User: {self.user_id[:8]}, Project: {self.project_id[:8]}")
 
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    @retry(
+        stop=stop_after_attempt(4), # Slightly increase attempts for rate limits
+        wait=wait_exponential(multiplier=1, min=4, max=30), # Increase wait times
+        retry=retry_if_exception_type((Exception, ResourceExhausted)) # Retry on general exceptions and specifically on ResourceExhausted (429)
+    )
     async def _get_llm(self, model_name: str) -> ChatGoogleGenerativeAI:
-        """Gets or creates a ChatGoogleGenerativeAI instance with caching and rate limiting."""
+        """Gets or creates a ChatGoogleGenerativeAI instance with caching, rate limiting, and retry logic."""
         async with self._lock: # Protect access to the class-level cache
             if model_name in self._llm_cache:
                 self.logger.debug(f"LLM Cache HIT for model: {model_name}")
