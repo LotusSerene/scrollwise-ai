@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import '../utils/auth.dart';
 import '../widgets/privacy_policy_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -34,6 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
+        _logger.info(
+            'Attempting Supabase sign-in with URL: ${Supabase.instance.client.supabaseUrl}');
         final response = await Supabase.instance.client.auth.signInWithPassword(
           email: _emailController.text,
           password: _passwordController.text,
@@ -53,13 +54,11 @@ class _LoginScreenState extends State<LoginScreen> {
             }),
           );
 
+          // Check if the backend sign-in call was successful (e.g., status 200)
+          // We don't need to parse the body if we no longer expect session_id from it.
           if (serverResponse.statusCode == 200) {
-            final data = json.decode(serverResponse.body);
-            final sessionId = data['session_id'];
-
-            // Store the session ID
-            await setSessionId(sessionId);
-
+            // Backend acknowledged the sign-in, proceed.
+            // No session_id to store from backend anymore.
             // Call onLogin callback with Supabase token
             widget.onLogin(response.session!.accessToken);
 
@@ -67,7 +66,9 @@ class _LoginScreenState extends State<LoginScreen> {
               Navigator.pushReplacementNamed(context, '/projects');
             }
           } else {
-            throw Exception('Failed to get session ID from server');
+            // Modify or remove this error based on backend behavior.
+            // If status code is not 200, it means backend sign-in failed.
+            throw Exception('Backend sign-in failed: ${serverResponse.body}');
           }
         }
       } on AuthException catch (error) {
@@ -162,12 +163,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<bool> verifyAuthState() async {
     try {
       final token = await getAuthToken();
-      final sessionId = await getSessionId();
+      // final sessionId = await getSessionId(); // Removed
 
       _logger.info('Verifying authentication state');
 
-      if (token == null || sessionId == null) {
-        _logger.warning('Missing token or sessionId');
+      // Check only for token now
+      if (token == null) {
+        _logger.warning('Missing token');
         return false;
       }
 
@@ -190,12 +192,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> initializeSession(String accessToken, String sessionId) async {
+  // Removed sessionId parameter and related logic
+  Future<void> initializeSession(String accessToken) async {
     try {
-      _logger.info('Initializing session with token and sessionId');
+      _logger.info('Initializing session with token');
 
-      // Store session ID first
-      await setSessionId(sessionId);
+      // Removed storing session ID
+      // await setSessionId(sessionId);
 
       // Don't try to initialize Supabase session directly
       // Just store the access token locally
@@ -204,17 +207,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Verify storage
       final storedToken = await getAuthToken();
-      final storedSessionId = await getSessionId();
+      // final storedSessionId = await getSessionId(); // Removed
 
       _logger.info('Session initialized successfully');
 
-      if (storedToken == null || storedSessionId == null) {
-        throw Exception('Failed to store session credentials');
+      // Check only for stored token
+      if (storedToken == null) {
+        throw Exception('Failed to store access token');
       }
     } catch (e) {
       _logger.severe('Error initializing session: $e');
-      // Clean up any partial session data
-      await removeSessionId();
+      // Removed session ID cleanup
+      // await removeSessionId();
       throw Exception('Failed to initialize session: $e');
     }
   }
@@ -222,17 +226,21 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<bool> checkBackendSession() async {
     try {
       final token = await getAuthToken();
-      final sessionId = await getSessionId();
+      // final sessionId = await getSessionId(); // Removed
 
-      if (token == null || sessionId == null) {
+      // Check only for token
+      if (token == null) {
         return false;
       }
 
+      // Backend session check should now rely only on the JWT (Authorization header)
+      // Assuming the backend endpoint /auth/session is updated accordingly
       final response = await http.get(
-        Uri.parse('$apiUrl/auth/session'),
+        Uri.parse(
+            '$apiUrl/auth/session'), // Ensure this endpoint exists and works with JWT
         headers: {
           'Authorization': 'Bearer $token',
-          'X-Session-ID': sessionId,
+          // 'X-Session-ID': sessionId, // Removed
         },
       );
 
@@ -268,7 +276,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await removeAuthToken();
 
       // Clear local session
-      await removeSessionId();
+      // await removeSessionId(); // Removed
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();

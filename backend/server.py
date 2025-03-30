@@ -248,7 +248,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"], # Ensure Authorization is allowed
+    allow_headers=["Authorization", "Content-Type"],  # Ensure Authorization is allowed
 )
 
 # --- Removed MAX_INACTIVITY and ACTIVE_SESSION_EXTEND ---
@@ -259,18 +259,20 @@ agent_manager_store = AgentManagerStore(api_key_manager)
 
 
 async def get_current_user(
-    authorization: str = Header(None), # Only depend on Authorization header
+    authorization: str = Header(None),  # Only depend on Authorization header
 ):
     try:
         if not authorization:
             raise HTTPException(
-                status_code=401, detail="Missing authentication credentials (Authorization header)"
+                status_code=401,
+                detail="Missing authentication credentials (Authorization header)",
             )
 
         # Extract token from Authorization header
         if not authorization.startswith("Bearer "):
-             raise HTTPException(
-                status_code=401, detail="Invalid Authorization header format. Expected 'Bearer <token>'."
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Authorization header format. Expected 'Bearer <token>'.",
             )
         token = authorization.replace("Bearer ", "")
 
@@ -300,21 +302,30 @@ async def get_current_user(
             # This handles cases where a user might have been deleted locally but still has a valid Supabase session,
             # or initial signup race conditions.
             try:
-                logger.info(f"User {user_response.user.email} authenticated via Supabase but not found locally. Creating local record.")
+                logger.info(
+                    f"User {user_response.user.email} authenticated via Supabase but not found locally. Creating local record."
+                )
                 local_user = await db_instance.sign_up(
                     email=user_response.user.email,
                     supabase_id=user_response.user.id,
-                    password=None, # No password needed, already authenticated
+                    password=None,  # No password needed, already authenticated
                 )
                 if not local_user:
                     # This case should ideally not happen if sign_up works correctly
-                    raise Exception("Failed to create local user record after Supabase authentication.")
+                    raise Exception(
+                        "Failed to create local user record after Supabase authentication."
+                    )
             except Exception as e:
-                logger.error(f"Failed to create local user record for {user_response.user.email}: {e}", exc_info=True)
+                logger.error(
+                    f"Failed to create local user record for {user_response.user.email}: {e}",
+                    exc_info=True,
+                )
                 # If creation fails, we might still proceed if local user data isn't strictly required for the endpoint,
                 # but it's safer to deny access as the system state is inconsistent.
-                raise HTTPException(status_code=500, detail="Failed to synchronize user data. Please try again later.")
-
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to synchronize user data. Please try again later.",
+                )
 
         # --- Removed custom session validation ---
 
@@ -325,7 +336,9 @@ async def get_current_user(
         # Re-raise HTTPExceptions directly
         raise he
     except Exception as e:
-        logger.error(f"Error validating token in get_current_user: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error validating token in get_current_user: {str(e)}", exc_info=True
+        )
         raise HTTPException(status_code=401, detail="Authentication failed")
 
 
@@ -749,10 +762,12 @@ async def register(user: UserCreate):
         # Register using database method (which now handles Supabase interaction implicitly or explicitly)
         # Ensure db_instance.sign_up creates both Supabase user and local user record
         user_response = await db_instance.sign_up(
-            email=user.email, password=user.password, supabase_id=user.supabase_id # Pass supabase_id if available from client
+            email=user.email,
+            password=user.password,
+            supabase_id=user.supabase_id,  # Pass supabase_id if available from client
         )
 
-        if not user_response or not user_response.get('id'):
+        if not user_response or not user_response.get("id"):
             logger.error("Registration failed: No user response or ID")
             raise HTTPException(status_code=400, detail="Registration failed")
 
@@ -763,11 +778,13 @@ async def register(user: UserCreate):
             "user_id": user_response["id"],
         }
     except HTTPException as he:
-        raise he # Re-raise specific HTTP exceptions (like 400 for existing user)
+        raise he  # Re-raise specific HTTP exceptions (like 400 for existing user)
     except Exception as e:
         logger.error(f"Registration error: {str(e)}", exc_info=True)
         # Provide a more generic error message to the client
-        raise HTTPException(status_code=500, detail="Registration failed due to an internal error.")
+        raise HTTPException(
+            status_code=500, detail="Registration failed due to an internal error."
+        )
 
 
 # --- Removed /auth/extend-session endpoint ---
@@ -789,11 +806,13 @@ async def sign_in(
 
         try:
             # db_instance.sign_in should interact with Supabase
-            auth_result = await db_instance.sign_in(
-                email=email, password=password
-            )
+            auth_result = await db_instance.sign_in(email=email, password=password)
 
-            if not auth_result or not auth_result.get("user") or not auth_result.get("session"):
+            if (
+                not auth_result
+                or not auth_result.get("user")
+                or not auth_result.get("session")
+            ):
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
             # --- Removed custom session creation ---
@@ -818,26 +837,32 @@ async def sign_in(
             logger.error(f"Supabase sign-in error: {str(e)}", exc_info=True)
             # Map common Supabase errors to HTTP 401
             if "Invalid login credentials" in str(e):
-                 raise HTTPException(status_code=401, detail="Invalid credentials")
-            raise HTTPException(status_code=500, detail="Authentication failed due to an internal error.")
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise HTTPException(
+                status_code=500,
+                detail="Authentication failed due to an internal error.",
+            )
 
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.error(f"Sign in endpoint error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during sign in.")
+        raise HTTPException(
+            status_code=500, detail="Internal server error during sign in."
+        )
 
 
 @auth_router.post("/signout")
 async def sign_out(
     # Depends on get_current_user to ensure a valid token is provided for sign-out
     current_user: User = Depends(get_current_user),
-    authorization: str = Header(None), # Need the token to sign out from Supabase
+    authorization: str = Header(None),  # Need the token to sign out from Supabase
 ):
     try:
         if not authorization or not authorization.startswith("Bearer "):
-             raise HTTPException(
-                status_code=401, detail="Valid Authorization header required for sign out."
+            raise HTTPException(
+                status_code=401,
+                detail="Valid Authorization header required for sign out.",
             )
         token = authorization.replace("Bearer ", "")
 
@@ -847,7 +872,7 @@ async def sign_out(
         # Note: Supabase sign_out might be synchronous depending on the library version
         try:
             # Pass the JWT to sign out the specific session
-            await db_instance.supabase.auth.sign_out(token)
+            await db_instance.supabase.auth.sign_out()
             logger.info(f"User {current_user.email} signed out from Supabase.")
         except Exception as e:
             logger.error(f"Supabase sign out error: {str(e)}", exc_info=True)
@@ -896,7 +921,7 @@ async def generate_chapters(
                 result = await agent_manager.generate_chapter(
                     chapter_number=chapter_number,
                     plot=gen_request.plot,
-                    writing_style=gen_request.writingStyle, # Use camelCase
+                    writing_style=gen_request.writingStyle,  # Use camelCase
                     instructions=gen_request.instructions,
                 )
 
@@ -2600,7 +2625,7 @@ async def graceful_shutdown():
         # --- Removed session cleanup ---
 
         # Close all agent managers
-        await close_all_agent_managers() # Assuming this function exists and works with the store
+        await close_all_agent_managers()  # Assuming this function exists and works with the store
 
         # Close database connections
         await db_instance.dispose()
@@ -3555,17 +3580,13 @@ async def delete_validity_check(
 
 # --- Include Routers ---
 app.include_router(auth_router)
-app.include_router(
-    chapter_router, prefix="/projects/{project_id}"
-)
+app.include_router(chapter_router, prefix="/projects/{project_id}")
 app.include_router(codex_item_router, prefix="/projects/{project_id}")
 app.include_router(event_router, prefix="/projects/{project_id}")
 app.include_router(location_router, prefix="/projects/{project_id}")
 app.include_router(knowledge_base_router, prefix="/projects/{project_id}")
 app.include_router(settings_router)
-app.include_router(
-    preset_router, prefix="/projects/{project_id}"
-)
+app.include_router(preset_router, prefix="/projects/{project_id}")
 app.include_router(universe_router)
 app.include_router(codex_router, prefix="/projects/{project_id}")
 app.include_router(relationship_router, prefix="/projects/{project_id}")
@@ -3585,8 +3606,8 @@ if __name__ == "__main__":
             host="localhost",
             port=8080,
             log_level="info",
-            reload=False, # Disable reload for production/stable runs
-            workers=1, # Adjust workers based on CPU cores if needed, but start with 1
+            reload=False,  # Disable reload for production/stable runs
+            workers=1,  # Adjust workers based on CPU cores if needed, but start with 1
         )
         server = uvicorn.Server(config)
 
@@ -3604,4 +3625,3 @@ if __name__ == "__main__":
         except NameError:  # If logger setup failed very early
             print(f"CRITICAL: Server failed to start: {str(e)}", file=sys.stderr)
         sys.exit(1)
-

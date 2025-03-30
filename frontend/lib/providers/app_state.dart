@@ -58,9 +58,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> checkAuthState() async {
     final session = Supabase.instance.client.auth.currentSession;
-    final sessionId = await getSessionId();
+    // final sessionId = await getSessionId(); // Removed custom session ID logic
 
-    _isLoggedIn = session != null && sessionId != null;
+    // Login state now depends only on Supabase session
+    _isLoggedIn = session != null;
     _token = session?.accessToken;
     notifyListeners();
   }

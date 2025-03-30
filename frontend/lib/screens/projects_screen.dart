@@ -137,11 +137,12 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     try {
       // Verify authentication before making requests
       final token = await getAuthToken();
-      final sessionId = await getSessionId();
+      // final sessionId = await getSessionId(); // Removed custom session ID logic
 
       _logger.info('Fetching project data');
 
-      if (token == null || sessionId == null) {
+      // Check only for token now
+      if (token == null) {
         _logger.severe('Missing authentication credentials');
         if (!mounted) return;
         Navigator.of(context).pushReplacementNamed('/login');
@@ -1039,8 +1040,8 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       );
 
       if (response.statusCode == 200) {
-        // Clear all local storage and session data
-        await removeSessionId();
+        // Clear all local storage (Supabase session is handled by Supabase library)
+        // await removeSessionId(); // Removed custom session ID logic
         if (mounted) {
           // Navigate to login and clear navigation stack
           Navigator.of(context).pushNamedAndRemoveUntil(

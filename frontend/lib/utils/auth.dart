@@ -1,11 +1,8 @@
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:logging/logging.dart';
 import '../main.dart';
 import '../providers/app_state.dart';
 import 'package:provider/provider.dart' as provider_pkg;
-import 'package:http/http.dart' as http;
-import 'constants.dart';
 
 final _logger = Logger('Auth');
 
@@ -25,7 +22,7 @@ Future<String?> getUserId() async {
 
 Future<Map<String, String>> getAuthHeaders() async {
   final session = Supabase.instance.client.auth.currentSession;
-  final sessionId = await getSessionId();
+  // final sessionId = await getSessionId(); // Removed custom session ID logic
 
   if (session?.accessToken == null) {
     _logger.warning('No auth token available');
@@ -34,40 +31,27 @@ Future<Map<String, String>> getAuthHeaders() async {
 
   return {
     'Authorization': 'Bearer ${session!.accessToken}',
-    if (sessionId != null) 'X-Session-ID': sessionId,
+    // if (sessionId != null) 'X-Session-ID': sessionId, // Removed custom session ID logic
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   };
 }
 
-// Session management for local server
-Future<void> setSessionId(String sessionId) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setString('session_id', sessionId);
-}
-
-Future<void> removeSessionId() async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.remove('session_id');
-}
-
-Future<String?> getSessionId() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getString('session_id');
-}
+// Removed custom session ID management functions (setSessionId, removeSessionId, getSessionId)
 
 Future<bool> isLoggedIn() async {
   try {
     final session = Supabase.instance.client.auth.currentSession;
-    final sessionId = await getSessionId().timeout(
-      const Duration(seconds: 2),
-      onTimeout: () {
-        _logger.warning('getSessionId timed out');
-        return null;
-      },
-    );
+    // final sessionId = await getSessionId().timeout( // Removed custom session ID logic
+    //   const Duration(seconds: 2),
+    //   onTimeout: () {
+    //     _logger.warning('getSessionId timed out');
+    //     return null;
+    //   },
+    // );
 
-    return session != null && sessionId != null;
+    // Login status now depends only on Supabase session
+    return session != null;
   } catch (e) {
     _logger.severe('Error checking login status: $e');
     return false;
@@ -77,30 +61,28 @@ Future<bool> isLoggedIn() async {
 // Helper method to handle sign out
 Future<void> signOut() async {
   try {
-    final sessionId = await getSessionId();
+    // final sessionId = await getSessionId(); // Removed custom session ID logic
 
-    // Try to sign out from backend first
-    if (sessionId != null) {
-      try {
-        final session = Supabase.instance.client.auth.currentSession;
-        await http.post(
-          Uri.parse('$apiUrl/auth/signout'),
-          headers: {
-            if (session?.accessToken != null)
-              'Authorization': 'Bearer ${session!.accessToken}',
-            'X-Session-ID': sessionId,
-          },
-        ).timeout(const Duration(seconds: 5));
-      } catch (e) {
-        _logger.warning('Backend signout failed: $e');
-      }
-    }
+    // Removed backend signout attempt using custom session ID
+    // try {
+    //   final session = Supabase.instance.client.auth.currentSession;
+    //   await http.post(
+    //     Uri.parse('$apiUrl/auth/signout'), // Assuming backend signout still uses JWT
+    //     headers: {
+    //       if (session?.accessToken != null)
+    //         'Authorization': 'Bearer ${session!.accessToken}',
+    //       // 'X-Session-ID': sessionId, // Removed
+    //     },
+    //   ).timeout(const Duration(seconds: 5));
+    // } catch (e) {
+    //   _logger.warning('Backend signout failed: $e');
+    // }
 
     // Sign out from Supabase
     await Supabase.instance.client.auth.signOut();
 
     // Clear local session
-    await removeSessionId();
+    // await removeSessionId(); // Removed custom session ID logic
 
     // Update AppState if context is available
     if (navigatorKey.currentContext != null) {
@@ -114,7 +96,7 @@ Future<void> signOut() async {
   } catch (e) {
     _logger.severe('Error during sign out: $e');
     // Still clear local state even if remote signout fails
-    await removeSessionId();
+    // await removeSessionId(); // Removed custom session ID logic
     if (navigatorKey.currentContext != null) {
       final appState = provider_pkg.Provider.of<AppState>(
         navigatorKey.currentContext!,
@@ -130,37 +112,38 @@ Future<void> signOut() async {
 Future<void> initializeAuthState() async {
   try {
     final session = Supabase.instance.client.auth.currentSession;
-    final sessionId = await getSessionId().timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        _logger.warning('getSessionId timed out');
-        return null;
-      },
-    );
+    // final sessionId = await getSessionId().timeout( // Removed custom session ID logic
+    //   const Duration(seconds: 5),
+    //   onTimeout: () {
+    //     _logger.warning('getSessionId timed out');
+    //     return null;
+    //   },
+    // );
 
-    // Add validation of session with backend before setting state
-    if (session != null && sessionId != null) {
-      try {
-        final response = await http.post(
-          Uri.parse('$apiUrl/auth/extend-session'),
-          headers: {
-            'Authorization': 'Bearer ${session.accessToken}',
-            'X-Session-ID': sessionId,
-          },
-        ).timeout(const Duration(seconds: 5));
-
-        if (response.statusCode != 200) {
-          _logger.warning(
-              'Session validation failed with status: ${response.statusCode}');
-          await signOut();
-          return;
-        }
-      } catch (e) {
-        _logger.warning('Session validation failed: $e');
-        await signOut();
-        return;
-      }
-    }
+    // Removed backend session validation/extension logic
+    // if (session != null /* && sessionId != null */) { // Check only Supabase session
+    //   try {
+    //     // If backend validation is still needed, it should rely solely on the JWT
+    //     // Example: Check a protected endpoint using only the Authorization header
+    //     final response = await http.get(
+    //       Uri.parse('$apiUrl/auth/session'), // Example endpoint
+    //       headers: {
+    //         'Authorization': 'Bearer ${session.accessToken}',
+    //       },
+    //     ).timeout(const Duration(seconds: 5));
+    //
+    //     if (response.statusCode != 200) {
+    //       _logger.warning(
+    //           'Backend JWT validation failed with status: ${response.statusCode}');
+    //       await signOut(); // Sign out if backend rejects JWT
+    //       return;
+    //     }
+    //   } catch (e) {
+    //     _logger.warning('Backend JWT validation failed: $e');
+    //     await signOut();
+    //     return;
+    //   }
+    // }
 
     // Update AppState only if session is valid
     if (navigatorKey.currentContext != null) {
@@ -168,7 +151,8 @@ Future<void> initializeAuthState() async {
         navigatorKey.currentContext!,
         listen: false,
       );
-      appState.setLoggedIn(session != null && sessionId != null);
+      // Set logged-in state based only on Supabase session
+      appState.setLoggedIn(session != null);
       appState.setToken(session?.accessToken);
     }
   } catch (e) {
