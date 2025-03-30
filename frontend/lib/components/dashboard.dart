@@ -234,10 +234,7 @@ class _DashboardState extends State<Dashboard> {
             Navigator.pushNamed(
               context,
               '/chapters',
-              arguments: {
-                'projectId': widget.projectId,
-                'readOnly': false,
-              },
+              arguments: widget.projectId, // Pass only projectId
             ).then((_) => _fetchData());
           } else if (title == 'Codex Entries') {
             Navigator.pushNamed(
