@@ -271,10 +271,10 @@ class VectorStore:
                     None, 
                     lambda: self.embeddings.embed_documents([new_content])[0]
                 )
-                
-                update_data["vectors"] = new_vector
+
+                update_data["vector"] = new_vector # Corrected key from "vectors" to "vector"
                 current_metadata["page_content"] = new_content
-            
+
             # Always update metadata
             update_data["payload"] = current_metadata
             
