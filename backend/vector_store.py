@@ -278,10 +278,10 @@ class VectorStore:
             # Always update metadata
             update_data["payload"] = current_metadata
             
-            # Update point
+            # Update point using upsert
             await loop.run_in_executor(
                 None,
-                lambda: self.qdrant_client.update(
+                lambda: self.qdrant_client.upsert(
                     collection_name=self.collection_name,
                     points=[rest.PointStruct(
                         id=doc_id,
