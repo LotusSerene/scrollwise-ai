@@ -25,39 +25,41 @@ from dotenv import load_dotenv
 import uuid
 from typing import Optional, List, Dict, Any
 from models import CodexItemType
-from supabase import create_client, Client
+import uuid
+import os
+from pathlib import Path
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# --- Local User ID Handling ---
+LOCAL_USER_ID_FILE = Path("./local_user_id.txt")
+
+def get_local_user_id() -> str:
+    """Gets or creates a persistent local user ID."""
+    if LOCAL_USER_ID_FILE.exists():
+        return LOCAL_USER_ID_FILE.read_text().strip()
+    else:
+        user_id = str(uuid.uuid4())
+        LOCAL_USER_ID_FILE.write_text(user_id)
+        logger.info(f"Generated new local user ID: {user_id}")
+        return user_id
+
+LOCAL_USER_ID = get_local_user_id()
+# --- End Local User ID Handling ---
+
 Base = declarative_base()
 
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(String, primary_key=True)
-    email = Column(String, unique=True, nullable=False)
-    api_key = Column(String)
-    model_settings = Column(Text)
-    created_at = Column(
-        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-    )
-
-    projects = relationship("Project", back_populates="user")
-
+# Removed User class
 
 class Project(Base):
     __tablename__ = "projects"
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(Text)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     universe_id = Column(String, ForeignKey("universes.id"), nullable=True)
     target_word_count = Column(Integer, default=0)
     created_at = Column(
@@ -69,8 +71,7 @@ class Project(Base):
         onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
-    # Add the user relationship
-    user = relationship("User", back_populates="projects")
+    # Removed user relationship
 
     # Update relationships to include cascade deletes
     chapters = relationship(
@@ -115,7 +116,7 @@ class Project(Base):
             "name": self.name,
             "description": self.description,
             "universe_id": self.universe_id,
-            "user_id": self.user_id,
+            # "user_id": self.user_id, # Removed user_id
             "targetWordCount": self.target_word_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -129,7 +130,7 @@ class Chapter(Base):
     title = Column(String(500))  # Increase the length limit to 500
     content = Column(Text)  # Text type for long content
     chapter_number = Column(Integer, nullable=False)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     last_processed_position = Column(Integer, default=0)
@@ -168,7 +169,7 @@ class ValidityCheck(Base):
     continuity_score = Column(Integer)
     continuity_explanation = Column(Text)
     areas_for_improvement = Column(JSON)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -199,7 +200,7 @@ class CodexItem(Base):
     description = Column(Text, nullable=False)
     type = Column(String, nullable=False)  # Will store the enum value as string
     subtype = Column(String)  # Will store the enum value as string
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     embedding_id = Column(String)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     # Add these fields for character-specific information
@@ -247,7 +248,7 @@ class CodexItem(Base):
 class ChatHistory(Base):
     __tablename__ = "chat_history"
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     messages = Column(Text, nullable=False)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     created_at = Column(
@@ -264,11 +265,12 @@ class ChatHistory(Base):
 class Preset(Base):
     __tablename__ = "presets"
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     name = Column(String, nullable=False)
     data = Column(JSON, nullable=False)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
-    __table_args__ = (UniqueConstraint("user_id", "name", name="_user_preset_uc"),)
+    # __table_args__ = (UniqueConstraint("user_id", "name", name="_user_preset_uc"),) # Removed user_id constraint
+    __table_args__ = (UniqueConstraint("project_id", "name", name="_project_preset_uc"),) # Added project_id constraint
     project = relationship("Project", back_populates="presets")
 
 
@@ -277,7 +279,7 @@ class Universe(Base):
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     created_at = Column(DateTime, default=datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -340,7 +342,7 @@ class Event(Base):
     date = Column(DateTime, nullable=False)
     character_id = Column(String, ForeignKey("codex_items.id"), nullable=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)  # Added this line
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     location_id = Column(String, ForeignKey("locations.id"), nullable=True)
     created_at = Column(
         DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -374,7 +376,7 @@ class Location(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     coordinates = Column(String, nullable=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     created_at = Column(
         DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -395,7 +397,7 @@ class Location(Base):
             "description": self.description,
             "coordinates": self.coordinates,
             "project_id": self.project_id,
-            "user_id": self.user_id,
+            # "user_id": self.user_id, # Removed user_id
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -426,7 +428,7 @@ class CharacterRelationshipAnalysis(Base):
     character2_id = Column(String, ForeignKey("codex_items.id"), nullable=False)
     relationship_type = Column(String, nullable=False)
     description = Column(Text)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -456,7 +458,7 @@ class BaseConnection(Base):
     description = Column(Text, nullable=False)
     connection_type = Column(String, nullable=False)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     created_at = Column(
         DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -472,7 +474,7 @@ class BaseConnection(Base):
             "description": self.description,
             "connection_type": self.connection_type,
             "project_id": self.project_id,
-            "user_id": self.user_id,
+            # "user_id": self.user_id, # Removed user_id
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -591,20 +593,18 @@ class LocationConnection(BaseConnection):
 class KnowledgeBaseItem(Base):
     __tablename__ = "knowledge_base_items"
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # user_id = Column(String, ForeignKey("users.id"), nullable=False) # Removed user_id FK
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
 
 
 class Database:
     def __init__(self):
+        self.local_user_id = LOCAL_USER_ID # Store local user ID
         try:
-            # Initialize credentials
-            supabase_url = os.getenv("SUPABASE_URL")
-            supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
-            self.supabase: Client = create_client(supabase_url, supabase_key)
+            # Removed Supabase client initialization
 
             self.engine = create_async_engine(
-                "sqlite+aiosqlite:///local.db",
+                "sqlite+aiosqlite:///local.db", # Use local SQLite DB
                 echo=False,
                 pool_pre_ping=True,
                 pool_recycle=3600,  # Recycle connections after 1 hour
@@ -648,10 +648,11 @@ class Database:
             logger.error("Error initializing database", exc_info=True)
             raise
 
-    async def get_projects(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_projects(self) -> List[Dict[str, Any]]: # Removed user_id
         try:
             async with self.Session() as session:
-                query = select(Project).where(Project.user_id == user_id)
+                # No user_id filter needed for local app
+                query = select(Project)
                 result = await session.execute(query)
                 projects = result.scalars().all()
                 return [project.to_dict() for project in projects]
@@ -659,10 +660,11 @@ class Database:
             logger.error("Error getting projects", exc_info=True)
             raise
 
-    async def get_universes(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_universes(self) -> List[Dict[str, Any]]: # Removed user_id
         try:
             async with self.Session() as session:
-                query = select(Universe).where(Universe.user_id == user_id)
+                # No user_id filter needed for local app
+                query = select(Universe)
                 result = await session.execute(query)
                 universes = result.scalars().all()
                 return [universe.to_dict() for universe in universes]
@@ -670,103 +672,14 @@ class Database:
             logger.error(f"Error getting universes: {str(e)}")
             raise
 
-    async def sign_up(
-        self, email: str, password: str, supabase_id: str
-    ) -> Dict[str, Any]:
-        try:
-            async with self.Session() as session:
-                # Check if user already exists
-                query = select(User).where(User.email == email)
-                result = await session.execute(query)
-                existing_user = result.scalars().first()
+    # Removed sign_up, sign_in, sign_out, get_user_by_email methods
 
-                if existing_user:
-                    # If user exists but has different supabase_id, update it
-                    if existing_user.id != supabase_id:
-                        existing_user.id = supabase_id
-                        existing_user.updated_at = datetime.now(timezone.utc).replace(
-                            tzinfo=None
-                        )
-                        await session.commit()
-
-                    return {"id": existing_user.id, "email": existing_user.email}
-
-                # Create new user if doesn't exist
-                new_user = User(
-                    id=supabase_id,
-                    email=email,
-                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                )
-                session.add(new_user)
-                await session.commit()
-
-                return {"id": new_user.id, "email": new_user.email}
-
-        except Exception as e:
-            logger.error(f"Database sign up error: {str(e)}")
-            raise
-
-    async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
-        try:
-            auth_response = self.supabase.auth.sign_in_with_password(
-                {"email": email, "password": password}
-            )
-
-            if not auth_response.user:
-                return None
-
-            return {"user": auth_response.user, "session": auth_response.session}
-
-        except Exception as e:
-            logger.error(f"Database sign in error: {str(e)}")
-            raise
-
-    async def sign_out(self, session_token: str):
-        try:
-            # Supabase auth sign_out is synchronous, so don't await it
-            self.supabase.auth.sign_out()
-
-            # Clear any local session data
-            async with self.Session() as session:
-                # You might want to update user's session status or clear tokens
-                await session.commit()
-
-            return True
-        except Exception as e:
-            logger.error(f"Error in sign out: {str(e)}")
-            raise
-
-    async def get_user_by_email(self, email: str):
-        try:
-            async with self.Session() as session:
-                query = select(User).where(User.email == email)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user:
-                    return {
-                        "id": user.id,
-                        "email": user.email,
-                        "api_key": user.api_key,
-                        "model_settings": user.model_settings,
-                        "created_at": (
-                            user.created_at.isoformat() if user.created_at else None
-                        ),
-                        "updated_at": (
-                            user.updated_at.isoformat() if user.updated_at else None
-                        ),
-                    }
-                return None
-        except Exception as e:
-            logger.error(f"Error getting user: {str(e)}")
-            return None
-
-    async def get_all_chapters(self, user_id: str, project_id: str):
+    async def get_all_chapters(self, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = (
                     select(Chapter)
-                    .where(Chapter.user_id == user_id, Chapter.project_id == project_id)
+                    .where(Chapter.project_id == project_id) # Removed user_id filter
                     .order_by(Chapter.chapter_number)
                 )
                 result = await session.execute(query)
@@ -777,8 +690,8 @@ class Database:
             raise
 
     async def create_chapter(
-        self, title: str, content: str, project_id: str, user_id: str
-    ) -> Dict[str, Any]:  # Changed return type to Dict instead of str
+        self, title: str, content: str, project_id: str # Removed user_id
+    ) -> Dict[str, Any]:
         try:
             async with self.Session() as session:
                 # Get the highest chapter number for this project
@@ -795,7 +708,7 @@ class Database:
                     content=content,
                     chapter_number=max_chapter_number
                     + 1,  # Auto-increment chapter number
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     processed_types=[],
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -811,12 +724,12 @@ class Database:
             logger.error(f"Error creating chapter: {str(e)}")
             raise
 
-    async def update_chapter(self, chapter_id, title, content, user_id, project_id):
+    async def update_chapter(self, chapter_id, title, content, project_id): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(Chapter).where(
                     Chapter.id == chapter_id,
-                    Chapter.user_id == user_id,
+                    # Chapter.user_id == user_id, # Removed user_id filter
                     Chapter.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -832,12 +745,12 @@ class Database:
             logger.error(f"Error updating chapter: {str(e)}")
             raise
 
-    async def delete_chapter(self, chapter_id, user_id, project_id):
+    async def delete_chapter(self, chapter_id, project_id): # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(Chapter).where(
                     Chapter.id == chapter_id,
-                    Chapter.user_id == user_id,
+                    # Chapter.user_id == user_id, # Removed user_id filter
                     Chapter.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -847,12 +760,12 @@ class Database:
             logger.error(f"Error deleting chapter: {str(e)}")
             raise
 
-    async def get_chapter(self, chapter_id: str, user_id: str, project_id: str):
+    async def get_chapter(self, chapter_id: str, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(Chapter).where(
                     Chapter.id == chapter_id,
-                    Chapter.user_id == user_id,
+                    # Chapter.user_id == user_id, # Removed user_id filter
                     Chapter.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -865,11 +778,11 @@ class Database:
             logger.error(f"Error getting chapter: {str(e)}")
             raise
 
-    async def get_all_validity_checks(self, user_id: str, project_id: str):
+    async def get_all_validity_checks(self, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(ValidityCheck).where(
-                    ValidityCheck.user_id == user_id,
+                    # ValidityCheck.user_id == user_id, # Removed user_id filter
                     ValidityCheck.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -879,12 +792,12 @@ class Database:
             logger.error(f"Error getting all validity checks: {str(e)}")
             raise
 
-    async def delete_validity_check(self, check_id, user_id, project_id):
+    async def delete_validity_check(self, check_id, project_id): # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(ValidityCheck).where(
                     ValidityCheck.id == check_id,
-                    ValidityCheck.user_id == user_id,
+                    # ValidityCheck.user_id == user_id, # Removed user_id filter
                     ValidityCheck.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -900,7 +813,7 @@ class Database:
         description: str,
         type: str,
         subtype: Optional[str],
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ) -> str:
         try:
@@ -912,7 +825,7 @@ class Database:
                     description=description,
                     type=type,
                     subtype=subtype,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     created_at=current_time,
                     updated_at=current_time,
@@ -924,11 +837,12 @@ class Database:
             logger.error(f"Error creating codex item: {str(e)}")
             raise
 
-    async def get_all_codex_items(self, user_id: str, project_id: str):
+    async def get_all_codex_items(self, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(CodexItem).where(
-                    CodexItem.user_id == user_id, CodexItem.project_id == project_id
+                    # CodexItem.user_id == user_id, # Removed user_id filter
+                    CodexItem.project_id == project_id
                 )
                 result = await session.execute(query)
                 codex_items = result.scalars().all()
@@ -944,14 +858,14 @@ class Database:
         description: str,
         type: str,
         subtype: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ):
         try:
             async with self.Session() as session:
                 query = select(CodexItem).where(
                     CodexItem.id == item_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -972,12 +886,12 @@ class Database:
             logger.error(f"Error updating codex item: {str(e)}")
             raise
 
-    async def delete_codex_item(self, item_id: str, user_id: str, project_id: str):
+    async def delete_codex_item(self, item_id: str, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(CodexItem).where(
                     CodexItem.id == item_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -987,12 +901,12 @@ class Database:
             logger.error(f"Error deleting codex item: {str(e)}")
             raise
 
-    async def get_codex_item_by_id(self, item_id: str, user_id: str, project_id: str):
+    async def get_codex_item_by_id(self, item_id: str, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(CodexItem).where(
                     CodexItem.id == item_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1005,61 +919,64 @@ class Database:
             logger.error(f"Error getting codex item by ID: {str(e)}")
             raise
 
-    async def save_model_settings(self, user_id, settings):
-        try:
-            async with self.Session() as session:
-                # Use select() instead of query
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
+    # --- Model Settings (Local Storage) ---
+    # Store settings in a simple JSON file for local use
+    MODEL_SETTINGS_FILE = Path("./model_settings.json")
 
-                if user:
-                    # Convert settings to string if it's not already
-                    settings_str = (
-                        json.dumps(settings) if isinstance(settings, dict) else settings
-                    )
-                    user.model_settings = settings_str
-                    user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    await session.commit()
-                    return True  # Add return value to confirm success
-                else:
-                    raise Exception("User not found")
+    async def save_model_settings(self, settings: Dict[str, Any]):
+        try:
+            # Ensure temperature is float if present
+            if "temperature" in settings:
+                try:
+                    settings["temperature"] = float(settings["temperature"])
+                except (ValueError, TypeError):
+                    logger.warning("Invalid temperature value, setting to default 0.7")
+                    settings["temperature"] = 0.7
+
+            with open(self.MODEL_SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f, indent=4)
+            return True
         except Exception as e:
-            logger.error(f"Error saving model settings: {str(e)}")
+            logger.error(f"Error saving model settings to file: {str(e)}")
             raise
 
-    async def get_model_settings(self, user_id):
+    async def get_model_settings(self) -> Dict[str, Any]:
+        default_settings = {
+            "mainLLM": "gemini-1.5-pro-002",
+            "checkLLM": "gemini-1.5-pro-002",
+            "embeddingsModel": "models/text-embedding-004",
+            "titleGenerationLLM": "gemini-1.5-pro-002",
+            "extractionLLM": "gemini-1.5-pro-002",
+            "knowledgeBaseQueryLLM": "gemini-1.5-pro-002",
+            "temperature": 0.7,
+        }
         try:
-            async with self.Session() as session:
-                query = select(User).where(User.id == user_id)
-                result = await session.execute(query)
-                user = result.scalars().first()
-                if user and user.model_settings:
-                    # Parse the JSON string back to a dictionary
-                    settings = json.loads(user.model_settings)
-                    # Ensure temperature is a float
+            if self.MODEL_SETTINGS_FILE.exists():
+                with open(self.MODEL_SETTINGS_FILE, 'r') as f:
+                    settings = json.load(f)
+                    # Ensure temperature is float
                     if "temperature" in settings:
-                        settings["temperature"] = float(settings["temperature"])
-                    return settings
-                return {
-                    "mainLLM": "gemini-1.5-pro-002",
-                    "checkLLM": "gemini-1.5-pro-002",
-                    "embeddingsModel": "models/text-embedding-004",
-                    "titleGenerationLLM": "gemini-1.5-pro-002",
-                    "extractionLLM": "gemini-1.5-pro-002",
-                    "knowledgeBaseQueryLLM": "gemini-1.5-pro-002",
-                    "temperature": 0.7,
-                }
+                        try:
+                            settings["temperature"] = float(settings["temperature"])
+                        except (ValueError, TypeError):
+                            logger.warning("Invalid temperature in file, using default 0.7")
+                            settings["temperature"] = 0.7
+                    # Merge with defaults to ensure all keys are present
+                    merged_settings = default_settings.copy()
+                    merged_settings.update(settings)
+                    return merged_settings
+            return default_settings
         except Exception as e:
-            logger.error(f"Error getting model settings: {str(e)}")
-            raise
+            logger.error(f"Error getting model settings from file: {str(e)}")
+            return default_settings # Return defaults on error
+    # --- End Model Settings ---
 
     async def create_location(
         self,
         name: str,
         description: str,
         coordinates: Optional[str],
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ) -> str:
         try:
@@ -1069,7 +986,7 @@ class Database:
                     name=name,
                     description=description,
                     coordinates=coordinates,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -1082,7 +999,7 @@ class Database:
             raise
 
     async def delete_location(
-        self, location_id: str, project_id: str, user_id: str
+        self, location_id: str, project_id: str # Removed user_id
     ) -> bool:
         try:
             async with self.Session() as session:
@@ -1100,7 +1017,7 @@ class Database:
                     and_(
                         Location.id == location_id,
                         Location.project_id == project_id,
-                        Location.user_id == user_id,
+                        # Location.user_id == user_id, # Removed user_id filter
                     )
                 )
                 result = await session.execute(delete_location_query)
@@ -1111,14 +1028,14 @@ class Database:
             raise
 
     async def mark_chapter_processed(
-        self, chapter_id: str, user_id: str, process_type: str
+        self, chapter_id: str, process_type: str # Removed user_id
     ):
         try:
             async with self.Session() as session:
                 # Get the chapter with a SELECT FOR UPDATE to prevent race conditions
                 query = (
                     select(Chapter)
-                    .where(Chapter.id == chapter_id, Chapter.user_id == user_id)
+                    .where(Chapter.id == chapter_id) # Removed user_id filter
                     .with_for_update()
                 )
 
@@ -1172,13 +1089,13 @@ class Database:
             raise
 
     async def get_event_by_id(
-        self, event_id: str, user_id: str, project_id: str
+        self, event_id: str, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Event).where(
                     Event.id == event_id,
-                    Event.user_id == user_id,
+                    # Event.user_id == user_id, # Removed user_id filter
                     Event.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1189,13 +1106,13 @@ class Database:
             raise
 
     async def get_location_by_id(
-        self, location_id: str, user_id: str, project_id: str
+        self, location_id: str, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Location).where(
                     Location.id == location_id,
-                    Location.user_id == user_id,
+                    # Location.user_id == user_id, # Removed user_id filter
                     Location.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1230,7 +1147,7 @@ class Database:
         self,
         name: str,
         description: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
         universe_id: Optional[str] = None,
     ) -> str:
         try:
@@ -1240,7 +1157,7 @@ class Database:
                     id=str(uuid.uuid4()),
                     name=name,
                     description=description,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     universe_id=universe_id,
                     created_at=current_time,
                     updated_at=current_time,
@@ -1253,12 +1170,12 @@ class Database:
             raise
 
     async def get_projects_by_universe(
-        self, universe_id: str, user_id: str
+        self, universe_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Project).where(
-                    Project.universe_id == universe_id, Project.user_id == user_id
+                    Project.universe_id == universe_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 projects = result.scalars().all()
@@ -1268,12 +1185,12 @@ class Database:
             raise
 
     async def get_project(
-        self, project_id: str, user_id: str
+        self, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Project).where(
-                    Project.id == project_id, Project.user_id == user_id
+                    Project.id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 project = result.scalars().first()
@@ -1287,14 +1204,14 @@ class Database:
         project_id: str,
         name: Optional[str],
         description: Optional[str],
-        user_id: str,
+        # user_id: str, # Removed user_id
         universe_id: Optional[str] = None,
         target_word_count: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Project).where(
-                    Project.id == project_id, Project.user_id == user_id
+                    Project.id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 project = result.scalars().first()
@@ -1317,12 +1234,12 @@ class Database:
             raise
 
     async def update_project_universe(
-        self, project_id: str, universe_id: Optional[str], user_id: str
+        self, project_id: str, universe_id: Optional[str] # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Project).where(
-                    Project.id == project_id, Project.user_id == user_id
+                    Project.id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 project = result.scalars().first()
@@ -1337,11 +1254,11 @@ class Database:
             logger.error(f"Error updating project universe: {str(e)}")
             raise
 
-    async def delete_project(self, project_id: str, user_id: str) -> bool:
+    async def delete_project(self, project_id: str) -> bool: # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(Project).where(
-                    Project.id == project_id, Project.user_id == user_id
+                    Project.id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 await session.commit()
@@ -1351,7 +1268,7 @@ class Database:
             raise
 
     async def create_universe(
-        self, name: str, user_id: str, description: Optional[str] = None
+        self, name: str, description: Optional[str] = None # Removed user_id
     ) -> str:
         try:
             current_time = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1360,7 +1277,7 @@ class Database:
                     id=str(uuid.uuid4()),
                     name=name,
                     description=description,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     created_at=current_time,
                     updated_at=current_time,
                 )
@@ -1372,12 +1289,12 @@ class Database:
             raise ValueError(str(e))
 
     async def get_universe(
-        self, universe_id: str, user_id: str
+        self, universe_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Universe).where(
-                    Universe.id == universe_id, Universe.user_id == user_id
+                    Universe.id == universe_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 universe = result.scalars().first()
@@ -1387,12 +1304,12 @@ class Database:
             raise
 
     async def update_universe(
-        self, universe_id: str, name: str, user_id: str
+        self, universe_id: str, name: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Universe).where(
-                    Universe.id == universe_id, Universe.user_id == user_id
+                    Universe.id == universe_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 universe = result.scalars().first()
@@ -1409,11 +1326,11 @@ class Database:
             logger.error(f"Error updating universe: {str(e)}")
             raise
 
-    async def delete_universe(self, universe_id: str, user_id: str) -> bool:
+    async def delete_universe(self, universe_id: str) -> bool: # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(Universe).where(
-                    Universe.id == universe_id, Universe.user_id == user_id
+                    Universe.id == universe_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 await session.commit()
@@ -1423,7 +1340,7 @@ class Database:
             raise
 
     async def get_universe_codex(
-        self, universe_id: str, user_id: str
+        self, universe_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
@@ -1431,7 +1348,7 @@ class Database:
                     select(CodexItem)
                     .join(Project, CodexItem.project_id == Project.id)
                     .where(
-                        Project.universe_id == universe_id, CodexItem.user_id == user_id
+                        Project.universe_id == universe_id # Removed user_id filter
                     )
                 )
                 result = await session.execute(query)
@@ -1442,13 +1359,13 @@ class Database:
             raise
 
     async def get_universe_knowledge_base(
-        self, universe_id: str, user_id: str, limit: int = 100, offset: int = 0
+        self, universe_id: str, limit: int = 100, offset: int = 0 # Removed user_id
     ) -> Dict[str, List[Dict[str, Any]]]:
         try:
             # Fetch all projects for the given universe
             async with self.Session() as session:
                 query = select(Project).where(
-                    Project.universe_id == universe_id, Project.user_id == user_id
+                    Project.universe_id == universe_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 projects = result.scalars().all()
@@ -1511,14 +1428,14 @@ class Database:
 
     async def get_characters(
         self,
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
         character_id: Optional[str] = None,
         name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         try:
             query = select(CodexItem).where(
-                CodexItem.user_id == user_id,
+                # CodexItem.user_id == user_id, # Removed user_id filter
                 CodexItem.project_id == project_id,
                 CodexItem.type == CodexItemType.CHARACTER.value,
             )
@@ -1540,11 +1457,12 @@ class Database:
             raise
 
     async def get_events(
-        self, project_id: str, user_id: str, limit: Optional[int] = None
+        self, project_id: str, limit: Optional[int] = None # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             query = select(Event).where(
-                Event.user_id == user_id, Event.project_id == project_id
+                # Event.user_id == user_id, # Removed user_id filter
+                Event.project_id == project_id
             )
             if limit is not None:
                 query = query.limit(limit)
@@ -1557,11 +1475,12 @@ class Database:
             raise
 
     async def get_locations(
-        self, user_id: str, project_id: str, k: Optional[int] = None
+        self, project_id: str, k: Optional[int] = None # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             query = select(Location).where(
-                Location.user_id == user_id, Location.project_id == project_id
+                # Location.user_id == user_id, # Removed user_id filter
+                Location.project_id == project_id
             )
             if k is not None:
                 query = query.limit(k)
@@ -1632,7 +1551,7 @@ class Database:
         continuity_score: int,
         continuity_explanation: str,
         areas_for_improvement: List[str],
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ):
         try:
@@ -1649,7 +1568,7 @@ class Database:
                     continuity_score=continuity_score,
                     continuity_explanation=continuity_explanation,
                     areas_for_improvement=json.dumps(areas_for_improvement),
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
@@ -1661,13 +1580,12 @@ class Database:
             raise
 
     async def get_validity_check(
-        self, chapter_id: str, user_id: str
+        self, chapter_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(ValidityCheck).where(
-                    ValidityCheck.chapter_id == chapter_id,
-                    ValidityCheck.user_id == user_id,
+                    ValidityCheck.chapter_id == chapter_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 validity_check = result.scalars().first()
@@ -1679,13 +1597,14 @@ class Database:
             raise
 
     async def save_chat_history(
-        self, user_id: str, project_id: str, messages: List[Dict[str, Any]]
+        self, project_id: str, messages: List[Dict[str, Any]] # Removed user_id
     ):
         try:
             async with self.Session() as session:
-                # First check if a chat history exists for this user and project
+                # First check if a chat history exists for this project
                 query = select(ChatHistory).where(
-                    ChatHistory.user_id == user_id, ChatHistory.project_id == project_id
+                    # ChatHistory.user_id == user_id, # Removed user_id filter
+                    ChatHistory.project_id == project_id
                 )
                 result = await session.execute(query)
                 chat_history = result.scalars().first()
@@ -1700,7 +1619,7 @@ class Database:
                     # Create new chat history
                     new_chat_history = ChatHistory(
                         id=str(uuid.uuid4()),
-                        user_id=user_id,
+                        # user_id=user_id, # Removed user_id
                         project_id=project_id,
                         messages=json.dumps(messages),
                     )
@@ -1711,11 +1630,12 @@ class Database:
             logger.error(f"Error saving chat history: {str(e)}")
             raise
 
-    async def get_chat_history(self, user_id: str, project_id: str):
+    async def get_chat_history(self, project_id: str): # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(ChatHistory.messages).where(
-                    ChatHistory.user_id == user_id, ChatHistory.project_id == project_id
+                    # ChatHistory.user_id == user_id, # Removed user_id filter
+                    ChatHistory.project_id == project_id
                 )
                 result = await session.execute(query)
                 chat_history = result.scalars().first()
@@ -1726,11 +1646,12 @@ class Database:
             logger.error(f"Error getting chat history: {str(e)}")
             raise
 
-    async def delete_chat_history(self, user_id: str, project_id: str) -> bool:
+    async def delete_chat_history(self, project_id: str) -> bool: # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(ChatHistory).where(
-                    ChatHistory.user_id == user_id, ChatHistory.project_id == project_id
+                    # ChatHistory.user_id == user_id, # Removed user_id filter
+                    ChatHistory.project_id == project_id
                 )
                 result = await session.execute(query)
                 await session.commit()
@@ -1740,13 +1661,13 @@ class Database:
             raise
 
     async def create_preset(
-        self, user_id: str, project_id: str, name: str, data: Dict[str, Any]
+        self, project_id: str, name: str, data: Dict[str, Any] # Removed user_id
     ) -> str:
         try:
             async with self.Session() as session:
-                # Check if a preset with the same name exists
+                # Check if a preset with the same name exists for this project
                 query = select(Preset).where(
-                    Preset.user_id == user_id,
+                    # Preset.user_id == user_id, # Removed user_id filter
                     Preset.project_id == project_id,
                     Preset.name == name,
                 )
@@ -1760,7 +1681,7 @@ class Database:
                 # Create new preset
                 new_preset = Preset(
                     id=str(uuid.uuid4()),
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     name=name,
                     data=data,
@@ -1775,11 +1696,12 @@ class Database:
             logger.error(f"Error creating preset: {str(e)}")
             raise
 
-    async def get_presets(self, user_id: str, project_id: str) -> List[Dict[str, Any]]:
+    async def get_presets(self, project_id: str) -> List[Dict[str, Any]]: # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(Preset).where(
-                    Preset.user_id == user_id, Preset.project_id == project_id
+                    # Preset.user_id == user_id, # Removed user_id filter
+                    Preset.project_id == project_id
                 )
                 result = await session.execute(query)
                 presets = result.scalars().all()
@@ -1792,13 +1714,13 @@ class Database:
             raise
 
     async def delete_preset(
-        self, preset_id: str, user_id: str, project_id: str
+        self, preset_id: str, project_id: str # Removed user_id
     ) -> bool:
         try:
             async with self.Session() as session:
                 query = delete(Preset).where(
                     Preset.id == preset_id,
-                    Preset.user_id == user_id,
+                    # Preset.user_id == user_id, # Removed user_id filter
                     Preset.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1809,13 +1731,13 @@ class Database:
             raise
 
     async def get_preset_by_name(
-        self, preset_name: str, user_id: str, project_id: str
+        self, preset_name: str, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Preset).where(
                     Preset.name == preset_name,
-                    Preset.user_id == user_id,
+                    # Preset.user_id == user_id, # Removed user_id filter
                     Preset.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1847,13 +1769,13 @@ class Database:
             raise
 
     async def delete_character_relationship(
-        self, relationship_id: str, user_id: str, project_id: str
+        self, relationship_id: str, project_id: str # Removed user_id
     ) -> bool:
         try:
             async with self.Session() as session:
                 query = delete(CharacterRelationship).where(
                     CharacterRelationship.id == relationship_id,
-                    CharacterRelationship.user_id == user_id,
+                    # CharacterRelationship.user_id == user_id, # Removed user_id filter
                     CharacterRelationship.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -1869,7 +1791,7 @@ class Database:
         character2_id: str,
         relationship_type: str,
         description: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ) -> str:
         try:
@@ -1880,7 +1802,7 @@ class Database:
                     character2_id=character2_id,
                     relationship_type=relationship_type,
                     description=description,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     project_id=project_id,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -1893,7 +1815,7 @@ class Database:
             raise
 
     async def get_character_relationships(
-        self, project_id: str, user_id: str
+        self, project_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
@@ -1908,7 +1830,7 @@ class Database:
                         CharacterRelationship.related_character_id
                         == RelatedCharacter.id,
                     )
-                    .where(CharacterRelationship.project_id == project_id)
+                    .where(CharacterRelationship.project_id == project_id) # Removed user_id filter
                     .options(
                         joinedload(CharacterRelationship.character),
                         joinedload(CharacterRelationship.related_character),
@@ -1942,14 +1864,14 @@ class Database:
             raise
 
     async def update_character_backstory(
-        self, character_id: str, backstory: str, user_id: str, project_id: str
+        self, character_id: str, backstory: str, project_id: str # Removed user_id
     ):
         try:
             async with self.Session() as session:
                 # Fetch the character
                 query = select(CodexItem).where(
                     CodexItem.id == character_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                     CodexItem.type == CodexItemType.CHARACTER.value,
                 )
@@ -1967,14 +1889,14 @@ class Database:
             raise
 
     async def delete_character_backstory(
-        self, character_id: str, user_id: str, project_id: str
+        self, character_id: str, project_id: str # Removed user_id
     ):
         try:
             async with self.Session() as session:
                 # Fetch the character
                 query = select(CodexItem).where(
                     CodexItem.id == character_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                     CodexItem.type == CodexItemType.CHARACTER.value,
                 )
@@ -1991,11 +1913,11 @@ class Database:
             logger.error(f"Error deleting character backstory: {str(e)}")
             raise
 
-    async def get_chapter_count(self, project_id: str, user_id: str) -> int:
+    async def get_chapter_count(self, project_id: str) -> int: # Removed user_id
         try:
             async with self.Session() as session:
                 query = select(func.count()).where(
-                    Chapter.project_id == project_id, Chapter.user_id == user_id
+                    Chapter.project_id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -2009,7 +1931,7 @@ class Database:
         description: str,
         date: datetime,
         project_id: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
         character_id: Optional[str] = None,
         location_id: Optional[str] = None,
     ) -> str:
@@ -2022,7 +1944,7 @@ class Database:
                     date=date,
                     character_id=character_id,
                     project_id=project_id,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     location_id=location_id,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -2035,14 +1957,14 @@ class Database:
             raise
 
     async def save_character_backstory(
-        self, character_id: str, content: str, user_id: str, project_id: str
+        self, character_id: str, content: str, project_id: str # Removed user_id
     ):
         try:
             async with self.Session() as session:
                 # Fetch the character to verify it exists and check its current backstory
                 query = select(CodexItem).where(
                     CodexItem.id == character_id,
-                    CodexItem.user_id == user_id,
+                    # CodexItem.user_id == user_id, # Removed user_id filter
                     CodexItem.project_id == project_id,
                     CodexItem.type == CodexItemType.CHARACTER.value,
                 )
@@ -2086,13 +2008,13 @@ class Database:
             raise
 
     async def get_latest_unprocessed_chapter_content(
-        self, project_id: str, user_id: str, process_type: str
+        self, project_id: str, process_type: str # Removed user_id
     ):
         try:
             async with self.Session() as session:
                 query = (
                     select(Chapter)
-                    .where(Chapter.project_id == project_id, Chapter.user_id == user_id)
+                    .where(Chapter.project_id == project_id) # Removed user_id filter
                     .order_by(Chapter.chapter_number)
                 )
                 result = await session.execute(query)
@@ -2117,6 +2039,7 @@ class Database:
         relationship_type: str,
         project_id: str,
         description: Optional[str] = None,
+        # user_id is implicitly the local user
     ) -> str:
         try:
             async with self.Session() as session:
@@ -2176,13 +2099,13 @@ class Database:
         character_id: Optional[str],
         location_id: Optional[str],
         project_id: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Event).where(
                     Event.id == event_id,
-                    Event.user_id == user_id,
+                    # Event.user_id == user_id, # Removed user_id filter
                     Event.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2203,13 +2126,13 @@ class Database:
             raise
 
     async def get_event_by_title(
-        self, title: str, user_id: str, project_id: str
+        self, title: str, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Event).where(
                     Event.title == title,
-                    Event.user_id == user_id,
+                    # Event.user_id == user_id, # Removed user_id filter
                     Event.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2220,11 +2143,15 @@ class Database:
             raise
 
     async def update_location(
-        self, location_id: str, location_data: Dict[str, Any]
+        self, location_id: str, project_id: str, location_data: Dict[str, Any] # Added project_id for verification
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
-                query = select(Location).where(Location.id == location_id)
+                # Verify project ownership (implicitly local user)
+                query = select(Location).where(
+                    Location.id == location_id,
+                    Location.project_id == project_id
+                )
                 result = await session.execute(query)
                 location = result.scalars().first()
                 if location:
@@ -2245,25 +2172,38 @@ class Database:
         self,
         relationship_id: str,
         relationship_type: str,
-        user_id: str,
-        project_id: str,
+        description: Optional[str], # Added description
+        project_id: str, # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(CharacterRelationship).where(
                     CharacterRelationship.id == relationship_id,
-                    CharacterRelationship.user_id == user_id,
+                    # CharacterRelationship.user_id == user_id, # Removed user_id filter
                     CharacterRelationship.project_id == project_id,
                 )
                 result = await session.execute(query)
                 relationship = result.scalars().first()
                 if relationship:
                     relationship.relationship_type = relationship_type
-                    relationship.updated_at = datetime.now(timezone.utc).replace(
-                        tzinfo=None
-                    )
+                    if description is not None: # Update description if provided
+                        relationship.description = description
+                    # relationship.updated_at = datetime.now(timezone.utc).replace( # No updated_at on this model
+                    #     tzinfo=None
+                    # )
                     await session.commit()
-                    return relationship.to_dict()
+                    # Fetch related names again for the response dict
+                    char1 = await session.get(CodexItem, relationship.character_id)
+                    char2 = await session.get(CodexItem, relationship.related_character_id)
+                    return {
+                        "id": relationship.id,
+                        "character1_id": relationship.character_id,
+                        "character2_id": relationship.related_character_id,
+                        "character1_name": char1.name if char1 else None,
+                        "character2_name": char2.name if char2 else None,
+                        "relationship_type": relationship.relationship_type,
+                        "description": relationship.description or "",
+                    }
                 else:
                     raise Exception("Character relationship not found")
         except Exception as e:
@@ -2271,13 +2211,13 @@ class Database:
             raise
 
     async def get_location_by_name(
-        self, name: str, user_id: str, project_id: str
+        self, name: str, project_id: str # Removed user_id
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(Location).where(
                     Location.name == name,
-                    Location.user_id == user_id,
+                    # Location.user_id == user_id, # Removed user_id filter
                     Location.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2303,7 +2243,7 @@ class Database:
         travel_route: Optional[str],
         cultural_exchange: Optional[str],
         project_id: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
     ) -> str:
         try:
             async with self.Session() as session:
@@ -2318,7 +2258,7 @@ class Database:
                     travel_route=travel_route,
                     cultural_exchange=cultural_exchange,
                     project_id=project_id,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
@@ -2338,7 +2278,7 @@ class Database:
         description: str,
         impact: str,
         project_id: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
     ) -> str:
         try:
             async with self.Session() as session:
@@ -2350,7 +2290,7 @@ class Database:
                     description=description,
                     impact=impact,
                     project_id=project_id,
-                    user_id=user_id,
+                    # user_id=user_id, # Removed user_id
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
@@ -2362,13 +2302,12 @@ class Database:
             raise
 
     async def get_location_connections(
-        self, project_id: str, user_id: str
+        self, project_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(LocationConnection).where(
-                    LocationConnection.project_id == project_id,
-                    LocationConnection.user_id == user_id,
+                    LocationConnection.project_id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 connections = result.scalars().all()
@@ -2378,13 +2317,12 @@ class Database:
             raise
 
     async def get_event_connections(
-        self, project_id: str, user_id: str
+        self, project_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(EventConnection).where(
-                    EventConnection.project_id == project_id,
-                    EventConnection.user_id == user_id,
+                    EventConnection.project_id == project_id # Removed user_id filter
                 )
                 result = await session.execute(query)
                 connections = result.scalars().all()
@@ -2400,14 +2338,14 @@ class Database:
         description: str,
         travel_route: Optional[str],
         cultural_exchange: Optional[str],
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(LocationConnection).where(
                     LocationConnection.id == connection_id,
-                    LocationConnection.user_id == user_id,
+                    # LocationConnection.user_id == user_id, # Removed user_id filter
                     LocationConnection.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2434,14 +2372,14 @@ class Database:
         connection_type: str,
         description: str,
         impact: str,
-        user_id: str,
+        # user_id: str, # Removed user_id
         project_id: str,
     ) -> Optional[Dict[str, Any]]:
         try:
             async with self.Session() as session:
                 query = select(EventConnection).where(
                     EventConnection.id == connection_id,
-                    EventConnection.user_id == user_id,
+                    # EventConnection.user_id == user_id, # Removed user_id filter
                     EventConnection.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2462,13 +2400,13 @@ class Database:
             raise
 
     async def delete_location_connection(
-        self, connection_id: str, user_id: str, project_id: str
+        self, connection_id: str, project_id: str # Removed user_id
     ) -> bool:
         try:
             async with self.Session() as session:
                 query = delete(LocationConnection).where(
                     LocationConnection.id == connection_id,
-                    LocationConnection.user_id == user_id,
+                    # LocationConnection.user_id == user_id, # Removed user_id filter
                     LocationConnection.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2479,13 +2417,13 @@ class Database:
             raise
 
     async def delete_event_connection(
-        self, connection_id: str, user_id: str, project_id: str
+        self, connection_id: str, project_id: str # Removed user_id
     ) -> bool:
         try:
             async with self.Session() as session:
                 query = delete(EventConnection).where(
                     EventConnection.id == connection_id,
-                    EventConnection.user_id == user_id,
+                    # EventConnection.user_id == user_id, # Removed user_id filter
                     EventConnection.project_id == project_id,
                 )
                 result = await session.execute(query)
@@ -2495,12 +2433,12 @@ class Database:
             logger.error(f"Error deleting event connection: {str(e)}")
             raise
 
-    async def delete_event(self, event_id: str, user_id: str, project_id: str) -> bool:
+    async def delete_event(self, event_id: str, project_id: str) -> bool: # Removed user_id
         try:
             async with self.Session() as session:
                 query = delete(Event).where(
                     Event.id == event_id,
-                    Event.user_id == user_id,
+                    # Event.user_id == user_id, # Removed user_id filter
                     Event.project_id == project_id,
                 )
                 result = await session.execute(query)
