@@ -12,9 +12,6 @@ class LandingScreen extends StatelessWidget {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
-        actions: [
-          // Removed Login button from AppBar
-        ],
       ),
       body: AnimatedBackground(
         child: SingleChildScrollView(
@@ -53,9 +50,10 @@ class LandingScreen extends StatelessWidget {
           _buildFeaturesList(context),
           const SizedBox(height: 32),
           FilledButton.icon(
-           onPressed: () => Navigator.pushReplacementNamed(context, '/projects'), // Navigate directly to projects
-           icon: const Icon(Icons.rocket_launch_outlined), // Changed icon
-           label: const Text('Go to Projects'), // Changed text
+            onPressed: () => Navigator.pushReplacementNamed(
+                context, '/projects'), // Navigate directly to projects
+            icon: const Icon(Icons.rocket_launch_outlined), // Changed icon
+            label: const Text('Go to Projects'), // Changed text
           ),
           const SizedBox(height: 16),
           Text(

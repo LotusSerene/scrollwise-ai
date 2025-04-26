@@ -136,18 +136,9 @@ class _ProjectsScreenState extends State<ProjectsScreen>
 
     try {
       // Verify authentication before making requests
-      final token = await getAuthToken();
       // final sessionId = await getSessionId(); // Removed custom session ID logic
 
       _logger.info('Fetching project data');
-
-      // Check only for token now
-      if (token == null) {
-        _logger.severe('Missing authentication credentials');
-        if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed('/login');
-        return;
-      }
 
       // Proceed with fetching data
       await Future.wait([
