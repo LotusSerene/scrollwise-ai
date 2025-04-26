@@ -11,7 +11,7 @@ from sqlalchemy import select, and_
 import os
 import uuid
 from models import CodexItemType, WorldbuildingSubtype
-from database import User, Chapter, Project, CodexItem
+from database import Chapter, Project, CodexItem # Removed User import
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -59,7 +59,7 @@ from models import (
     UniverseUpdate,
     UpdateTargetWordCountRequest,
     BackstoryExtractionRequest,
-)
+) # Removed UserCreate
 
 # PDF/DOCX processing imports
 from PyPDF2 import PdfReader
@@ -257,123 +257,16 @@ security_manager = SecurityManager()
 api_key_manager = ApiKeyManager(security_manager)
 agent_manager_store = AgentManagerStore(api_key_manager)
 
-
-async def get_current_user(
-    authorization: str = Header(None),  # Only depend on Authorization header
-):
-    try:
-        if not authorization:
-            raise HTTPException(
-                status_code=401,
-                detail="Missing authentication credentials (Authorization header)",
-            )
-
-        # Extract token from Authorization header
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid Authorization header format. Expected 'Bearer <token>'.",
-            )
-        token = authorization.replace("Bearer ", "")
-
-        # Get user from Supabase token
-        try:
-            # Use the provided token to get the user
-            user_response = db_instance.supabase.auth.get_user(token)
-        except Exception as e:
-            # Log the specific Supabase error if possible
-            logger.warning(f"Supabase auth.get_user failed: {e}")
-            # Don't attempt refresh here, let the client handle token expiry/refresh
-            raise HTTPException(
-                status_code=401, detail="Invalid or expired token. Please login again."
-            )
-
-        if not user_response or not user_response.user:
-            raise HTTPException(
-                status_code=401, detail="Invalid authentication credentials"
-            )
-
-        # Check if user exists in local database (optional, but good for consistency)
-        # This ensures that a user authenticated via Supabase also has a record
-        # in our local DB for storing app-specific data like API keys, settings etc.
-        local_user = await db_instance.get_user_by_email(user_response.user.email)
-        if not local_user:
-            # If user is authenticated via Supabase but not in local DB, create them.
-            # This handles cases where a user might have been deleted locally but still has a valid Supabase session,
-            # or initial signup race conditions.
-            try:
-                logger.info(
-                    f"User {user_response.user.email} authenticated via Supabase but not found locally. Creating local record."
-                )
-                local_user = await db_instance.sign_up(
-                    email=user_response.user.email,
-                    supabase_id=user_response.user.id,
-                    password=None,  # No password needed, already authenticated
-                )
-                if not local_user:
-                    # This case should ideally not happen if sign_up works correctly
-                    raise Exception(
-                        "Failed to create local user record after Supabase authentication."
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Failed to create local user record for {user_response.user.email}: {e}",
-                    exc_info=True,
-                )
-                # If creation fails, we might still proceed if local user data isn't strictly required for the endpoint,
-                # but it's safer to deny access as the system state is inconsistent.
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to synchronize user data. Please try again later.",
-                )
-
-        # --- Removed custom session validation ---
-
-        # Return the Supabase user object
-        return user_response.user
-
-    except HTTPException as he:
-        # Re-raise HTTPExceptions directly
-        raise he
-    except Exception as e:
-        logger.error(
-            f"Error validating token in get_current_user: {str(e)}", exc_info=True
-        )
-        raise HTTPException(status_code=401, detail="Authentication failed")
+# --- Removed get_current_user and get_current_active_user ---
 
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    # This function remains largely the same, ensuring the user fetched by get_current_user is valid and active.
-    try:
-        if not current_user:
-            # This case should technically be caught by get_current_user raising an exception,
-            # but kept for robustness.
-            raise HTTPException(
-                status_code=401, detail="Could not validate credentials"
-            )
-
-        # Check if user is active (e.g., email confirmed in Supabase)
-        # Adjust this check based on your definition of "active"
-        if not current_user.email_confirmed_at:
-            raise HTTPException(status_code=403, detail="Email not verified")
-
-        return current_user
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Error validating active user: {str(e)}")
-        # Ensure we return a 401 or appropriate error if activation check fails
-        raise HTTPException(status_code=401, detail="User validation failed")
-
-
-async def get_project_stats(project_id: str, user_id: str) -> Dict[str, int]:
+async def get_project_stats(project_id: str) -> Dict[str, int]: # Removed user_id
     """Get statistics for a project including chapter count and word count."""
     try:
         async with db_instance.Session() as session:
             # Get chapters using SQLAlchemy
             query = select(Chapter).where(
-                and_(Chapter.project_id == project_id, Chapter.user_id == user_id)
+                Chapter.project_id == project_id # Removed user_id filter
             )
             result = await session.execute(query)
             chapters = result.scalars().all()
@@ -401,7 +294,7 @@ async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
         async with db_instance.Session() as session:
             # Get project count
             project_query = select(Project).where(
-                and_(Project.universe_id == universe_id, Project.user_id == user_id)
+                Project.universe_id == universe_id # Removed user_id filter
             )
             result = await session.execute(project_query)
             projects = result.scalars().all()
@@ -414,10 +307,7 @@ async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
             codex_count = 0
             if project_ids:
                 codex_query = select(CodexItem).where(
-                    and_(
-                        CodexItem.project_id.in_(project_ids),
-                        CodexItem.user_id == user_id,
-                    )
+                    CodexItem.project_id.in_(project_ids) # Removed user_id filter
                 )
                 result = await session.execute(codex_query)
                 codex_items = result.scalars().all()
@@ -455,7 +345,7 @@ validity_router = APIRouter(prefix="/validity-checks", tags=["Validity Checks"])
 async def update_project_target_word_count(
     project_id: str,
     update_data: UpdateTargetWordCountRequest,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
         # Assuming db_instance method exists and is correct
@@ -463,7 +353,7 @@ async def update_project_target_word_count(
             project_id=project_id,
             name=None,
             description=None,  # Only updating target word count
-            user_id=current_user.id,
+            # user_id=current_user.id, # Removed user_id
             universe_id=None,
             target_word_count=update_data.targetWordCount,
         )
@@ -479,16 +369,19 @@ async def update_project_target_word_count(
 
 @project_router.post("/{project_id}/refresh-knowledge-base")
 async def refresh_project_knowledge_base(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     logger.info(f"Starting knowledge base refresh for project {project_id}")
+    # Use local user ID implicitly via db_instance and agent_manager
+    local_user_id = db_instance.local_user_id
     added_count = 0
     skipped_count = 0
     error_count = 0
 
     try:
+        # Use local_user_id when getting agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
 
             logger.info("Resetting knowledge base via AgentManager...")
@@ -499,16 +392,12 @@ async def refresh_project_knowledge_base(
             logger.info(f"Restored {restored_count} items from backup.")
 
             logger.info("Fetching current project data from database...")
-            chapters = await db_instance.get_all_chapters(current_user.id, project_id)
-            codex_items = await db_instance.get_all_codex_items(
-                current_user.id, project_id
-            )
-            # Fetch other potentially indexed items if needed (relationships, etc.)
-            relationships = await db_instance.get_character_relationships(
-                project_id, current_user.id
-            )
-            events = await db_instance.get_events(project_id, current_user.id)
-            locations = await db_instance.get_locations(current_user.id, project_id)
+            # Remove user_id from DB calls
+            chapters = await db_instance.get_all_chapters(project_id)
+            codex_items = await db_instance.get_all_codex_items(project_id)
+            relationships = await db_instance.get_character_relationships(project_id)
+            events = await db_instance.get_events(project_id)
+            locations = await db_instance.get_locations(project_id)
 
             logger.info(f"Re-indexing items not restored from backup...")
 
@@ -633,10 +522,11 @@ async def refresh_project_knowledge_base(
 # Universe routes
 @universe_router.post("/", response_model=Dict[str, Any])
 async def create_universe(
-    universe: UniverseCreate, current_user: User = Depends(get_current_active_user)
+    universe: UniverseCreate, # Removed current_user dependency
 ):
     try:
-        universe_id = await db_instance.create_universe(universe.name, current_user.id)
+        # Removed user_id from create_universe call
+        universe_id = await db_instance.create_universe(universe.name)
         return {"id": universe_id, "name": universe.name}
     except Exception as e:
         logger.error(f"Error creating universe: {str(e)}")
@@ -645,13 +535,15 @@ async def create_universe(
 
 @universe_router.get("/{universe_id}", response_model=Dict[str, Any])
 async def get_universe(
-    universe_id: str, current_user: User = Depends(get_current_active_user)
+    universe_id: str, # Removed current_user dependency
 ):
     try:
-        universe = await db_instance.get_universe(universe_id, current_user.id)
+        # Removed user_id from get_universe call
+        universe = await db_instance.get_universe(universe_id)
         if not universe:
             raise HTTPException(status_code=404, detail="Universe not found")
-        stats = await get_universe_stats(universe_id, current_user.id)
+        # Removed user_id from get_universe_stats call
+        stats = await get_universe_stats(universe_id)
         universe.update(stats)
         return JSONResponse(content=universe)
     except Exception as e:
@@ -663,11 +555,12 @@ async def get_universe(
 async def update_universe(
     universe_id: str,
     universe: UniverseUpdate,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from update_universe call
         updated_universe = await db_instance.update_universe(
-            universe_id, universe.name, current_user.id
+            universe_id, universe.name
         )
         if not updated_universe:
             raise HTTPException(status_code=404, detail="Universe not found")
@@ -679,10 +572,11 @@ async def update_universe(
 
 @universe_router.delete("/{universe_id}", response_model=bool)
 async def delete_universe(
-    universe_id: str, current_user: User = Depends(get_current_active_user)
+    universe_id: str, # Removed current_user dependency
 ):
     try:
-        success = await db_instance.delete_universe(universe_id, current_user.id)
+        # Removed user_id from delete_universe call
+        success = await db_instance.delete_universe(universe_id)
         if not success:
             raise HTTPException(status_code=404, detail="Universe not found")
         return JSONResponse(content={"success": success})
@@ -693,10 +587,11 @@ async def delete_universe(
 
 @universe_router.get("/{universe_id}/codex", response_model=List[Dict[str, Any]])
 async def get_universe_codex(
-    universe_id: str, current_user: User = Depends(get_current_active_user)
+    universe_id: str, # Removed current_user dependency
 ):
     try:
-        codex_items = await db_instance.get_universe_codex(universe_id, current_user.id)
+        # Removed user_id from get_universe_codex call
+        codex_items = await db_instance.get_universe_codex(universe_id)
         return JSONResponse(content=codex_items)
     except Exception as e:
         logger.error(f"Error fetching universe codex: {str(e)}")
@@ -707,11 +602,12 @@ async def get_universe_codex(
     "/{universe_id}/knowledge-base", response_model=List[Dict[str, Any]]
 )
 async def get_universe_knowledge_base(
-    universe_id: str, current_user: User = Depends(get_current_active_user)
+    universe_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_universe_knowledge_base call
         knowledge_base_items = await db_instance.get_universe_knowledge_base(
-            universe_id, current_user.id
+            universe_id
         )
         return JSONResponse(content=knowledge_base_items)
     except Exception as e:
@@ -721,11 +617,12 @@ async def get_universe_knowledge_base(
 
 @universe_router.get("/{universe_id}/projects", response_model=List[Dict[str, Any]])
 async def get_projects_by_universe(
-    universe_id: str, current_user: User = Depends(get_current_active_user)
+    universe_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_projects_by_universe call
         projects = await db_instance.get_projects_by_universe(
-            universe_id, current_user.id
+            universe_id
         )
         return JSONResponse(content=projects)
     except Exception as e:
@@ -734,12 +631,15 @@ async def get_projects_by_universe(
 
 
 @universe_router.get("/", response_model=List[Dict[str, Any]])
-async def get_universes(current_user: User = Depends(get_current_active_user)):
+async def get_universes(# Removed current_user dependency
+):
     try:
-        universes = await db_instance.get_universes(current_user.id)
+        # Removed user_id from get_universes call
+        universes = await db_instance.get_universes()
         # Add stats to each universe
         for universe in universes:
-            stats = await get_universe_stats(universe["id"], current_user.id)
+            # Removed user_id from get_universe_stats call
+            stats = await get_universe_stats(universe["id"])
             universe.update(stats)
         return universes
     except Exception as e:
@@ -747,148 +647,7 @@ async def get_universes(current_user: User = Depends(get_current_active_user)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# Auth routes
-@auth_router.post("/signup", status_code=201, response_model=dict)
-async def register(user: UserCreate):
-    try:
-        logger.info(f"Starting registration for email: {user.email}")
-
-        # Check if user already exists in local DB
-        existing_user = await db_instance.get_user_by_email(user.email)
-        if existing_user:
-            logger.warning(f"Email already registered: {user.email}")
-            raise HTTPException(status_code=400, detail="Email already registered")
-
-        # Register using database method (which now handles Supabase interaction implicitly or explicitly)
-        # Ensure db_instance.sign_up creates both Supabase user and local user record
-        user_response = await db_instance.sign_up(
-            email=user.email,
-            password=user.password,
-            supabase_id=user.supabase_id,  # Pass supabase_id if available from client
-        )
-
-        if not user_response or not user_response.get("id"):
-            logger.error("Registration failed: No user response or ID")
-            raise HTTPException(status_code=400, detail="Registration failed")
-
-        logger.info(f"Registration successful for user ID: {user_response['id']}")
-        # Return only success message, no tokens or session IDs here. Client should sign in separately.
-        return {
-            "message": "User registered successfully. Please sign in.",
-            "user_id": user_response["id"],
-        }
-    except HTTPException as he:
-        raise he  # Re-raise specific HTTP exceptions (like 400 for existing user)
-    except Exception as e:
-        logger.error(f"Registration error: {str(e)}", exc_info=True)
-        # Provide a more generic error message to the client
-        raise HTTPException(
-            status_code=500, detail="Registration failed due to an internal error."
-        )
-
-
-# --- Removed /auth/extend-session endpoint ---
-
-
-@auth_router.post("/signin")
-async def sign_in(
-    credentials: Dict[str, str] = Body(
-        ..., example={"email": "user@example.com", "password": "password"}
-    )
-):
-    try:
-        email = credentials.get("email")
-        password = credentials.get("password")
-        if not email or not password:
-            raise HTTPException(
-                status_code=400, detail="Email and password are required"
-            )
-
-        try:
-            # db_instance.sign_in should interact with Supabase
-            auth_result = await db_instance.sign_in(email=email, password=password)
-
-            if (
-                not auth_result
-                or not auth_result.get("user")
-                or not auth_result.get("session")
-            ):
-                raise HTTPException(status_code=401, detail="Invalid credentials")
-
-            # --- Removed custom session creation ---
-
-            # Return Supabase access token and user info
-            return {
-                "access_token": auth_result["session"].access_token,
-                # Optionally return refresh token if client needs to handle refresh:
-                # "refresh_token": auth_result["session"].refresh_token,
-                "user": {
-                    "id": auth_result["user"].id,
-                    "email": auth_result["user"].email,
-                    # Add any other relevant user details needed by the client
-                },
-            }
-
-        except HTTPException:
-            # Re-raise 401 if db_instance.sign_in raises it
-            raise
-        except Exception as e:
-            # Catch potential errors from Supabase client interaction
-            logger.error(f"Supabase sign-in error: {str(e)}", exc_info=True)
-            # Map common Supabase errors to HTTP 401
-            if "Invalid login credentials" in str(e):
-                raise HTTPException(status_code=401, detail="Invalid credentials")
-            raise HTTPException(
-                status_code=500,
-                detail="Authentication failed due to an internal error.",
-            )
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Sign in endpoint error: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Internal server error during sign in."
-        )
-
-
-@auth_router.post("/signout")
-async def sign_out(
-    # Depends on get_current_user to ensure a valid token is provided for sign-out
-    current_user: User = Depends(get_current_user),
-    authorization: str = Header(None),  # Need the token to sign out from Supabase
-):
-    try:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail="Valid Authorization header required for sign out.",
-            )
-        token = authorization.replace("Bearer ", "")
-
-        # --- Removed custom session removal ---
-
-        # Sign out from Supabase using the provided token
-        # Note: Supabase sign_out might be synchronous depending on the library version
-        try:
-            # Pass the JWT to sign out the specific session
-            await db_instance.supabase.auth.sign_out()
-            logger.info(f"User {current_user.email} signed out from Supabase.")
-        except Exception as e:
-            logger.error(f"Supabase sign out error: {str(e)}", exc_info=True)
-            # Even if Supabase signout fails, proceed, but log the error.
-            # Client should still discard the token.
-            # Consider if a 500 error is appropriate here. Maybe just log and return success.
-            # For now, let's return success but log the error.
-
-        # No custom session to remove
-
-        return {"message": "Successfully signed out"}
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Sign out endpoint error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred during sign out")
+# --- Removed Auth routes ---
 
 
 # --- Chapter Routes ---
@@ -898,8 +657,9 @@ async def sign_out(
 async def generate_chapters(
     request: Request,  # Keep raw request to parse JSON manually
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Parse JSON body
         body = await request.json()
@@ -907,11 +667,13 @@ async def generate_chapters(
             body
         )  # Validate using Pydantic
 
-        chapter_count = await db_instance.get_chapter_count(project_id, current_user.id)
+        # Removed user_id from get_chapter_count
+        chapter_count = await db_instance.get_chapter_count(project_id)
         generated_chapters_details = []  # Store details of generated chapters
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             for i in range(gen_request.numChapters):
                 chapter_number = chapter_count + i + 1
@@ -961,11 +723,11 @@ async def generate_chapters(
                     continue
 
                 # 1. Save Chapter to DB
+                # Removed user_id from create_chapter
                 new_chapter_db = await db_instance.create_chapter(
                     title=chapter_title,
                     content=chapter_content,
                     project_id=project_id,
-                    user_id=current_user.id,
                     # chapter_number is handled by create_chapter
                 )
                 chapter_id = new_chapter_db["id"]
@@ -1095,16 +857,17 @@ async def generate_chapters(
 async def get_chapter(
     chapter_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
-    # Only check project ownership
-    project = await db_instance.get_project(project_id, current_user.id)
-    if not project:
-        raise HTTPException(
-            status_code=403, detail="Not authorized to access this project"
-        )
+    # Project check might be redundant if DB methods handle project scope correctly
+    # project = await db_instance.get_project(project_id) # Removed user_id
+    # if not project:
+    #     raise HTTPException(
+    #         status_code=404, detail="Project not found" # Changed from 403
+    #     )
     try:
-        chapter = await db_instance.get_chapter(chapter_id, current_user.id, project_id)
+        # Removed user_id from get_chapter
+        chapter = await db_instance.get_chapter(chapter_id, project_id)
         if not chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         return chapter
@@ -1115,10 +878,11 @@ async def get_chapter(
 
 @chapter_router.get("/")
 async def get_chapters(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        chapters = await db_instance.get_all_chapters(current_user.id, project_id)
+        # Removed user_id from get_all_chapters
+        chapters = await db_instance.get_all_chapters(project_id)
         return {"chapters": chapters}
     except Exception as e:
         logger.error(f"Error fetching chapters: {str(e)}")
@@ -1129,15 +893,16 @@ async def get_chapters(
 async def create_chapter(
     chapter: ChapterCreate,
     project_id: str,  # Get project_id from path
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Create chapter in DB first
+        # Removed user_id from create_chapter
         new_chapter = await db_instance.create_chapter(
             title=chapter.title,
             content=chapter.content,
             project_id=project_id,
-            user_id=current_user.id,
         )
         chapter_id = new_chapter["id"]
         embedding_id = None
@@ -1145,8 +910,9 @@ async def create_chapter(
 
         # Add to knowledge base
         try:
+            # Use local_user_id for agent manager
             async with agent_manager_store.get_or_create_manager(
-                current_user.id, project_id
+                local_user_id, project_id
             ) as agent_manager:
                 metadata = {
                     "id": chapter_id,
@@ -1187,33 +953,36 @@ async def update_chapter(
     chapter_id: str,
     chapter_update: ChapterUpdate,
     project_id: str,  # Get project_id from path
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     updated_chapter = None
     try:
         # 1. Get existing chapter to find embedding_id
+        # Removed user_id from get_chapter
         existing_chapter = await db_instance.get_chapter(
-            chapter_id, current_user.id, project_id
+            chapter_id, project_id
         )
         if not existing_chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         existing_embedding_id = existing_chapter.get("embedding_id")
 
         # 2. Update DB
+        # Removed user_id from update_chapter
         updated_chapter = await db_instance.update_chapter(
             chapter_id=chapter_id,
             title=chapter_update.title,
             content=chapter_update.content,
-            user_id=current_user.id,
             project_id=project_id,
         )
 
         # 3. Update Knowledge Base
         if existing_embedding_id:
             try:
+                # Use local_user_id for agent manager
                 async with agent_manager_store.get_or_create_manager(
-                    current_user.id, project_id
+                    local_user_id, project_id
                 ) as agent_manager:
                     metadata = {
                         "id": chapter_id,
@@ -1256,12 +1025,14 @@ async def update_chapter(
 async def delete_chapter(
     chapter_id: str,
     project_id: str,  # Get project_id from path
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     try:
         # 1. Get existing chapter for embedding_id
-        chapter = await db_instance.get_chapter(chapter_id, current_user.id, project_id)
+        # Removed user_id from get_chapter
+        chapter = await db_instance.get_chapter(chapter_id, project_id)
         if not chapter:
             raise HTTPException(status_code=404, detail="Chapter not found")
         embedding_id = chapter.get("embedding_id")
@@ -1269,8 +1040,9 @@ async def delete_chapter(
         # 2. Delete from Knowledge Base first
         if embedding_id:
             try:
+                # Use local_user_id for agent manager
                 async with agent_manager_store.get_or_create_manager(
-                    current_user.id, project_id
+                    local_user_id, project_id
                 ) as agent_manager:
                     await agent_manager.update_or_remove_from_knowledge_base(
                         embedding_id, "delete"
@@ -1285,8 +1057,9 @@ async def delete_chapter(
             )
 
         # 3. Delete from Database
+        # Removed user_id from delete_chapter
         success = await db_instance.delete_chapter(
-            chapter_id, current_user.id, project_id
+            chapter_id, project_id
         )
         if not success:
             # This indicates a potential race condition or logic error if chapter was found initially
@@ -1314,8 +1087,9 @@ async def delete_chapter(
 async def generate_codex_item(
     request: CodexItemGenerateRequest,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     embedding_id = None
     kb_error = None
     item_id_db = None
@@ -1330,8 +1104,9 @@ async def generate_codex_item(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=f"Invalid type or subtype: {e}")
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # 1. Generate Item Details
             generated_item = await agent_manager.generate_codex_item(
@@ -1346,12 +1121,12 @@ async def generate_codex_item(
                 )
 
             # 2. Save to Database
+            # Removed user_id from create_codex_item
             item_id_db = await db_instance.create_codex_item(
                 name=generated_item["name"],
                 description=generated_item["description"],
                 type=request.codex_type,  # Use validated type
                 subtype=request.subtype,  # Use validated subtype
-                user_id=current_user.id,
                 project_id=project_id,
             )
 
@@ -1402,10 +1177,11 @@ async def generate_codex_item(
 
 @codex_router.get("/characters")
 async def get_characters(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        characters = await db_instance.get_all_codex_items(current_user.id, project_id)
+        # Removed user_id from get_all_codex_items
+        characters = await db_instance.get_all_codex_items(project_id)
         # Filter only character type items
         characters = [item for item in characters if item["type"] == "character"]
         return {"characters": characters}
@@ -1418,10 +1194,11 @@ async def get_characters(
     "/"
 )  # , response_model=Dict[str, List[Dict[str, Any]]]) # Response model needs adjustment if DB returns objects
 async def get_codex_items(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        codex_items = await db_instance.get_all_codex_items(current_user.id, project_id)
+        # Removed user_id from get_all_codex_items
+        codex_items = await db_instance.get_all_codex_items(project_id)
         # Convert DB models to dicts if needed, or ensure db method returns dicts
         return {"codex_items": codex_items}
     except Exception as e:
@@ -1433,8 +1210,9 @@ async def get_codex_items(
 async def create_codex_item(
     codex_item: CodexItemCreate,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     embedding_id = None
     kb_error = None
     item_id_db = None
@@ -1448,19 +1226,20 @@ async def create_codex_item(
             raise HTTPException(status_code=422, detail=f"Invalid type or subtype: {e}")
 
         # 1. Create in DB
+        # Removed user_id from create_codex_item
         item_id_db = await db_instance.create_codex_item(
             codex_item.name,
             codex_item.description,
             codex_item.type,
             codex_item.subtype,
-            current_user.id,
             project_id,
         )
 
         # 2. Add to Knowledge Base
         try:
+            # Use local_user_id for agent manager
             async with agent_manager_store.get_or_create_manager(
-                current_user.id, project_id
+                local_user_id, project_id
             ) as agent_manager:
                 metadata = {
                     "id": item_id_db,
@@ -1504,8 +1283,9 @@ async def update_codex_item(
     item_id: str,
     codex_item_update: CodexItemUpdate,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     updated_item_db = None
     try:
@@ -1518,29 +1298,31 @@ async def update_codex_item(
             raise HTTPException(status_code=422, detail=f"Invalid type or subtype: {e}")
 
         # 1. Get existing item for embedding_id
+        # Removed user_id from get_codex_item_by_id
         existing_item = await db_instance.get_codex_item_by_id(
-            item_id, current_user.id, project_id
+            item_id, project_id
         )
         if not existing_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
         existing_embedding_id = existing_item.get("embedding_id")
 
         # 2. Update DB
+        # Removed user_id from update_codex_item
         updated_item_db = await db_instance.update_codex_item(
             item_id=item_id,
             name=codex_item_update.name,
             description=codex_item_update.description,
             type=codex_item_update.type,
             subtype=codex_item_update.subtype,
-            user_id=current_user.id,
             project_id=project_id,
         )
 
         # 3. Update Knowledge Base
         if existing_embedding_id:
             try:
+                # Use local_user_id for agent manager
                 async with agent_manager_store.get_or_create_manager(
-                    current_user.id, project_id
+                    local_user_id, project_id
                 ) as agent_manager:
                     metadata = {
                         "id": item_id,
@@ -1580,13 +1362,15 @@ async def update_codex_item(
 
 @codex_item_router.delete("/{item_id}")
 async def delete_codex_item(
-    item_id: str, project_id: str, current_user: User = Depends(get_current_active_user)
+    item_id: str, project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     try:
         # 1. Get existing item for embedding_id
+        # Removed user_id from get_codex_item_by_id
         codex_item = await db_instance.get_codex_item_by_id(
-            item_id, current_user.id, project_id
+            item_id, project_id
         )
         if not codex_item:
             raise HTTPException(status_code=404, detail="Codex item not found")
@@ -1598,8 +1382,9 @@ async def delete_codex_item(
         # 2. Delete from Knowledge Base first
         if embedding_id:
             try:
+                # Use local_user_id for agent manager
                 async with agent_manager_store.get_or_create_manager(
-                    current_user.id, project_id
+                    local_user_id, project_id
                 ) as agent_manager:
                     # Use embedding ID directly if available
                     await agent_manager.update_or_remove_from_knowledge_base(
@@ -1620,8 +1405,9 @@ async def delete_codex_item(
             )
 
         # 3. Delete from Database
+        # Removed user_id from delete_codex_item
         deleted = await db_instance.delete_codex_item(
-            item_id, current_user.id, project_id
+            item_id, project_id
         )
         if not deleted:
             raise HTTPException(
@@ -1649,18 +1435,21 @@ async def extract_character_backstory_endpoint(  # Renamed endpoint function
     character_id: str,
     project_id: str,  # project_id from path
     # request: BackstoryExtractionRequest, # No longer needed, agent method handles finding chapters
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Verify character exists
+        # Removed user_id from get_characters
         character = await db_instance.get_characters(
-            current_user.id, project_id, character_id=character_id
+            project_id, character_id=character_id
         )
         if not character or character["type"] != CodexItemType.CHARACTER.value:
             raise HTTPException(status_code=404, detail="Character not found")
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method now handles finding unprocessed chapters and saving/adding KB
             backstory_result = await agent_manager.extract_character_backstory(
@@ -1704,19 +1493,22 @@ async def update_backstory(
     character_id: str,
     project_id: str,
     backstory_content: str = Body(..., embed=True),  # Embed content in request body
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     try:
         # 1. Update DB (assuming method exists)
+        # Removed user_id from update_character_backstory
         await db_instance.update_character_backstory(
-            character_id, backstory_content, current_user.id, project_id
+            character_id, backstory_content, project_id
         )
 
         # 2. Update/Add KB
         try:
+            # Use local_user_id for agent manager
             async with agent_manager_store.get_or_create_manager(
-                current_user.id, project_id
+                local_user_id, project_id
             ) as agent_manager:
                 # Use update_or_remove, treating it as an upsert for backstory potentially
                 # Assumes backstory KB items use character_id and type identifier
@@ -1755,14 +1547,16 @@ async def update_backstory(
 async def delete_backstory(
     character_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     kb_error = None
     try:
         # 1. Delete from KB first
         try:
+            # Use local_user_id for agent manager
             async with agent_manager_store.get_or_create_manager(
-                current_user.id, project_id
+                local_user_id, project_id
             ) as agent_manager:
                 identifier = {
                     "item_id": character_id,
@@ -1776,8 +1570,9 @@ async def delete_backstory(
             logger.error(kb_error, exc_info=True)
 
         # 2. Delete from DB (set backstory field to None)
+        # Removed user_id from delete_character_backstory
         await db_instance.delete_character_backstory(
-            character_id, current_user.id, project_id
+            character_id, project_id
         )
 
         message = "Backstory deleted successfully" + (
@@ -1796,8 +1591,9 @@ async def delete_backstory(
 async def analyze_relationships(
     project_id: str,
     character_ids: List[str] = Body(...),
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         if len(character_ids) < 2:
             raise HTTPException(
@@ -1806,10 +1602,11 @@ async def analyze_relationships(
             )
 
         # Fetch character data from DB
+        # Removed user_id from get_characters
         characters = []
         for char_id in character_ids:
             character = await db_instance.get_characters(
-                current_user.id, project_id, character_id=char_id
+                project_id, character_id=char_id
             )
             if character and character["type"] == CodexItemType.CHARACTER.value:
                 characters.append(character)
@@ -1820,8 +1617,9 @@ async def analyze_relationships(
                 detail="Fewer than two valid characters found for the provided IDs.",
             )
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method now saves to DB and adds to KB
             relationships_analysis = (
@@ -1843,12 +1641,14 @@ async def analyze_relationships(
 
 @location_router.post("/analyze-chapter")
 async def analyze_chapter_locations(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Check if unprocessed chapters exist *before* getting manager? Maybe not necessary.
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method now handles checking unprocessed, saving DB, adding KB
             new_locations = await agent_manager.analyze_unprocessed_chapter_locations()
@@ -1872,11 +1672,13 @@ async def analyze_chapter_locations(
 
 @event_router.post("/analyze-chapter")
 async def analyze_chapter_events(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method handles finding unprocessed, saving DB, adding KB
             new_events = await agent_manager.analyze_unprocessed_chapter_events()
@@ -1901,11 +1703,13 @@ async def analyze_chapter_events(
 
 @event_router.post("/analyze-connections")
 async def analyze_event_connections_endpoint(  # Renamed
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method handles analysis, saving DB, adding KB
             new_connections = await agent_manager.analyze_event_connections()
@@ -1921,19 +1725,22 @@ async def analyze_event_connections_endpoint(  # Renamed
 
 @location_router.post("/analyze-connections")
 async def analyze_location_connections_endpoint(  # Renamed
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Check if enough locations exist first
-        locations = await db_instance.get_locations(current_user.id, project_id)
+        # Removed user_id from get_locations
+        locations = await db_instance.get_locations(project_id)
         if len(locations) < 2:
             return {
                 "message": "Not enough locations exist to analyze connections.",
                 "location_connections": [],
             }
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent method handles analysis, saving DB, adding KB
             new_connections = await agent_manager.analyze_location_connections()
@@ -1958,8 +1765,9 @@ async def add_to_knowledge_base(
     text_content: Optional[str] = Form(None),
     metadata_str: str = Form("{}"),  # Default to empty JSON object string
     file: Optional[UploadFile] = File(None),
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     content_to_add = None
     source_info = "text input"
 
@@ -2004,8 +1812,9 @@ async def add_to_knowledge_base(
     embedding_id = None
     kb_error = None
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Use the provided content_type
             embedding_id = await agent_manager.add_to_knowledge_base(
@@ -2032,7 +1841,7 @@ async def add_to_knowledge_base(
 async def extract_document_text(
     file: UploadFile,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
         content = await file.read()
@@ -2076,11 +1885,13 @@ async def extract_document_text(
 # GET /knowledge-base/ - Calls agent_manager.get_knowledge_base_content()
 @knowledge_base_router.get("/")
 async def get_knowledge_base_content_endpoint(  # Renamed
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Agent manager method gets content directly from vector store
             content = await agent_manager.get_knowledge_base_content()
@@ -2116,8 +1927,9 @@ async def update_knowledge_base_item(
     update_data: Dict[str, Any] = Body(
         ...
     ),  # Expect {'content': '...', 'metadata': {...}}
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     new_content = update_data.get("content")
     new_metadata = update_data.get("metadata")
     if new_content is None and new_metadata is None:
@@ -2127,8 +1939,9 @@ async def update_knowledge_base_item(
         )
 
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # Ensure metadata includes necessary fields if provided
             if new_metadata:
@@ -2159,11 +1972,13 @@ async def update_knowledge_base_item(
 async def delete_knowledge_base_item(
     embedding_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 embedding_id, "delete"
@@ -2184,11 +1999,13 @@ async def delete_knowledge_base_item(
 async def query_knowledge_base(
     query_data: KnowledgeBaseQuery,  # Use the existing Pydantic model
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             # chatHistory items are already dicts from the Pydantic model parsing
             chat_history_dicts = query_data.chatHistory
@@ -2204,12 +2021,14 @@ async def query_knowledge_base(
 # POST /knowledge-base/reset-chat-history - Calls agent_manager.reset_memory
 @knowledge_base_router.post("/reset-chat-history")
 async def reset_chat_history(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # AgentManager's reset_memory should handle DB deletion
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.reset_memory()
         return {"message": "Chat history reset successfully"}
@@ -2218,29 +2037,31 @@ async def reset_chat_history(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.delete("/chat-history")
+@app.delete("/chat-history") # Should this be under project_router?
 async def delete_chat_history(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        await db_instance.delete_chat_history(current_user.id, project_id)
+        # Removed user_id from delete_chat_history
+        await db_instance.delete_chat_history(project_id)
         return {"message": "Chat history deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting chat history: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.post("/chat-history")
+@app.post("/chat-history") # Should this be under project_router?
 async def save_chat_history(
     chat_history: ChatHistoryRequest,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
         # Convert Pydantic models to dictionaries
         chat_history_dicts = [item.model_dump() for item in chat_history.chatHistory]
+        # Removed user_id from save_chat_history
         await db_instance.save_chat_history(
-            current_user.id, project_id, chat_history_dicts
+            project_id, chat_history_dicts
         )
         return {"message": "Chat history saved successfully"}
     except Exception as e:
@@ -2251,11 +2072,13 @@ async def save_chat_history(
 # GET /knowledge-base/chat-history - Calls agent_manager.get_chat_history
 @knowledge_base_router.get("/chat-history")
 async def get_knowledge_base_chat_history(  # Renamed from app.get route
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             chat_history = await agent_manager.get_chat_history()  # Agent gets from DB
             # Ensure history is a list of dicts (or whatever format client expects)
@@ -2273,10 +2096,12 @@ async def get_knowledge_base_chat_history(  # Renamed from app.get route
 # Settings routes
 @settings_router.post("/api-key")
 async def save_api_key(
-    api_key_update: ApiKeyUpdate, current_user: User = Depends(get_current_active_user)
+    api_key_update: ApiKeyUpdate, # Removed current_user dependency
 ):
+    # Use local user ID implicitly via api_key_manager changes (to be done next)
     try:
-        await api_key_manager.save_api_key(current_user.id, api_key_update.apiKey)
+        # The api_key_manager methods will be updated to not require user_id
+        await api_key_manager.save_api_key(api_key_update.apiKey)
         return {"message": "API key saved successfully"}
     except Exception as e:
         logger.error(f"Error saving API key: {str(e)}")
@@ -2284,9 +2109,12 @@ async def save_api_key(
 
 
 @settings_router.get("/api-key")
-async def check_api_key(current_user: User = Depends(get_current_active_user)):
+async def check_api_key(# Removed current_user dependency
+):
+    # Use local user ID implicitly via api_key_manager changes
     try:
-        api_key = await api_key_manager.get_api_key(current_user.id)
+        # The api_key_manager methods will be updated to not require user_id
+        api_key = await api_key_manager.get_api_key()
         is_set = bool(api_key)
         # Mask the API key for security
         masked_key = "*" * (len(api_key) - 4) + api_key[-4:] if is_set else None
@@ -2297,11 +2125,12 @@ async def check_api_key(current_user: User = Depends(get_current_active_user)):
 
 
 @settings_router.delete("/api-key")
-async def remove_api_key(current_user: User = Depends(get_current_active_user)):
+async def remove_api_key(# Removed current_user dependency
+):
+    # Use local user ID implicitly via api_key_manager changes
     try:
-        await api_key_manager.remove_api_key(
-            current_user.id
-        )  # Updated to call remove_api_key
+        # The api_key_manager methods will be updated to not require user_id
+        await api_key_manager.remove_api_key()
         return {"message": "API key removed successfully"}
     except Exception as e:
         logger.error(f"Error removing API key: {str(e)}")
@@ -2309,9 +2138,11 @@ async def remove_api_key(current_user: User = Depends(get_current_active_user)):
 
 
 @settings_router.get("/model")
-async def get_model_settings(current_user: User = Depends(get_current_active_user)):
+async def get_model_settings(# Removed current_user dependency
+):
+    # Model settings are now stored locally, not per-user
     try:
-        settings = await db_instance.get_model_settings(current_user.id)
+        settings = await db_instance.get_model_settings()
         return settings
     except Exception as e:
         logger.error(f"Error fetching model settings: {str(e)}")
@@ -2320,10 +2151,11 @@ async def get_model_settings(current_user: User = Depends(get_current_active_use
 
 @settings_router.post("/model")
 async def save_model_settings(
-    settings: ModelSettings, current_user: User = Depends(get_current_active_user)
+    settings: ModelSettings, # Removed current_user dependency
 ):
+    # Model settings are now stored locally, not per-user
     try:
-        await db_instance.save_model_settings(current_user.id, settings.model_dump())
+        await db_instance.save_model_settings(settings.model_dump())
         return {"message": "Model settings saved successfully"}
     except Exception as e:
         logger.error(f"Error saving model settings: {str(e)}")
@@ -2337,11 +2169,12 @@ async def save_model_settings(
 async def create_preset(
     preset: PresetCreate,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from create_preset
         preset_id = await db_instance.create_preset(
-            current_user.id, project_id, preset.name, preset.data
+            project_id, preset.name, preset.data
         )
         return {"id": preset_id, "name": preset.name, "data": preset.data}
     except ValueError as ve:
@@ -2352,10 +2185,13 @@ async def create_preset(
 
 
 @preset_router.get("")
-async def get_presets(current_user: User = Depends(get_current_active_user)):
+async def get_presets(
+    project_id: str, # Added project_id path parameter back
+    # Removed current_user dependency
+):
     try:
-        # Remove project_id parameter
-        presets = await db_instance.get_presets(current_user.id, None)
+        # Removed user_id from get_presets
+        presets = await db_instance.get_presets(project_id)
         return {"presets": presets}
     except Exception as e:
         logger.error(f"Error getting presets: {str(e)}")
@@ -2367,19 +2203,26 @@ async def update_preset(
     preset_name: str,
     project_id: str,
     preset_update: PresetUpdate,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_preset_by_name
         existing_preset = await db_instance.get_preset_by_name(
-            preset_name, current_user.id, project_id
+            preset_name, project_id
         )
         if not existing_preset:
             raise HTTPException(status_code=404, detail="Preset not found")
 
         updated_data = preset_update.model_dump()
-        await db_instance.update_preset(
-            preset_name, current_user.id, project_id, updated_data
-        )
+        # Removed user_id from update_preset (assuming DB method is updated)
+        # Need to add update_preset method to database.py if it doesn't exist
+        # For now, assuming it exists and takes (preset_name, project_id, data)
+        # await db_instance.update_preset(
+        #     preset_name, project_id, updated_data
+        # )
+        # Let's use create_preset which handles upsert logic based on name constraint
+        await db_instance.create_preset(project_id, preset_name, updated_data)
+
         return {
             "message": "Preset updated successfully",
             "name": preset_name,
@@ -2394,12 +2237,12 @@ async def update_preset(
 async def get_preset(
     preset_name: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
-        # Remove project_id from get_preset_by_name call
+        # Removed user_id from get_preset_by_name call
         preset = await db_instance.get_preset_by_name(
-            preset_name, current_user.id, project_id
+            preset_name, project_id
         )
         if not preset:
             raise HTTPException(status_code=404, detail="Preset not found")
@@ -2413,12 +2256,19 @@ async def get_preset(
 async def delete_preset(
     preset_name: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
-        # Remove project_id from delete_preset call
+        # Removed user_id from delete_preset call
+        # Need to ensure delete_preset in DB takes (preset_name, project_id)
+        # Let's assume it does for now.
+        # Get preset ID first
+        preset = await db_instance.get_preset_by_name(preset_name, project_id)
+        if not preset:
+             raise HTTPException(status_code=404, detail="Preset not found")
+
         deleted = await db_instance.delete_preset(
-            preset_name, current_user.id, project_id
+            preset['id'], project_id
         )
         if deleted:
             return {"message": "Preset deleted successfully"}
@@ -2436,12 +2286,13 @@ async def delete_preset(
 async def update_project_universe(
     project_id: str,
     universe: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
         universe_id = universe.get("universe_id")  # This can now be None
+        # Removed user_id from update_project_universe
         updated_project = await db_instance.update_project_universe(
-            project_id, universe_id, current_user.id
+            project_id, universe_id
         )
         if not updated_project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -2453,18 +2304,19 @@ async def update_project_universe(
 
 @project_router.post("/", response_model=Dict[str, Any])
 async def create_project(
-    project: ProjectCreate, current_user: User = Depends(get_current_active_user)
+    project: ProjectCreate, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from create_project
         project_id = await db_instance.create_project(
             name=project.name,
             description=project.description,
-            user_id=current_user.id,
             universe_id=project.universe_id,
         )
 
         # Fetch the created project to return its details
-        new_project = await db_instance.get_project(project_id, current_user.id)
+        # Removed user_id from get_project
+        new_project = await db_instance.get_project(project_id)
         if not new_project:
             raise HTTPException(
                 status_code=404, detail="Project not found after creation"
@@ -2477,14 +2329,17 @@ async def create_project(
 
 
 @project_router.get("/")
-async def get_projects(current_user: User = Depends(get_current_active_user)):
+async def get_projects(# Removed current_user dependency
+):
     try:
-        # Get user's own projects
-        projects = await db_instance.get_projects(current_user.id)
+        # Get all projects (since it's local)
+        # Removed user_id from get_projects
+        projects = await db_instance.get_projects()
 
         # Add stats for each project
         for project in projects:
-            stats = await get_project_stats(project["id"], current_user.id)
+            # Removed user_id from get_project_stats
+            stats = await get_project_stats(project["id"])
             project.update(stats)
 
         return {"projects": projects}
@@ -2495,13 +2350,15 @@ async def get_projects(current_user: User = Depends(get_current_active_user)):
 
 @project_router.get("/{project_id}")
 async def get_project(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        project = await db_instance.get_project(project_id, current_user.id)
+        # Removed user_id from get_project
+        project = await db_instance.get_project(project_id)
         if project:
             # Add stats to the project
-            stats = await get_project_stats(project_id, current_user.id)
+            # Removed user_id from get_project_stats
+            stats = await get_project_stats(project_id)
             project.update(stats)
             return project
         raise HTTPException(status_code=404, detail="Project not found")
@@ -2514,14 +2371,14 @@ async def get_project(
 async def update_project(
     project_id: str,
     project: ProjectUpdate,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from update_project
         updated_project = await db_instance.update_project(
             project_id,
             project.name,
             project.description,
-            current_user.id,
             project.universe_id,
             project.target_word_count,
         )
@@ -2535,10 +2392,11 @@ async def update_project(
 
 @project_router.delete("/{project_id}")
 async def delete_project(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        success = await db_instance.delete_project(project_id, current_user.id)
+        # Removed user_id from delete_project
+        success = await db_instance.delete_project(project_id)
         if success:
             return {"message": "Project deleted successfully"}
         raise HTTPException(status_code=404, detail="Project not found")
@@ -2554,9 +2412,10 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
+    # Removed Strict-Transport-Security for local HTTP
+    # response.headers["Strict-Transport-Security"] = (
+    #     "max-age=31536000; includeSubDomains"
+    # )
     return response
 
 
@@ -2591,9 +2450,7 @@ async def health_check():
                 content={"status": "error", "message": "Database not initialized"},
             )
 
-        # Add a simple check to Supabase connection if possible (e.g., get service status)
-        # For now, just check local DB init status
-        # await db_instance.supabase.rpc('health_check', {}).execute() # Example if Supabase had such a function
+        # Removed Supabase check
 
         return JSONResponse(
             status_code=200,
@@ -2662,8 +2519,9 @@ signal.signal(signal.SIGINT, handle_sigterm)
 async def create_relationship(
     project_id: str,  # Make project_id a path parameter
     data: Dict[str, Any] = Body(...),  # Accept request body as a dictionary
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Validate required fields
         required_fields = ["character_id", "related_character_id", "relationship_type"]
@@ -2683,8 +2541,9 @@ async def create_relationship(
         )
 
         # Add to knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.add_to_knowledge_base(
                 "relationship",
@@ -2706,11 +2565,12 @@ async def create_relationship(
 
 @relationship_router.get("/")
 async def get_relationships(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_character_relationships
         relationships = await db_instance.get_character_relationships(
-            project_id, current_user.id
+            project_id
         )
         return {"relationships": relationships}
     except Exception as e:
@@ -2723,21 +2583,23 @@ async def update_relationship(
     relationship_id: str,
     project_id: str,
     relationship_data: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Update in database
+        # Removed user_id from update_character_relationship
         await db_instance.update_character_relationship(
             relationship_id,
             relationship_data["relationship_type"],
             relationship_data.get("description"),
             project_id,
-            current_user.id,
         )
 
         # Update in knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": relationship_id, "item_type": "relationship"},
@@ -2759,20 +2621,23 @@ async def update_relationship(
 async def delete_relationship(
     relationship_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Delete from database - update parameter order to match the database method
+        # Removed user_id from delete_character_relationship
         success = await db_instance.delete_character_relationship(
-            relationship_id, project_id, current_user.id  # Add project_id parameter
+            relationship_id, project_id
         )
 
         if not success:
             raise HTTPException(status_code=404, detail="Relationship not found")
 
         # Delete from knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": relationship_id, "item_type": "relationship"}, "delete"
@@ -2783,41 +2648,42 @@ async def delete_relationship(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@relationship_router.post("/analyze")
-async def analyze_relationships(
-    project_id: str,
-    character_ids: List[str] = Body(...),
-    current_user: User = Depends(get_current_active_user),
-):
-    try:
-        async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
-        ) as agent_manager:
-            # Get only the selected characters
-            characters = []
-            for char_id in character_ids:
-                character = await db_instance.get_characters(
-                    current_user.id, project_id, character_id=char_id
-                )
-                if character and character["type"] == CodexItemType.CHARACTER.value:
-                    characters.append(character)
-
-            if len(characters) < 2:
-                raise HTTPException(
-                    status_code=404, detail="At least two valid characters are required"
-                )
-
-            # Analyze relationships for selected characters only
-            relationships = await agent_manager.analyze_character_relationships(
-                characters
-            )
-
-            return {"relationships": relationships}
-    except ValueError as ve:
-        return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
-    except Exception as e:
-        logger.error(f"Error analyzing relationships: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# This duplicates the /analyze endpoint above, removing this one.
+# @relationship_router.post("/analyze")
+# async def analyze_relationships(
+#     project_id: str,
+#     character_ids: List[str] = Body(...),
+#     current_user: User = Depends(get_current_active_user),
+# ):
+#     try:
+#         async with agent_manager_store.get_or_create_manager(
+#             current_user.id, project_id
+#         ) as agent_manager:
+#             # Get only the selected characters
+#             characters = []
+#             for char_id in character_ids:
+#                 character = await db_instance.get_characters(
+#                     current_user.id, project_id, character_id=char_id
+#                 )
+#                 if character and character["type"] == CodexItemType.CHARACTER.value:
+#                     characters.append(character)
+#
+#             if len(characters) < 2:
+#                 raise HTTPException(
+#                     status_code=404, detail="At least two valid characters are required"
+#                 )
+#
+#             # Analyze relationships for selected characters only
+#             relationships = await agent_manager.analyze_character_relationships(
+#                 characters
+#             )
+#
+#             return {"relationships": relationships}
+#     except ValueError as ve:
+#         return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
+#     except Exception as e:
+#         logger.error(f"Error analyzing relationships: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # Event Connections
@@ -2831,10 +2697,12 @@ async def create_event_connection(
     connection_type: str,
     description: str,
     impact: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Create in database
+        # Removed user_id from create_event_connection
         connection_id = await db_instance.create_event_connection(
             event1_id=event1_id,
             event2_id=event2_id,
@@ -2842,12 +2710,12 @@ async def create_event_connection(
             description=description,
             impact=impact,
             project_id=project_id,
-            user_id=current_user.id,
         )
 
         # Add to knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.add_to_knowledge_base(
                 "event_connection",
@@ -2874,22 +2742,24 @@ async def update_event_connection(
     connection_type: str,
     description: str,
     impact: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Update in database
+        # Removed user_id from update_event_connection
         updated = await db_instance.update_event_connection(
             connection_id=connection_id,
             connection_type=connection_type,
             description=description,
             impact=impact,
-            user_id=current_user.id,
             project_id=project_id,
         )
 
         # Update in knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": connection_id, "item_type": "event_connection"},
@@ -2913,17 +2783,20 @@ async def update_event_connection(
 async def delete_event_connection(
     connection_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Delete from database
+        # Removed user_id from delete_event_connection
         success = await db_instance.delete_event_connection(
-            connection_id, current_user.id, project_id
+            connection_id, project_id
         )
 
         # Delete from knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": connection_id, "item_type": "event_connection"}, "delete"
@@ -2940,11 +2813,12 @@ async def delete_event_connection(
 # Get Event Connections
 @event_router.get("/connections")
 async def get_event_connections(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_event_connections
         connections = await db_instance.get_event_connections(
-            project_id, current_user.id
+            project_id
         )
         return {"event_connections": connections}
     except Exception as e:
@@ -2953,33 +2827,34 @@ async def get_event_connections(
 
 
 # Update analyze event connections to save to knowledge base
-@event_router.post("/analyze-connections")
-async def analyze_event_connections(
-    project_id: str, current_user: User = Depends(get_current_active_user)
-):
-    try:
-        async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
-        ) as agent_manager:
-            connections = await agent_manager.analyze_event_connections()
-
-            # Convert each connection to a dictionary before returning
-            connection_dicts = [
-                {
-                    "id": getattr(conn, "connection_id", None),
-                    "event1_id": conn.event1_id,
-                    "event2_id": conn.event2_id,
-                    "connection_type": conn.connection_type,
-                    "description": conn.description,
-                    "impact": conn.impact,
-                }
-                for conn in connections
-            ]
-
-            return {"event_connections": connection_dicts}
-    except Exception as e:
-        logger.error(f"Error analyzing event connections: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# This endpoint seems duplicated, removing this one.
+# @event_router.post("/analyze-connections")
+# async def analyze_event_connections(
+#     project_id: str, current_user: User = Depends(get_current_active_user)
+# ):
+#     try:
+#         async with agent_manager_store.get_or_create_manager(
+#             current_user.id, project_id
+#         ) as agent_manager:
+#             connections = await agent_manager.analyze_event_connections()
+#
+#             # Convert each connection to a dictionary before returning
+#             connection_dicts = [
+#                 {
+#                     "id": getattr(conn, "connection_id", None),
+#                     "event1_id": conn.event1_id,
+#                     "event2_id": conn.event2_id,
+#                     "connection_type": conn.connection_type,
+#                     "description": conn.description,
+#                     "impact": conn.impact,
+#                 }
+#                 for conn in connections
+#             ]
+#
+#             return {"event_connections": connection_dicts}
+#     except Exception as e:
+#         logger.error(f"Error analyzing event connections: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # Location Connections
@@ -2992,10 +2867,12 @@ async def create_location_connection(
     description: str,
     travel_route: Optional[str] = None,
     cultural_exchange: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Create in database
+        # Removed user_id from create_location_connection
         connection_id = await db_instance.create_location_connection(
             location1_id=location1_id,
             location2_id=location2_id,
@@ -3004,7 +2881,6 @@ async def create_location_connection(
             travel_route=travel_route,
             cultural_exchange=cultural_exchange,
             project_id=project_id,
-            user_id=current_user.id,
         )
 
         # Add to knowledge base
@@ -3014,8 +2890,9 @@ async def create_location_connection(
         if cultural_exchange:
             content += f"\nCultural Exchange: {cultural_exchange}"
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.add_to_knowledge_base(
                 "location_connection",
@@ -3043,17 +2920,18 @@ async def update_location_connection(
     description: str,
     travel_route: Optional[str] = None,
     cultural_exchange: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Update in database
+        # Removed user_id from update_location_connection
         updated = await db_instance.update_location_connection(
             connection_id=connection_id,
             connection_type=connection_type,
             description=description,
             travel_route=travel_route,
             cultural_exchange=cultural_exchange,
-            user_id=current_user.id,
             project_id=project_id,
         )
 
@@ -3064,8 +2942,9 @@ async def update_location_connection(
         if cultural_exchange:
             content += f"\nCultural Exchange: {cultural_exchange}"
 
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": connection_id, "item_type": "location_connection"},
@@ -3089,26 +2968,30 @@ async def update_location_connection(
 async def delete_location_connection(
     connection_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Delete from database
+        # Removed user_id from delete_location_connection
         success = await db_instance.delete_location_connection(
-            connection_id, current_user.id, project_id
+            connection_id, project_id
         )
         if not success:
             raise HTTPException(status_code=404, detail="Connection not found")
 
         # Delete from knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": connection_id, "item_type": "location_connection"}, "delete"
             )
             # Delete any associated connections
+            # Removed user_id from get_location_connections
             connections = await db_instance.get_location_connections(
-                project_id, current_user.id
+                project_id
             )
             for conn in connections:
                 if (
@@ -3126,52 +3009,55 @@ async def delete_location_connection(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@location_router.post("/analyze-connections")
-async def analyze_location_connections(
-    project_id: str, current_user: User = Depends(get_current_active_user)
-):
-    try:
-        locations = await db_instance.get_locations(current_user.id, project_id)
-        if not locations or len(locations) < 2:
-            return JSONResponse(
-                {"message": "Not enough locations to analyze connections", "skip": True}
-            )
-
-        async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
-        ) as agent_manager:
-            connections = await agent_manager.analyze_location_connections()
-
-            # Convert each connection to a dictionary before returning
-            connection_dicts = [
-                {
-                    "id": connection.id,
-                    "location1_id": connection.location1_id,
-                    "location2_id": connection.location2_id,
-                    "connection_type": connection.connection_type,
-                    "description": connection.description,
-                    "travel_route": connection.travel_route,
-                    "cultural_exchange": connection.cultural_exchange,
-                }
-                for connection in connections
-            ]
-
-            return {
-                "location_connections": connection_dicts,
-            }
-    except Exception as e:
-        logger.error(f"Error analyzing location connections: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# This endpoint seems duplicated, removing this one.
+# @location_router.post("/analyze-connections")
+# async def analyze_location_connections(
+#     project_id: str, current_user: User = Depends(get_current_active_user)
+# ):
+#     try:
+#         locations = await db_instance.get_locations(current_user.id, project_id)
+#         if not locations or len(locations) < 2:
+#             return JSONResponse(
+#                 {"message": "Not enough locations to analyze connections", "skip": True}
+#             )
+#
+#         async with agent_manager_store.get_or_create_manager(
+#             current_user.id, project_id
+#         ) as agent_manager:
+#             connections = await agent_manager.analyze_location_connections()
+#
+#             # Convert each connection to a dictionary before returning
+#             connection_dicts = [
+#                 {
+#                     "id": connection.id,
+#                     "location1_id": connection.location1_id,
+#                     "location2_id": connection.location2_id,
+#                     "connection_type": connection.connection_type,
+#                     "description": connection.description,
+#                     "travel_route": connection.travel_route,
+#                     "cultural_exchange": connection.cultural_exchange,
+#                 }
+#                 for connection in connections
+#             ]
+#
+#             return {
+#                 "location_connections": connection_dicts,
+#             }
+#     except Exception as e:
+#         logger.error(f"Error analyzing location connections: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @event_router.post("")
 async def create_event(
     project_id: str,
     event_data: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Create in database
+        # Removed user_id from create_event
         event_id = await db_instance.create_event(
             title=event_data["title"],
             description=event_data["description"],
@@ -3179,12 +3065,12 @@ async def create_event(
             character_id=event_data.get("character_id"),
             location_id=event_data.get("location_id"),
             project_id=project_id,
-            user_id=current_user.id,
         )
 
         # Add to knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.add_to_knowledge_base(
                 "event",
@@ -3207,10 +3093,11 @@ async def create_event(
 
 @event_router.get("")
 async def get_events(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        events = await db_instance.get_events(project_id, current_user.id)
+        # Removed user_id from get_events
+        events = await db_instance.get_events(project_id)
         return {"events": events}
     except Exception as e:
         logger.error(f"Error getting events: {str(e)}")
@@ -3221,10 +3108,11 @@ async def get_events(
 async def get_event(
     event_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
-        event = await db_instance.get_event_by_id(event_id, current_user.id, project_id)
+        # Removed user_id from get_event_by_id
+        event = await db_instance.get_event_by_id(event_id, project_id)
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
         return event
@@ -3238,10 +3126,12 @@ async def update_event(
     event_id: str,
     project_id: str,
     event_data: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Update in database
+        # Removed user_id from update_event
         await db_instance.update_event(
             event_id=event_id,
             title=event_data["title"],
@@ -3250,12 +3140,12 @@ async def update_event(
             character_id=event_data.get("character_id"),
             location_id=event_data.get("location_id"),
             project_id=project_id,
-            user_id=current_user.id,
         )
 
         # Update in knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": event_id, "item_type": "event"},
@@ -3280,17 +3170,20 @@ async def update_event(
 async def delete_event(
     event_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Delete from database
-        success = await db_instance.delete_event(event_id, project_id, current_user.id)
+        # Removed user_id from delete_event
+        success = await db_instance.delete_event(event_id, project_id)
         if not success:
             raise HTTPException(status_code=404, detail="Event not found")
 
         # Delete from knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": event_id, "item_type": "event"}, "delete"
@@ -3301,63 +3194,65 @@ async def delete_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@event_router.post("/analyze-chapter")
-async def analyze_chapter_events(
-    project_id: str, current_user: User = Depends(get_current_active_user)
-):
-    try:
-        async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
-        ) as agent_manager:
-            # Analyze and get unprocessed chapter events
-            events = await agent_manager.analyze_unprocessed_chapter_events()
+# This endpoint seems duplicated, removing this one.
+# @event_router.post("/analyze-chapter")
+# async def analyze_chapter_events(
+#     project_id: str, current_user: User = Depends(get_current_active_user)
+# ):
+#     try:
+#         async with agent_manager_store.get_or_create_manager(
+#             current_user.id, project_id
+#         ) as agent_manager:
+#             # Analyze and get unprocessed chapter events
+#             events = await agent_manager.analyze_unprocessed_chapter_events()
 
-            # Add events to the knowledge base
-            for event in events:
-                try:
-                    # Create metadata with only the required fields
-                    metadata = {
-                        "id": event["id"],
-                        "title": event["title"],
-                        "type": "event",
-                    }
-
-                    # Add optional fields if they exist
-                    if "date" in event:
-                        metadata["date"] = event["date"]
-                    if "character_id" in event:
-                        metadata["character_id"] = event["character_id"]
-                    if "location_id" in event:
-                        metadata["location_id"] = event["location_id"]
-
-                    # Add to knowledge base
-                    await agent_manager.add_to_knowledge_base(
-                        "event", event["description"], metadata
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Error adding event to knowledge base for event {event.get('id', 'unknown')}: {str(e)}"
-                    )
-                    logger.error(
-                        f"Event data: {event}"
-                    )  # Log the event data for debugging
-                    continue  # Continue with the next event if one fails
-
-            return {"events": events}
-    except ValueError as ve:
-        return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
-    except Exception as e:
-        logger.error(f"Error analyzing chapter events: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+#             # Add events to the knowledge base
+#             for event in events:
+#                 try:
+#                     # Create metadata with only the required fields
+#                     metadata = {
+#                         "id": event["id"],
+#                         "title": event["title"],
+#                         "type": "event",
+#                     }
+#
+#                     # Add optional fields if they exist
+#                     if "date" in event:
+#                         metadata["date"] = event["date"]
+#                     if "character_id" in event:
+#                         metadata["character_id"] = event["character_id"]
+#                     if "location_id" in event:
+#                         metadata["location_id"] = event["location_id"]
+#
+#                     # Add to knowledge base
+#                     await agent_manager.add_to_knowledge_base(
+#                         "event", event["description"], metadata
+#                     )
+#                 except Exception as e:
+#                     logger.error(
+#                         f"Error adding event to knowledge base for event {event.get('id', 'unknown')}: {str(e)}"
+#                     )
+#                     logger.error(
+#                         f"Event data: {event}"
+#                     )  # Log the event data for debugging
+#                     continue  # Continue with the next event if one fails
+#
+#             return {"events": events}
+#     except ValueError as ve:
+#         return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
+#     except Exception as e:
+#         logger.error(f"Error analyzing chapter events: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # Location endpoints
 @location_router.get("")
 async def get_locations(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
-        locations = await db_instance.get_locations(current_user.id, project_id)
+        # Removed user_id from get_locations
+        locations = await db_instance.get_locations(project_id)
         return {"locations": locations}
     except Exception as e:
         logger.error(f"Error getting locations: {str(e)}")
@@ -3368,14 +3263,14 @@ async def get_locations(
 async def create_location(
     project_id: str,
     location_data: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from create_location
         location_id = await db_instance.create_location(
             name=location_data["name"],
             description=location_data["description"],
             coordinates=location_data.get("coordinates"),
-            user_id=current_user.id,
             project_id=project_id,
         )
         return {"id": location_id}
@@ -3384,60 +3279,62 @@ async def create_location(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@location_router.post("/analyze-chapter")
-async def analyze_chapter_locations(
-    project_id: str, current_user: User = Depends(get_current_active_user)
-):
-    try:
-        # Check if there are any unprocessed chapters
-        unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
-            project_id, current_user.id, PROCESS_TYPES["LOCATIONS"]
-        )
-
-        if not unprocessed_chapters:
-            return JSONResponse(
-                {
-                    "message": "All chapters analyzed for locations",
-                    "alreadyAnalyzed": True,
-                }
-            )
-
-        async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
-        ) as agent_manager:
-            locations = await agent_manager.analyze_unprocessed_chapter_locations()
-
-            # Add each location to knowledge base
-            for location in locations:
-                # Add to knowledge base
-                await agent_manager.add_to_knowledge_base(
-                    "location",
-                    f"{location['name']}: {location['description']}",
-                    {
-                        "item_id": location[
-                            "id"
-                        ],  # Now using id from the location returned by agent_manager
-                        "name": location["name"],
-                        "item_type": "location",
-                        "coordinates": location.get("coordinates"),
-                    },
-                )
-
-            return {"locations": locations}
-    except Exception as e:
-        logger.error(f"Error analyzing chapter locations: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# This endpoint seems duplicated, removing this one.
+# @location_router.post("/analyze-chapter")
+# async def analyze_chapter_locations(
+#     project_id: str, current_user: User = Depends(get_current_active_user)
+# ):
+#     try:
+#         # Check if there are any unprocessed chapters
+#         unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
+#             project_id, current_user.id, PROCESS_TYPES["LOCATIONS"]
+#         )
+#
+#         if not unprocessed_chapters:
+#             return JSONResponse(
+#                 {
+#                     "message": "All chapters analyzed for locations",
+#                     "alreadyAnalyzed": True,
+#                 }
+#             )
+#
+#         async with agent_manager_store.get_or_create_manager(
+#             current_user.id, project_id
+#         ) as agent_manager:
+#             locations = await agent_manager.analyze_unprocessed_chapter_locations()
+#
+#             # Add each location to knowledge base
+#             for location in locations:
+#                 # Add to knowledge base
+#                 await agent_manager.add_to_knowledge_base(
+#                     "location",
+#                     f"{location['name']}: {location['description']}",
+#                     {
+#                         "item_id": location[
+#                             "id"
+#                         ],  # Now using id from the location returned by agent_manager
+#                         "name": location["name"],
+#                         "item_type": "location",
+#                         "coordinates": location.get("coordinates"),
+#                     },
+#                 )
+#
+#             return {"locations": locations}
+#     except Exception as e:
+#         logger.error(f"Error analyzing chapter locations: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @location_router.get("/{location_id}")
 async def get_location(
     location_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_location_by_id
         location = await db_instance.get_location_by_id(
-            location_id, current_user.id, project_id
+            location_id, project_id
         )
         if not location:
             # logger.warning(f"Location not found: {location_id}")
@@ -3453,21 +3350,23 @@ async def update_location(
     location_id: str,
     project_id: str,
     location_data: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Update in database
+        # Removed user_id from update_location
+        # Note: update_location in DB takes (location_id, project_id, location_data)
         await db_instance.update_location(
             location_id=location_id,
-            name=location_data["name"],
-            description=location_data["description"],
             project_id=project_id,
-            user_id=current_user.id,
+            location_data=location_data # Pass the whole dict
         )
 
         # Update in knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": location_id, "item_type": "location"},
@@ -3490,26 +3389,30 @@ async def update_location(
 async def delete_location(
     location_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
+    local_user_id = db_instance.local_user_id # Get local user ID
     try:
         # Delete from database
+        # Removed user_id from delete_location
         success = await db_instance.delete_location(
-            location_id, project_id, current_user.id
+            location_id, project_id
         )
         if not success:
             raise HTTPException(status_code=404, detail="Location not found")
 
         # Delete from knowledge base
+        # Use local_user_id for agent manager
         async with agent_manager_store.get_or_create_manager(
-            current_user.id, project_id
+            local_user_id, project_id
         ) as agent_manager:
             await agent_manager.update_or_remove_from_knowledge_base(
                 {"item_id": location_id, "item_type": "location"}, "delete"
             )
             # Delete any associated connections
+            # Removed user_id from get_location_connections
             connections = await db_instance.get_location_connections(
-                project_id, current_user.id
+                project_id
             )
             for conn in connections:
                 if (
@@ -3527,13 +3430,14 @@ async def delete_location(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/locations/connections")
+@app.get("/locations/connections") # Should this be under project_router?
 async def get_location_connections(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_location_connections
         connections = await db_instance.get_location_connections(
-            project_id, current_user.id
+            project_id
         )
         return {"location_connections": connections}
     except Exception as e:
@@ -3544,11 +3448,12 @@ async def get_location_connections(
 # --- Validity Check Endpoints ---
 @validity_router.get("/")
 async def get_validity_checks(
-    project_id: str, current_user: User = Depends(get_current_active_user)
+    project_id: str, # Removed current_user dependency
 ):
     try:
+        # Removed user_id from get_all_validity_checks
         validity_checks = await db_instance.get_all_validity_checks(
-            current_user.id, project_id
+            project_id
         )
         return {"validityChecks": validity_checks}
     except Exception as e:
@@ -3560,12 +3465,13 @@ async def get_validity_checks(
 async def delete_validity_check(
     check_id: str,
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    # Removed current_user dependency
 ):
     try:
         # Validity checks likely don't have separate KB entries, just delete from DB
+        # Removed user_id from delete_validity_check
         result = await db_instance.delete_validity_check(
-            check_id, current_user.id, project_id
+            check_id, project_id
         )
         if result:
             return {"message": "Validity check deleted successfully"}
@@ -3579,7 +3485,7 @@ async def delete_validity_check(
 
 
 # --- Include Routers ---
-app.include_router(auth_router)
+# Removed auth_router
 app.include_router(chapter_router, prefix="/projects/{project_id}")
 app.include_router(codex_item_router, prefix="/projects/{project_id}")
 app.include_router(event_router, prefix="/projects/{project_id}")
