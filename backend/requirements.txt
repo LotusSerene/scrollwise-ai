@@ -11,7 +11,6 @@ pydantic[email]
 fastapi
 sqlalchemy
 cryptography
-supabase
 aiosqlite
 PyPDF2
 pdfplumber

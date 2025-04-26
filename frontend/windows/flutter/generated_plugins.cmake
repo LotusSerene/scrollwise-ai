@@ -3,7 +3,6 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  app_links
   flutter_secure_storage_windows
   protocol_handler
   screen_retriever_windows
