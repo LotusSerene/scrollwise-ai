@@ -2,7 +2,10 @@
 import 'dart:async';
 import 'dart:io';
 
-// Flutter imports
+// Dart imports
+import 'dart:async';
+import 'dart:io';
+
 // Flutter imports
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
@@ -19,6 +22,9 @@ import 'providers/relationship_provider.dart';
 import 'screens/chapters_screen.dart';
 import 'screens/codex_screen.dart';
 import 'screens/editor_screen.dart';
+import 'screens/chapters_screen.dart';
+import 'screens/codex_screen.dart';
+import 'screens/editor_screen.dart';
 import 'screens/home_screen.dart'; // Keep if used
 import 'screens/knowledge_base_screen.dart';
 import 'screens/landing_screen.dart'; // Keep for now, might remove later
@@ -30,8 +36,6 @@ import 'screens/timeline_screen.dart';
 import 'screens/validity_screen.dart';
 
 // Utils
-import 'utils/auth.dart';
-import 'utils/config_handler.dart';
 // Removed auth.dart import (no longer needed here)
 import 'utils/config_handler.dart'; // Keep config handler
 import 'utils/server_manager.dart';
