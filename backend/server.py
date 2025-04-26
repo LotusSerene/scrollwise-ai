@@ -288,7 +288,7 @@ async def get_project_stats(project_id: str) -> Dict[str, int]: # Removed user_i
         raise
 
 
-async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
+async def get_universe_stats(universe_id: str) -> Dict[str, int]: # Removed user_id
     """Get statistics for a universe including project count and total entries."""
     try:
         async with db_instance.Session() as session:
@@ -320,7 +320,7 @@ async def get_universe_stats(universe_id: str, user_id: str) -> Dict[str, int]:
 
 
 # --- API Routers ---
-auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
+# Removed auth_router
 chapter_router = APIRouter(prefix="/chapters", tags=["Chapters"])
 codex_item_router = APIRouter(prefix="/codex-items", tags=["Codex Items"])
 knowledge_base_router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base"])
