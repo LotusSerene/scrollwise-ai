@@ -534,12 +534,12 @@ class LocationConnection(BaseConnection):
         return result
 
     async def get_connections(
-        self, model_class, project_id: str, user_id: str
+        self, model_class, project_id: str # Removed user_id
     ) -> List[Dict[str, Any]]:
         try:
             query = (
                 select(model_class)
-                .filter_by(project_id=project_id, user_id=user_id)
+                .filter_by(project_id=project_id) # Removed user_id filter
                 .options(
                     joinedload(
                         model_class.location1
