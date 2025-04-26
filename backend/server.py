@@ -783,7 +783,7 @@ async def generate_chapters(
                                 subtype=item.get(
                                     "subtype"
                                 ),  # Assumes validated subtype string or None
-                                user_id=current_user.id,
+                                # user_id=current_user.id, # Removed user_id reference
                                 project_id=project_id,
                             )
                             codex_metadata = {
