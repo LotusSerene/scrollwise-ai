@@ -13,10 +13,7 @@ class LandingScreen extends StatelessWidget {
         elevation: 0,
         backgroundColor: Colors.transparent,
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.pushNamed(context, '/login'),
-            child: const Text('Login'),
-          ),
+          // Removed Login button from AppBar
         ],
       ),
       body: AnimatedBackground(

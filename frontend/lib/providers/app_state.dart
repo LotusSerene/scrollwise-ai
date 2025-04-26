@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/auth.dart';
-import '../utils/constants.dart';
+import '../utils/constants.dart'; // Keep constants
 import 'package:logging/logging.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+// Removed Supabase import
 
 final _logger = Logger('AppState');
 
@@ -25,23 +25,23 @@ class GenerationState {
 }
 
 class AppState extends ChangeNotifier {
-  bool _isLoggedIn = false;
+  // Removed _isLoggedIn
   String? _currentProjectId;
   List<dynamic> _chapters = [];
   List<dynamic> _codexItems = [];
   List<dynamic> _validityChecks = [];
-  String? _token;
+  // Removed _token
   int _chaptersRead = 0;
   int _codexEntries = 0;
   int _wordCount = 0;
   int _targetWordCount = 0;
 
-  bool get isLoggedIn => _isLoggedIn;
+  // Removed isLoggedIn getter
   String? get currentProjectId => _currentProjectId;
   List<dynamic> get chapters => _chapters;
   List<dynamic> get codexItems => _codexItems;
   List<dynamic> get validityChecks => _validityChecks;
-  String? get token => _token;
+  // Removed token getter
 
   int get chaptersRead => _chaptersRead;
   int get codexEntries => _codexEntries;
@@ -56,25 +56,9 @@ class AppState extends ChangeNotifier {
     'character_relationships': GenerationState(type: 'character_relationships'),
   };
 
-  Future<void> checkAuthState() async {
-    final session = Supabase.instance.client.auth.currentSession;
-    // final sessionId = await getSessionId(); // Removed custom session ID logic
-
-    // Login state now depends only on Supabase session
-    _isLoggedIn = session != null;
-    _token = session?.accessToken;
-    notifyListeners();
-  }
-
-  void setLoggedIn(bool value) {
-    _isLoggedIn = value;
-    notifyListeners();
-  }
-
-  void setToken(String? token) {
-    _token = token;
-    notifyListeners();
-  }
+  // Removed checkAuthState
+  // Removed setLoggedIn
+  // Removed setToken
 
   void setChapters(List<dynamic> chapters) {
     _chapters = chapters;

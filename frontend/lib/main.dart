@@ -3,10 +3,11 @@ import 'dart:async';
 import 'dart:io';
 
 // Flutter imports
+// Flutter imports
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+// Removed Supabase import
 import 'package:window_manager/window_manager.dart';
 
 // Providers
@@ -18,10 +19,10 @@ import 'providers/relationship_provider.dart';
 import 'screens/chapters_screen.dart';
 import 'screens/codex_screen.dart';
 import 'screens/editor_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/home_screen.dart'; // Keep if used
 import 'screens/knowledge_base_screen.dart';
-import 'screens/landing_screen.dart';
-import 'screens/login_screen.dart';
+import 'screens/landing_screen.dart'; // Keep for now, might remove later
+// Removed LoginScreen import
 import 'screens/projects_screen.dart';
 import 'screens/query_screen.dart';
 import 'screens/settings_screen.dart';
@@ -31,12 +32,14 @@ import 'screens/validity_screen.dart';
 // Utils
 import 'utils/auth.dart';
 import 'utils/config_handler.dart';
+// Removed auth.dart import (no longer needed here)
+import 'utils/config_handler.dart'; // Keep config handler
 import 'utils/server_manager.dart';
 import 'utils/theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-bool _preventExit = true;
+bool _preventExit = true; // Keep for window close handling
 
 Future<void> main() async {
   final log = Logger('main');
@@ -86,19 +89,10 @@ Future<void> main() async {
             throw TimeoutException('Server start timed out');
           },
         ),
-        supabase.Supabase.initialize(
-          url: ConfigHandler.get('SUPABASE_URL', fallback: ''),
-          anonKey: ConfigHandler.get('SUPABASE_ANON_KEY', fallback: ''),
-        ).timeout(
-          const Duration(seconds: 10),
-          onTimeout: () {
-            log.warning('Supabase initialization failed');
-            throw TimeoutException('Supabase initialization failed');
-          },
-        ),
+        // Removed Supabase initialization block
       ]);
     } catch (e) {
-      log.severe('Service initialization failed: $e');
+      log.severe('Service initialization failed: $e'); // Keep error handling
       _preventExit = false; // Allow exit when there's a startup error
       rethrow;
     }
@@ -117,17 +111,7 @@ Future<void> main() async {
       ),
     );
 
-    // Initialize auth state after UI is running
-    Future.delayed(const Duration(seconds: 1), () async {
-      try {
-        final appState = navigatorKey.currentContext != null
-            ? Provider.of<AppState>(navigatorKey.currentContext!, listen: false)
-            : null;
-        await appState?.checkAuthState();
-      } catch (e) {
-        log.warning('Auth initialization error: $e');
-      }
-    });
+    // Removed auth state initialization block
 
     log.info('Application started successfully');
   } catch (e, stackTrace) {
@@ -205,16 +189,10 @@ class _ScrollWiseAppState extends State<ScrollWiseApp>
     windowManager.addListener(this);
 
     // Initialize auth state when app starts
-    _initializeAuth();
+    // Removed _initializeAuth call
   }
 
-  Future<void> _initializeAuth() async {
-    try {
-      await initializeAuthState();
-    } catch (e) {
-      log.severe('Error initializing auth state: $e');
-    }
-  }
+  // Removed _initializeAuth method
 
   @override
   void dispose() {
@@ -309,23 +287,13 @@ class _ScrollWiseAppState extends State<ScrollWiseApp>
       themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
-      home: Consumer<AppState>(
-        builder: (context, appState, _) {
-          return appState.isLoggedIn
-              ? const ProjectsScreen()
-              : const LandingScreen();
-        },
-      ),
+      // Go directly to ProjectsScreen, remove LandingScreen/Login logic
+      home: const ProjectsScreen(),
       routes: {
-        '/landing': (context) => const LandingScreen(),
+        // '/landing': (context) => const LandingScreen(), // Can remove landing if not needed
         '/projects': (context) => const ProjectsScreen(),
-        '/home': (context) => const HomeScreen(),
-        '/login': (context) => LoginScreen(onLogin: (token) {
-              final appState = Provider.of<AppState>(context, listen: false);
-              appState.setLoggedIn(true);
-              appState.setToken(token);
-              Navigator.pushReplacementNamed(context, '/projects');
-            }),
+        '/home': (context) => const HomeScreen(), // Keep home if used
+        // Removed '/login' route
         '/editor': (context) => const EditorScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/codex': (context) => CodexScreen(
