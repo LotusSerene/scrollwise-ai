@@ -53,9 +53,9 @@ class LandingScreen extends StatelessWidget {
           _buildFeaturesList(context),
           const SizedBox(height: 32),
           FilledButton.icon(
-            onPressed: () => Navigator.pushNamed(context, '/login'),
-            icon: const Icon(Icons.login),
-            label: const Text('Get Started'),
+           onPressed: () => Navigator.pushReplacementNamed(context, '/projects'), // Navigate directly to projects
+           icon: const Icon(Icons.rocket_launch_outlined), // Changed icon
+           label: const Text('Go to Projects'), // Changed text
           ),
           const SizedBox(height: 16),
           Text(
