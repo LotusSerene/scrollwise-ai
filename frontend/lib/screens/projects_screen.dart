@@ -750,11 +750,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
             },
           ),
           const Divider(),
-          ListTile(
-            leading: const Icon(Icons.logout),
-            title: const Text('Logout'),
-            onTap: _handleSignOut,
-          ),
         ],
       ),
     );
