@@ -2732,7 +2732,7 @@ async def get_event_connections(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/locations/connections")  # Should this be under project_router?
+@location_router.get("/connections")
 async def get_location_connections(
     project_id: str,  # Removed current_user dependency
 ):
