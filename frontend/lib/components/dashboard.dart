@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
@@ -46,12 +46,9 @@ class _DashboardState extends State<Dashboard> {
     });
 
     try {
-      final headers = await getAuthHeaders();
-
       // Fetch chapters
       final chapterResponse = await http.get(
         Uri.parse('$apiUrl/chapters?project_id=${widget.projectId}'),
-        headers: headers,
       );
 
       if (chapterResponse.statusCode == 200) {
@@ -68,7 +65,6 @@ class _DashboardState extends State<Dashboard> {
       // Fetch codex items
       final codexResponse = await http.get(
         Uri.parse('$apiUrl/codex-items?project_id=${widget.projectId}'),
-        headers: headers,
       );
 
       if (codexResponse.statusCode == 200) {

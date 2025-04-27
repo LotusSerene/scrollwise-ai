@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../utils/auth.dart';
+
 import '../models/character.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -45,10 +45,8 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   Future<void> _loadCharacters() async {
     setState(() => isLoading = true);
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters'),
-        headers: headers,
       );
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body)['characters'];
@@ -73,7 +71,7 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     appState.updateCharacterJourneyProgress(isGenerating: true);
 
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
 
       bool anyUpdates = false;
@@ -82,8 +80,8 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
       for (var character in characters) {
         if (!ignoredCharacters.contains(character.id)) {
           final response = await http.post(
-            Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters/${character.id}/extract-backstory'),
-            headers: headers,
+            Uri.parse(
+                '$apiUrl/projects/${widget.projectId}/codex/characters/${character.id}/extract-backstory'),
             body: json.encode({
               'character_id': character.id,
               'chapter_id': 'latest',
@@ -141,10 +139,11 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
   Future<void> _deleteBackstory(String characterId) async {
     setState(() => isLoading = true);
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
+      headers['Content-Type'] = 'application/json';
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/characters/$characterId/backstory'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/codex-items/characters/$characterId/backstory'),
       );
       if (response.statusCode == 200) {
         setState(() {
@@ -205,11 +204,11 @@ class _CharacterJourneyScreenState extends State<CharacterJourneyScreen> {
     if (result != null) {
       setState(() => isLoading = true);
       try {
-        final headers = await getAuthHeaders();
+        final headers = {};
         headers['Content-Type'] = 'application/json';
         final response = await http.put(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/characters/${character.id}/backstory'),
-          headers: headers,
+          Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/codex-items/characters/${character.id}/backstory'),
           body: json.encode(result), // Change this line
         );
 

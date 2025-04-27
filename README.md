@@ -150,7 +150,7 @@ This means:
 
 ## 🌐 Links
 
-- [Official Website](https://scrollwise.netlify.app/)
+- [Official Website](https://scrllwise.com/)
 - [Discord](https://discord.gg/R8PUtxFPUq)
 - [Changelog](https://github.com/LotusSerene/scrollwise-ai/blob/master/changelog.md)
 

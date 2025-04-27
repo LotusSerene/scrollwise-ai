@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:logging/logging.dart';
 
@@ -39,10 +39,11 @@ class _QueryState extends State<Query> {
     final appState = Provider.of<AppState>(context, listen: false);
 
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
+      headers['Content-Type'] = 'application/json';
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/chat-history'),
       );
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(utf8.decode(response.bodyBytes));
@@ -58,12 +59,11 @@ class _QueryState extends State<Query> {
   Future<void> _saveChatHistory() async {
     final appState = Provider.of<AppState>(context, listen: false);
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
       // Use the non-prefixed route as defined in server.py
       await http.post(
         Uri.parse('$apiUrl/chat-history'),
-        headers: headers,
         body: utf8.encode(json.encode({
           'chatHistory': appState.queryState['chatHistory'],
         })),
@@ -89,11 +89,10 @@ class _QueryState extends State<Query> {
     );
 
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
         Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/query'),
-        headers: headers,
         body: utf8.encode(json.encode({
           'query': _queryController.text,
           'chatHistory': appState.queryState['chatHistory'],
@@ -147,10 +146,11 @@ class _QueryState extends State<Query> {
     final appState = Provider.of<AppState>(context, listen: false);
 
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
+      headers['Content-Type'] = 'application/json';
       await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/reset-chat-history'),
       );
       appState.updateQueryProgress(
         chatHistory: [],

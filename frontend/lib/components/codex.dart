@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
@@ -170,12 +170,12 @@ class _CodexState extends State<Codex> {
       });
 
       try {
-        final headers = await getAuthHeaders();
+        final headers = {};
         headers['Content-Type'] = 'application/json';
 
         final response = await http.put(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/${item['id']}'),
-          headers: headers,
+          Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/codex-items/${item['id']}'),
           body: json.encode({
             'name': nameController.text,
             'description': descriptionController.text,
@@ -360,10 +360,8 @@ class _CodexState extends State<Codex> {
     final navigator = Navigator.of(context);
 
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/${widget.projectId}/codex-items/$itemId'),
-        headers: headers,
       );
 
       if (!context.mounted) return;
@@ -419,7 +417,7 @@ class _CodexState extends State<Codex> {
     setState(() => _isAdding = true);
 
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
 
       final body = json.encode({
@@ -436,7 +434,6 @@ class _CodexState extends State<Codex> {
             .post(
               Uri.parse(
                   '$apiUrl/projects/${widget.projectId}/codex-items/?project_id=${widget.projectId}'),
-              headers: headers,
               body: body,
             )
             .timeout(const Duration(seconds: 30)); // Add timeout just in case

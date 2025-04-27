@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:logging/logging.dart';
 
@@ -86,7 +86,6 @@ class _ValidityState extends State<Validity> {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/validity-checks/'),
-        headers: await getAuthHeaders(),
       );
 
       if (!_mounted) return;
@@ -124,8 +123,8 @@ class _ValidityState extends State<Validity> {
   Future<void> _handleDeleteCheck(String checkId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/validity-checks/$checkId'),
-        headers: await getAuthHeaders(),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/validity-checks/$checkId'),
       );
       if (response.statusCode == 200) {
         setState(() {

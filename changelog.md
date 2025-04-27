@@ -186,3 +186,7 @@
 - Migrated to Qdrant
 
 - Added vector store backing
+
+## 1.0.6
+
+- Removed Supabase

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../utils/auth.dart';
 import '../models/event.dart';
 import '../models/location.dart';
 import 'package:http/http.dart' as http;
@@ -68,10 +67,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _loadEvents() async {
     setState(() => isLoading = true);
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/events/'),
-        headers: headers,
       );
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body)['events'];
@@ -90,10 +87,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _loadLocations() async {
     setState(() => isLoading = true);
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/locations/'),
-        headers: headers,
       );
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body)['locations'];
@@ -114,17 +109,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     appState.updateTimelineProgress(isGenerating: true);
 
     try {
-      final headers = await getAuthHeaders();
-
       // Removed chapter_id parameter since it's handled server-side
       final eventResponse = await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/events/analyze-chapter'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/events/analyze-chapter'),
       );
 
       final locationResponse = await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/locations/analyze-chapter'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/locations/analyze-chapter'),
       );
 
       if (eventResponse.statusCode == 200 &&
@@ -166,12 +159,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
     if (result != null) {
       try {
-        final headers = await getAuthHeaders();
-        headers['Content-Type'] = 'application/json';
-
         final response = await http.put(
           Uri.parse('$apiUrl/projects/${widget.projectId}/events/${event.id}'),
-          headers: headers,
           body: json.encode(result),
         );
 
@@ -193,12 +182,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
     if (result != null) {
       try {
-        final headers = await getAuthHeaders();
-        headers['Content-Type'] = 'application/json';
-
         final response = await http.put(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/locations/${location.id}'),
-          headers: headers,
+          Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/locations/${location.id}'),
           body: json.encode(result),
         );
 
@@ -214,10 +200,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _deleteEvent(String eventId) async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/${widget.projectId}/events/$eventId'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {
@@ -259,10 +243,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
 
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/${widget.projectId}/locations/$locationId'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {
@@ -295,11 +277,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       if (result != null) {
         try {
-          final headers = await getAuthHeaders();
-          headers['Content-Type'] = 'application/json';
           final response = await http.post(
             Uri.parse('$apiUrl/projects/${widget.projectId}/events/'),
-            headers: headers,
             body: json.encode(result),
           );
           if (response.statusCode == 201 || response.statusCode == 200) {
@@ -318,11 +297,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       if (result != null) {
         try {
-          final headers = await getAuthHeaders();
-          headers['Content-Type'] = 'application/json';
           final response = await http.post(
             Uri.parse('$apiUrl/projects/${widget.projectId}/locations/'),
-            headers: headers,
             body: json.encode(result),
           );
           if (response.statusCode == 201 || response.statusCode == 200) {
@@ -338,10 +314,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _loadEventConnections() async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/events/connections'),
-        headers: headers,
       );
       if (response.statusCode == 200) {
         final List<dynamic> data =
@@ -358,10 +332,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _deleteEventConnection(String connectionId) async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/events/connections/$connectionId'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/events/connections/$connectionId'),
       );
 
       if (response.statusCode == 200) {
@@ -375,50 +348,51 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _loadLocationConnections() async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/locations/connections'),
-        headers: headers,
       );
       if (response.statusCode == 200) {
         final decodedBody = json.decode(response.body);
-        // Check if the body is a map and contains the key before accessing
-        if (decodedBody is Map<String, dynamic> && decodedBody.containsKey('location_connections')) {
+        if (decodedBody is Map<String, dynamic> &&
+            decodedBody.containsKey('location_connections')) {
           final List<dynamic> data = decodedBody['location_connections'];
           setState(() {
             locationConnections =
                 data.map((json) => LocationConnection.fromJson(json)).toList();
           });
         } else if (decodedBody is! Map<String, dynamic>) {
-          _showError('Error loading location connections: Response body is not a Map.');
+          _showError(
+              'Error loading location connections: Response body is not a Map.');
           setState(() {
             locationConnections = [];
           });
         } else {
-          // Handle cases where the key is missing (since it passed the Map check but failed the containsKey check)
-          _showError('Error loading location connections: "location_connections" key missing in response.');
+          _showError(
+              'Error loading location connections: "location_connections" key missing in response.');
           setState(() {
             locationConnections = [];
           });
         }
       } else {
-        // Handle non-200 status codes
-        _showError('Failed to load location connections: Status code ${response.statusCode}');
+        _showError(
+            'Failed to load location connections: Status code ${response.statusCode}');
         setState(() {
-          locationConnections = []; // Clear existing connections on error
+          locationConnections = [];
         });
       }
     } catch (e) {
       _showError('Error loading location connections: $e');
+      setState(() {
+        locationConnections = [];
+      });
     }
   }
 
   Future<void> _deleteLocationConnection(String connectionId) async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/locations/connections/$connectionId'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/locations/connections/$connectionId'),
       );
 
       if (response.statusCode == 200) {
@@ -432,12 +406,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _updateEventConnection(EventConnection connection) async {
     try {
-      final headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/json';
-
       final response = await http.put(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/events/connections/${connection.id}'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/events/connections/${connection.id}'),
         body: json.encode({
           'connection_type': connection.connectionType,
           'description': connection.description,
@@ -456,12 +427,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _updateLocationConnection(LocationConnection connection) async {
     try {
-      final headers = await getAuthHeaders();
-      headers['Content-Type'] = 'application/json';
-
       final response = await http.put(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/locations/connections/${connection.id}'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/locations/connections/${connection.id}'),
         body: json.encode({
           'travel_route': connection.travelRoute,
           'cultural_exchange': connection.culturalExchange,
@@ -480,18 +448,16 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _analyzeConnections() async {
     setState(() => isLoading = true);
     try {
-      final headers = await getAuthHeaders();
-
       // Analyze event connections
       final eventResponse = await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/events/analyze-connections'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/events/analyze-connections'),
       );
 
       // Analyze location connections
       final locationResponse = await http.post(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/locations/analyze-connections'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/locations/analyze-connections'),
       );
 
       final eventData = json.decode(eventResponse.body);
@@ -1053,13 +1019,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   // Add this method for batch deletions
   Future<void> _batchDeleteLocations(List<String> locationIds) async {
     try {
-      final headers = await getAuthHeaders();
-
       // Delete all locations without individual confirmations
       for (final locationId in locationIds) {
         final response = await http.delete(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/locations/$locationId'),
-          headers: headers,
+          Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/locations/$locationId'),
         );
 
         if (response.statusCode != 200) {

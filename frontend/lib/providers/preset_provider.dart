@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
-import '../utils/auth.dart';
+
 import 'package:logging/logging.dart';
 
 final _logger = Logger('PresetProvider');
@@ -34,7 +34,6 @@ class PresetProvider with ChangeNotifier {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/projects/$_currentProjectId/presets'),
-        headers: await getAuthHeaders(),
       );
 
       if (response.statusCode == 200) {
@@ -64,8 +63,8 @@ class PresetProvider with ChangeNotifier {
     }
     try {
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
-        headers: await getAuthHeaders(),
+        Uri.parse(
+            '$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
       );
 
       if (response.statusCode == 200) {
@@ -92,7 +91,6 @@ class PresetProvider with ChangeNotifier {
       final response = await http.post(
         Uri.parse('$apiUrl/projects/$_currentProjectId/presets'),
         headers: {
-          ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
         body: json.encode({
@@ -121,8 +119,8 @@ class PresetProvider with ChangeNotifier {
       }
 
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
-        headers: await getAuthHeaders(),
+        Uri.parse(
+            '$apiUrl/projects/$_currentProjectId/presets/${Uri.encodeComponent(presetName)}'),
       );
 
       if (response.statusCode == 200) {

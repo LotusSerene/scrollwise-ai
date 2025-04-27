@@ -57,7 +57,7 @@ class LandingScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Beta v1.0.5',
+            'Beta v1.0.6',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.primary,
                 ),

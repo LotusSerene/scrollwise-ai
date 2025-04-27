@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
@@ -91,7 +91,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/'),
-        headers: await getAuthHeaders(),
       );
 
       if (!_mounted) return;
@@ -138,7 +137,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
 
     try {
       final headers = <String, String>{
-        ...await getAuthHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded',
       };
       final response = await http.post(
@@ -216,7 +214,7 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
               Uri.parse('$apiUrl/documents/extract'),
             );
 
-            request.headers.addAll(await getAuthHeaders());
+            request.headers.addAll({});
             request.files.add(
               http.MultipartFile(
                 'file',
@@ -277,7 +275,6 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
       final response = await http.post(
         Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/'),
         headers: {
-          ...await getAuthHeaders(),
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: {
@@ -337,8 +334,8 @@ class _KnowledgeBaseState extends State<KnowledgeBase> {
   Future<void> _handleDelete(String embeddingId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/knowledge-base/$embeddingId'),
-        headers: await getAuthHeaders(),
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/knowledge-base/$embeddingId'),
       );
       final jsonResponse = json.decode(response.body);
       if ((response.statusCode == 204 || response.statusCode == 200) &&

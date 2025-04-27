@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
 import '../utils/constants.dart';
 import '../providers/preset_provider.dart';
 import 'package:provider/provider.dart';
@@ -162,108 +161,100 @@ class _CreateChapterState extends State<CreateChapter> {
 
   Future<void> _handleSubmit(BuildContext context) async {
     final appState = Provider.of<AppState>(context, listen: false);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     if (_formKey.currentState!.validate()) {
-      appState.updateGenerationProgress(
-        isGenerating: true,
-        currentChapter: 0,
-        progress: 0.0,
-        streamedContent: '',
-        generatedChapters: [],
-      );
+      setState(() {
+        _isGenerating = true;
+        _generatedChapterIds = [];
+        _currentChapterContent = '';
+      });
 
-      try {
-        final headers = {
-          ...await getAuthHeaders(),
-          'Content-Type': 'application/json',
-        };
+      final plot = _plotController.text;
+      final numChapters = _numChapters;
+      final writingStyle = _writingStyleController.text;
+      final additionalInstructions =
+          'Style Guide:\n${_styleGuideController.text}\n\nAdditional Instructions:\n${_additionalInstructionsController.text}\n\nTarget Word Count: ${_wordCountController.text}';
 
-        final requestBody = {
-          'numChapters': _numChapters,
-          'plot': _plotController.text,
-          'writingStyle': _writingStyleController.text,
-          'instructions': {
-            'styleGuide': _styleGuideController.text,
-            'wordCount': int.tryParse(_wordCountController.text) ?? 1000,
-            'additionalInstructions': _additionalInstructionsController.text,
-          },
-          'project_id': widget.projectId,
-        };
+      await appState.generateChapter(
+        projectId: widget.projectId,
+        description: plot,
+        numChapters: numChapters,
+        writingStyle: writingStyle,
+        additionalInstructions: additionalInstructions,
+        onSuccess: (List<dynamic> successfulChaptersData) async {
+          final chapterIds = successfulChaptersData
+              .map((chapterData) => chapterData['id'] as String?)
+              .where((id) => id != null)
+              .cast<String>()
+              .toList();
 
-        final response = await http.post(
-          Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/generate'),
-          headers: headers,
-          body: utf8.encode(json.encode(requestBody)),
-        );
-
-        if (response.statusCode == 200) {
-          final responseData = json.decode(response.body);
-
-          List<String> chapterIds = [];
-
-          if (responseData['generated_chapter_ids'] != null) {
-            chapterIds =
-                List<String>.from(responseData['generated_chapter_ids']);
-          } else if (responseData['generated_chapters'] != null) {
-            chapterIds = List<String>.from(
-                (responseData['generated_chapters'] as List)
-                    .map((chapter) => chapter['id']));
-          }
+          if (!mounted) return;
 
           if (chapterIds.isNotEmpty) {
             setState(() {
               _generatedChapterIds = chapterIds;
               _displayedChapterIndex = 0;
             });
-
             await _fetchChapterContent(chapterIds[0]);
 
-            appState.completeChapterGeneration();
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
+            scaffoldMessenger.showSnackBar(
               const SnackBar(content: Text('Chapters generated successfully')),
             );
           } else {
-            throw Exception('No chapter IDs received from server');
+            _showError(scaffoldMessenger,
+                'No valid chapter data received after generation.');
+            setState(() {
+              _isGenerating = false;
+            });
           }
-        } else {
-          throw Exception('Error ${response.statusCode}: ${response.body}');
-        }
-      } catch (error) {
-        appState.cancelChapterGeneration();
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error generating chapters: $error')),
-        );
-      }
+          if (mounted) {
+            setState(() {
+              _isGenerating = false;
+            });
+          }
+        },
+        onError: (String error) {
+          if (!mounted) return;
+          _showError(scaffoldMessenger, 'Error generating chapters: $error');
+          setState(() {
+            _isGenerating = false;
+          });
+        },
+      );
     }
+  }
+
+  void _showError(ScaffoldMessengerState messenger, String message) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   Future<void> _fetchChapterContent(String chapterId) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      final headers = await getAuthHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {
         if (!mounted) return;
-        final chapterData = json.decode(response.body);
+        final chapterData = json.decode(utf8.decode(response.bodyBytes));
         setState(() {
-          _currentChapterContent = chapterData['content'];
+          _currentChapterContent =
+              chapterData['content'] ?? 'No content found.';
         });
       } else {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Error fetching chapter content')),
-        );
+        _showError(scaffoldMessenger,
+            'Error fetching chapter content: ${response.statusCode}');
       }
     } catch (error) {
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(content: Text('Error fetching chapter content')),
-      );
+      _showError(scaffoldMessenger, 'Error fetching chapter content: $error');
     }
   }
 

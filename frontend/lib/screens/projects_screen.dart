@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
@@ -175,13 +175,11 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     if (!_mounted) return;
 
     try {
-      final headers = await getAuthHeaders();
       _logger.info('Fetching projects');
 
       final response = await http
           .get(
             Uri.parse('$apiUrl/projects/'), // Note the trailing slash
-            headers: headers,
           )
           .timeout(const Duration(seconds: 10));
 
@@ -208,12 +206,10 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   Future<List<dynamic>> _fetchUniverses() async {
     if (!_mounted) return [];
     try {
-      final headers = await getAuthHeaders();
       _logger.info('Fetching universes');
 
       final response = await http.get(
         Uri.parse('$apiUrl/universes/'),
-        headers: headers,
       );
 
       if (!_mounted) return [];
@@ -243,7 +239,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     if (_projectFormKey.currentState!.validate()) {
       try {
         final headers = {
-          ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         };
 
@@ -300,7 +295,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       final response = await http.post(
         Uri.parse('$apiUrl/universes/'),
         headers: {
-          ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
         body: utf8.encode(json.encode({'name': name})),
@@ -336,7 +330,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     try {
       final response = await http.put(
         Uri.parse('$apiUrl/universes/$universeId'),
-        headers: await getAuthHeaders(),
         body: json.encode({'name': newName}),
       );
 
@@ -367,7 +360,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
     try {
       final response = await http.delete(
         Uri.parse('$apiUrl/universes/$universeId'),
-        headers: await getAuthHeaders(),
       );
 
       if (response.statusCode == 200) {
@@ -448,7 +440,6 @@ class _ProjectsScreenState extends State<ProjectsScreen>
       final response = await http.put(
         Uri.parse('$apiUrl/projects/$projectId/universe'),
         headers: {
-          ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
         body: json.encode(
@@ -705,53 +696,54 @@ class _ProjectsScreenState extends State<ProjectsScreen>
   }
 
   Widget _buildDrawer() {
+    // Define the list tile items here
+    final drawerItems = [
+      _buildDrawerItem(Icons.folder, 'Projects', '/', true),
+      _buildDrawerItem(Icons.settings, 'Settings', '/settings'),
+      // Removed Sign Out button
+    ];
+
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
           DrawerHeader(
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).primaryColor,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Image.asset(
-                  'assets/images/logo.png',
-                  width: 48,
-                  height: 48,
-                  color: Colors.white,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'ScrollWise AI',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ],
+            child: Text(
+              'ScrollWise AI',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onPrimary,
+                fontSize: 24,
+              ),
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: const Text('Settings'),
-            onTap: () {
-              Navigator.pop(context); // Close the drawer
-              Navigator.pushNamed(context, '/settings');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.folder),
-            title: const Text('Projects'),
-            onTap: () {
-              Navigator.pop(context); // Close the drawer
-            },
-          ),
-          const Divider(),
+          ...drawerItems,
         ],
       ),
+    );
+  }
+
+  ListTile _buildDrawerItem(IconData icon, String title, String route,
+      [bool isSelected = false]) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      selected: isSelected,
+      onTap: () {
+        Navigator.of(context).pop(); // Close the drawer
+        // Navigate only if it's not the current route
+        if (ModalRoute.of(context)?.settings.name != route) {
+          if (route == '/settings') {
+            Navigator.of(context).pushNamed(route);
+          } else if (route == '/') {
+            // Already on projects screen, maybe just refresh?
+            _fetchData();
+          }
+          // Add other routes if necessary
+        }
+      },
     );
   }
 
@@ -1014,37 +1006,5 @@ class _ProjectsScreenState extends State<ProjectsScreen>
         return _buildProjectCard(_displayedProjects[index]);
       },
     );
-  }
-
-  // Add this method to handle sign out
-  Future<void> _handleSignOut() async {
-    try {
-      final headers = await getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$apiUrl/auth/signout'),
-        headers: headers,
-      );
-
-      if (response.statusCode == 200) {
-        // Clear all local storage (Supabase session is handled by Supabase library)
-        // await removeSessionId(); // Removed custom session ID logic
-        if (mounted) {
-          // Navigate to login and clear navigation stack
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/login',
-            (Route<dynamic> route) => false, // This removes all previous routes
-          );
-        }
-      } else {
-        throw Exception('Failed to sign out');
-      }
-    } catch (error) {
-      _logger.severe('Sign out error: $error');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error signing out')),
-        );
-      }
-    }
   }
 }

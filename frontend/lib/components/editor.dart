@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
@@ -146,10 +146,8 @@ class _EditorState extends State<Editor> {
     } else {
       // If the chapter is not in the state, fetch it from the API
       try {
-        final headers = await getAuthHeaders();
         final response = await http.get(
           Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
-          headers: headers,
         );
         if (response.statusCode == 200) {
           final chapter = json.decode(utf8.decode(response.bodyBytes));
@@ -176,12 +174,11 @@ class _EditorState extends State<Editor> {
     if (!mounted) return;
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
-      final headers = await getAuthHeaders();
       if (!mounted) return;
 
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
-        headers: headers,
+        Uri.parse(
+            '$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
       );
 
       if (!mounted) return;
@@ -224,12 +221,10 @@ class _EditorState extends State<Editor> {
     final appState = Provider.of<AppState>(context, listen: false);
 
     try {
-      final headers = await getAuthHeaders();
       if (!mounted) return;
 
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId'),
-        headers: headers,
       );
 
       if (!mounted) return;
@@ -269,7 +264,6 @@ class _EditorState extends State<Editor> {
       return;
     }
 
-    final headers = await getAuthHeaders();
     if (!mounted) return;
 
     final chapterId =
@@ -285,12 +279,12 @@ class _EditorState extends State<Editor> {
 
       // Create the initial request
       var uri = _selectedChapter != null
-          ? Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/$chapterId')
+          ? Uri.parse(
+              '$apiUrl/projects/${widget.projectId}/chapters/$chapterId')
           : Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/');
 
       var request =
           http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
-      request.headers.addAll(headers);
       request.body = json.encode(requestBody);
 
       var streamedResponse = await client.send(request);
@@ -303,7 +297,6 @@ class _EditorState extends State<Editor> {
 
         uri = uri.resolve(location);
         request = http.Request(_selectedChapter != null ? 'PUT' : 'POST', uri);
-        request.headers.addAll(headers);
         request.body = json.encode(requestBody);
 
         streamedResponse = await client.send(request);
@@ -429,7 +422,7 @@ class _EditorState extends State<Editor> {
                 Uri.parse('$apiUrl/documents/extract'),
               );
 
-              request.headers.addAll(await getAuthHeaders());
+              request.headers.addAll({});
 
               request.files.add(
                 http.MultipartFile(
@@ -503,7 +496,7 @@ class _EditorState extends State<Editor> {
     try {
       var uri = Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/');
       var request = http.Request('POST', uri);
-      request.headers.addAll(await getAuthHeaders());
+      request.headers.addAll({});
       request.body = json.encode({
         'title': title,
         'content': content,
@@ -520,7 +513,7 @@ class _EditorState extends State<Editor> {
 
         uri = uri.resolve(location);
         request = http.Request('POST', uri);
-        request.headers.addAll(await getAuthHeaders());
+        request.headers.addAll({});
         request.body = json.encode({
           'title': title,
           'content': content,
@@ -969,13 +962,12 @@ class _EditorState extends State<Editor> {
       List<String> failures = [];
 
       // Get all chapters with full content
-      final headers = await getAuthHeaders();
       for (var chapter in appState.chapters) {
         try {
           // Fetch full chapter content if needed
           final response = await http.get(
-            Uri.parse('$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
-            headers: headers,
+            Uri.parse(
+                '$apiUrl/projects/${widget.projectId}/chapters/${chapter['id']}'),
           );
 
           if (response.statusCode == 200) {

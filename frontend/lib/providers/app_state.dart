@@ -191,6 +191,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> fetchChapters(String projectId) async {
+    // Add guard clause
+    if (projectId.isEmpty) {
+      _logger.warning('fetchChapters called with empty projectId, skipping.');
+      return;
+    }
     try {
       // Use _baseHeaders directly
       final headers = _baseHeaders; // Changed from getAuthHeaders()
@@ -204,11 +209,11 @@ class AppState extends ChangeNotifier {
         // Use utf8.decode for potentially non-ASCII characters
         final data = json.decode(utf8.decode(response.bodyBytes));
         // Adjust key based on actual backend response
-        final chapters = data; // Assume the list is the direct response
+        final chapters = data['chapters']; // Extract from the 'chapters' key
         if (chapters == null || chapters is! List) {
           // Basic validation
           throw Exception(
-              'Invalid response format: expected a list of chapters');
+              'Invalid response format: expected a list of chapters under the \'chapters\' key');
         }
         setChapters(chapters);
       } else {
@@ -223,6 +228,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> fetchCodexItems(String projectId) async {
+    // Add guard clause
+    if (projectId.isEmpty) {
+      _logger.warning('fetchCodexItems called with empty projectId, skipping.');
+      return;
+    }
     try {
       // Use _baseHeaders directly
       final headers = _baseHeaders; // Changed from getAuthHeaders()
@@ -236,11 +246,11 @@ class AppState extends ChangeNotifier {
         // Use utf8.decode for potentially non-ASCII characters
         final data = json.decode(utf8.decode(response.bodyBytes));
         // Adjust key based on actual backend response
-        final items = data; // Assume the list is the direct response
+        final items = data['codex_items']; // Extract from the 'codex_items' key
         if (items == null || items is! List) {
           // Basic validation
           throw Exception(
-              'Invalid response format: expected a list of codex items');
+              'Invalid response format: expected a list of codex items under the \'codex_items\' key');
         }
         setCodexItems(items);
       } else {
@@ -681,5 +691,55 @@ class AppState extends ChangeNotifier {
       _logger.severe('API Exception ($method $url): $e');
       onError('Network or parsing error: $e');
     }
+  }
+
+  Future<void> generateChapter({
+    required String projectId,
+    required String description,
+    required int numChapters,
+    required String writingStyle,
+    required String additionalInstructions,
+    required Function(List<dynamic>) onSuccess,
+    required Function(String) onError,
+  }) async {
+    setGenerationState('chapter', isGenerating: true, description: description);
+    await _handleApiCall(
+      url: '/projects/$projectId/chapters/generate',
+      method: 'POST',
+      body: {
+        'plot': description,
+        'numChapters': numChapters,
+        'writingStyle': writingStyle,
+        'instructions': additionalInstructions,
+      },
+      onSuccess: (data) {
+        final results = data['generation_results'] as List<dynamic>? ?? [];
+        List<dynamic> successfulChaptersData = [];
+
+        for (var chapterResult in results) {
+          if (chapterResult is Map<String, dynamic> &&
+              chapterResult['status'] == 'success') {
+            if (chapterResult.containsKey('id') &&
+                chapterResult['id'] != null) {
+              addChapter(chapterResult);
+              successfulChaptersData.add(chapterResult);
+            } else {
+              _logger.warning(
+                  'Chapter generation result marked success but missing ID: $chapterResult');
+            }
+          } else if (chapterResult is Map<String, dynamic>) {
+            _logger.warning(
+                'Chapter generation failed or had unexpected status: ${chapterResult['status']}, Error: ${chapterResult['error']}');
+          }
+        }
+        setGenerationState('chapter',
+            isGenerating: false, lastGeneratedItem: successfulChaptersData);
+        onSuccess(successfulChaptersData);
+      },
+      onError: (error) {
+        setGenerationState('chapter', isGenerating: false);
+        onError(error);
+      },
+    );
   }
 }

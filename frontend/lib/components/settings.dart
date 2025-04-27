@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:logging/logging.dart';
 
@@ -54,7 +54,6 @@ class _SettingsState extends State<Settings> {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/settings/api-key'),
-        headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
@@ -82,7 +81,6 @@ class _SettingsState extends State<Settings> {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/settings/model'),
-        headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
         if (mounted) {
@@ -115,7 +113,6 @@ class _SettingsState extends State<Settings> {
     try {
       final response = await http.post(
         Uri.parse('$apiUrl/settings/api-key'),
-        headers: await getAuthHeaders(),
         body: utf8.encode(json.encode({'apiKey': _apiKey})),
       );
       if (response.statusCode == 200) {
@@ -146,7 +143,6 @@ class _SettingsState extends State<Settings> {
     try {
       final response = await http.delete(
         Uri.parse('$apiUrl/settings/api-key'),
-        headers: await getAuthHeaders(),
       );
       if (response.statusCode == 204) {
         if (mounted) {
@@ -178,7 +174,6 @@ class _SettingsState extends State<Settings> {
 
       final response = await http.post(
         Uri.parse('$apiUrl/settings/model'),
-        headers: await getAuthHeaders(),
         body: utf8.encode(json.encode(settingsToSave)),
       );
 

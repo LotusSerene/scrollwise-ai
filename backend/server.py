@@ -2732,6 +2732,19 @@ async def get_event_connections(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.get("/locations/connections")  # Should this be under project_router?
+async def get_location_connections(
+    project_id: str,  # Removed current_user dependency
+):
+    try:
+        # Removed user_id from get_location_connections
+        connections = await db_instance.get_location_connections(project_id)
+        return {"location_connections": connections}
+    except Exception as e:
+        logger.error(f"Error fetching location connections: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 # Location Connections
 @location_router.post("/connections")
 async def create_location_connection(
@@ -3159,19 +3172,6 @@ async def delete_location(
     except Exception as e:
         logger.error(f"Error deleting location: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/locations/connections")  # Should this be under project_router?
-async def get_location_connections(
-    project_id: str,  # Removed current_user dependency
-):
-    try:
-        # Removed user_id from get_location_connections
-        connections = await db_instance.get_location_connections(project_id)
-        return {"location_connections": connections}
-    except Exception as e:
-        logger.error(f"Error fetching location connections: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # --- Validity Check Endpoints ---

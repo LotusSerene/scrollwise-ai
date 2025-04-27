@@ -4,7 +4,7 @@ import '../providers/relationship_provider.dart';
 import '../models/relationship.dart';
 import '../widgets/create_relationship_dialog.dart';
 import '../widgets/character_relationship_card.dart';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -43,10 +43,10 @@ class _CharacterRelationshipsScreenState
 
   Future<void> _fetchCharacters() async {
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
+      headers['Content-Type'] = 'application/json';
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}/codex/characters'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {

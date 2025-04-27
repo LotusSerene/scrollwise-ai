@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
@@ -38,7 +38,6 @@ class _ProjectSettingsState extends State<ProjectSettings> {
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/projects/${widget.projectId}'),
-        headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
         final projectData = json.decode(utf8.decode(response.bodyBytes));
@@ -71,7 +70,6 @@ class _ProjectSettingsState extends State<ProjectSettings> {
         final response = await http.put(
           Uri.parse('$apiUrl/projects/${widget.projectId}'),
           headers: {
-            ...await getAuthHeaders(),
             'Content-Type': 'application/json',
           },
           body: utf8.encode(json.encode({
@@ -138,7 +136,6 @@ class _ProjectSettingsState extends State<ProjectSettings> {
     try {
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/${widget.projectId}'),
-        headers: await getAuthHeaders(),
       );
       if (response.statusCode == 200) {
         if (!mounted) return;
@@ -196,7 +193,6 @@ class _ProjectSettingsState extends State<ProjectSettings> {
       final response = await http.post(
         Uri.parse(
             '$apiUrl/projects/${widget.projectId}/refresh-knowledge-base'),
-        headers: await getAuthHeaders(),
       );
 
       if (!mounted) return;

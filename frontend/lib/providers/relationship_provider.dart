@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/constants.dart';
-import '../utils/auth.dart';
+
 import '../models/relationship.dart';
 
 class RelationshipProvider extends ChangeNotifier {
@@ -21,11 +21,9 @@ class RelationshipProvider extends ChangeNotifier {
   Future<void> analyzeRelationships(
       List<String> characterIds, String projectId) async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.post(
         Uri.parse('$apiUrl/projects/$projectId/relationships/analyze'),
         headers: {
-          ...headers,
           'Content-Type': 'application/json',
         },
         body: json
@@ -59,11 +57,10 @@ class RelationshipProvider extends ChangeNotifier {
     String? description,
   }) async {
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
       final response = await http.post(
         Uri.parse('$apiUrl/projects/$projectId/relationships/'),
-        headers: headers,
         body: json.encode({
           'character_id': character1Id,
           'related_character_id': relatedCharacterId,
@@ -89,11 +86,8 @@ class RelationshipProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final headers = await getAuthHeaders();
-
       final response = await http.get(
         Uri.parse('$apiUrl/projects/$projectId/relationships/'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {
@@ -128,11 +122,10 @@ class RelationshipProvider extends ChangeNotifier {
   Future<void> updateRelationship(
       String relationshipId, String relationshipType, String projectId) async {
     try {
-      final headers = await getAuthHeaders();
+      final headers = {};
       headers['Content-Type'] = 'application/json';
       final response = await http.put(
         Uri.parse('$apiUrl/projects/$projectId/relationships/$relationshipId'),
-        headers: headers,
         body: json.encode({
           'relationship_type': relationshipType,
         }),
@@ -152,10 +145,8 @@ class RelationshipProvider extends ChangeNotifier {
   Future<void> deleteRelationship(
       String relationshipId, String projectId) async {
     try {
-      final headers = await getAuthHeaders();
       final response = await http.delete(
         Uri.parse('$apiUrl/projects/$projectId/relationships/$relationshipId'),
-        headers: headers,
       );
 
       if (response.statusCode == 200) {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
@@ -62,8 +62,6 @@ class _CodexGenerationState extends State<CodexGeneration> {
       appState.updateCodexGenerationProgress(isGenerating: true);
 
       try {
-        final headers = {...await getAuthHeaders()};
-
         final requestBody = {
           'codex_type': appState.codexGenerationState['type'],
           'subtype': appState.codexGenerationState['subtype'],
@@ -72,7 +70,6 @@ class _CodexGenerationState extends State<CodexGeneration> {
 
         final response = await http.post(
           Uri.parse('$apiUrl/projects/${widget.projectId}/codex/generate'),
-          headers: headers,
           body: utf8.encode(json.encode(requestBody)),
         );
 

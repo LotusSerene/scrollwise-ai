@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
+
 import '../utils/constants.dart';
 import 'package:intl/intl.dart';
 import 'package:logging/logging.dart';
@@ -44,7 +44,6 @@ class UniverseScreenState extends State<UniverseScreen> {
       // Fetch universe data
       final universeResponse = await http.get(
         Uri.parse('$apiUrl/universes/${widget.universeId}'),
-        headers: await getAuthHeaders(),
       );
       if (universeResponse.statusCode == 200) {
         _universeData = json.decode(utf8.decode(universeResponse.bodyBytes));
@@ -55,7 +54,6 @@ class UniverseScreenState extends State<UniverseScreen> {
       // Fetch projects
       final projectsResponse = await http.get(
         Uri.parse('$apiUrl/universes/${widget.universeId}/projects'),
-        headers: await getAuthHeaders(),
       );
       if (projectsResponse.statusCode == 200) {
         _projects = json.decode(utf8.decode(projectsResponse.bodyBytes));
@@ -66,7 +64,6 @@ class UniverseScreenState extends State<UniverseScreen> {
       // Fetch codex items
       final codexResponse = await http.get(
         Uri.parse('$apiUrl/universes/${widget.universeId}/codex'),
-        headers: await getAuthHeaders(),
       );
       if (codexResponse.statusCode == 200) {
         _codexItems = json.decode(utf8.decode(codexResponse.bodyBytes));
@@ -75,7 +72,6 @@ class UniverseScreenState extends State<UniverseScreen> {
       // Fetch knowledge base items
       final knowledgeBaseResponse = await http.get(
         Uri.parse('$apiUrl/universes/${widget.universeId}/knowledge-base'),
-        headers: await getAuthHeaders(),
       );
       if (knowledgeBaseResponse.statusCode == 200) {
         Map<String, dynamic> responseData =
