@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/auth.dart';
 import '../utils/constants.dart'; // Keep constants
 import 'package:logging/logging.dart';
 // Removed Supabase import
@@ -121,23 +120,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Define standard headers without Auth
+  Map<String, String> get _baseHeaders => {
+        'Content-Type': 'application/json',
+        // Add any other standard headers if needed
+      };
+
   Future<void> updateTargetWordCount(int targetWordCount) async {
     _targetWordCount = targetWordCount;
     notifyListeners();
 
     if (_currentProjectId != null) {
       try {
-        final headers = await getAuthHeaders();
-        headers['Content-Type'] = 'application/json';
+        // Use _baseHeaders directly
+        final headers = _baseHeaders; // Changed from getAuthHeaders()
+        // headers['Content-Type'] = 'application/json'; // Already set in _baseHeaders
         final response = await http.put(
-          Uri.parse('$apiUrl/projects/$_currentProjectId'),
+          Uri.parse(
+              '$apiUrl/projects/$_currentProjectId'), // Ensure API URL is correct
           headers: headers,
           body: json.encode({'target_word_count': targetWordCount}),
         );
 
         if (response.statusCode != 200) {
           _logger.severe(
-              'Error updating target word count: ${response.statusCode}');
+              'Error updating target word count: ${response.statusCode} - ${response.body}');
         }
       } catch (error) {
         _logger.severe('Error updating target word count: $error');
@@ -147,9 +154,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> fetchProgressData(String projectId) async {
     try {
-      final headers = await getAuthHeaders();
+      // Use _baseHeaders directly
+      final headers = _baseHeaders; // Changed from getAuthHeaders()
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$projectId'),
+        Uri.parse('$apiUrl/projects/$projectId'), // Ensure API URL is correct
         headers: headers,
       );
 
@@ -163,7 +171,8 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       } else {
         // Handle error fetching progress data
-        _logger.severe('Error fetching progress data: ${response.statusCode}');
+        _logger.severe(
+            'Error fetching progress data: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       // Handle error fetching progress data
@@ -176,26 +185,35 @@ class AppState extends ChangeNotifier {
       await fetchProgressData(_currentProjectId!);
       await fetchChapters(_currentProjectId!);
       await fetchCodexItems(_currentProjectId!);
+      await fetchValidityChecks(
+          _currentProjectId!); // Added validity check fetch
     }
   }
 
   Future<void> fetchChapters(String projectId) async {
     try {
-      final headers = await getAuthHeaders();
+      // Use _baseHeaders directly
+      final headers = _baseHeaders; // Changed from getAuthHeaders()
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$projectId/chapters/'),
+        Uri.parse(
+            '$apiUrl/projects/$projectId/chapters/'), // Ensure API URL is correct
         headers: headers,
       );
 
       if (response.statusCode == 200) {
+        // Use utf8.decode for potentially non-ASCII characters
         final data = json.decode(utf8.decode(response.bodyBytes));
-        final chapters = data['chapters'];
-        if (chapters == null) {
-          throw Exception('Invalid response format: missing chapters key');
+        // Adjust key based on actual backend response
+        final chapters = data; // Assume the list is the direct response
+        if (chapters == null || chapters is! List) {
+          // Basic validation
+          throw Exception(
+              'Invalid response format: expected a list of chapters');
         }
         setChapters(chapters);
       } else {
-        throw Exception('Failed to fetch chapters: ${response.statusCode}');
+        throw Exception(
+            'Failed to fetch chapters: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       _logger.severe('Error fetching chapters: $error');
@@ -206,21 +224,28 @@ class AppState extends ChangeNotifier {
 
   Future<void> fetchCodexItems(String projectId) async {
     try {
-      final headers = await getAuthHeaders();
+      // Use _baseHeaders directly
+      final headers = _baseHeaders; // Changed from getAuthHeaders()
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$projectId/codex-items/'),
+        Uri.parse(
+            '$apiUrl/projects/$projectId/codex-items/'), // Ensure API URL is correct
         headers: headers,
       );
 
       if (response.statusCode == 200) {
+        // Use utf8.decode for potentially non-ASCII characters
         final data = json.decode(utf8.decode(response.bodyBytes));
-        final items = data['codex_items'];
-        if (items == null) {
-          throw Exception('Invalid response format: missing codex_items key');
+        // Adjust key based on actual backend response
+        final items = data; // Assume the list is the direct response
+        if (items == null || items is! List) {
+          // Basic validation
+          throw Exception(
+              'Invalid response format: expected a list of codex items');
         }
         setCodexItems(items);
       } else {
-        throw Exception('Failed to fetch codex items: ${response.statusCode}');
+        throw Exception(
+            'Failed to fetch codex items: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       _logger.severe('Error fetching codex items: $error');
@@ -230,23 +255,28 @@ class AppState extends ChangeNotifier {
 
   Future<void> fetchValidityChecks(String projectId) async {
     try {
-      final headers = await getAuthHeaders();
+      // Use _baseHeaders directly
+      final headers = _baseHeaders; // Changed from getAuthHeaders()
       final response = await http.get(
-        Uri.parse('$apiUrl/projects/$projectId/validity-checks/'),
+        Uri.parse(
+            '$apiUrl/projects/$projectId/validity-checks/'), // Ensure API URL is correct
         headers: headers,
       );
 
       if (response.statusCode == 200) {
+        // Use utf8.decode for potentially non-ASCII characters
         final data = json.decode(utf8.decode(response.bodyBytes));
-        final checks = data['validity_checks'];
-        if (checks == null) {
+        // Adjust key based on actual backend response
+        final checks = data; // Assume the list is the direct response
+        if (checks == null || checks is! List) {
+          // Basic validation
           throw Exception(
-              'Invalid response format: missing validity_checks key');
+              'Invalid response format: expected a list of validity checks');
         }
         setValidityChecks(checks);
       } else {
         throw Exception(
-            'Failed to fetch validity checks: ${response.statusCode}');
+            'Failed to fetch validity checks: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       _logger.severe('Error fetching validity checks: $error');
@@ -596,5 +626,60 @@ class AppState extends ChangeNotifier {
     if (isLoading != null) _queryState['isLoading'] = isLoading;
     if (lastQuery != null) _queryState['lastQuery'] = lastQuery;
     notifyListeners();
+  }
+
+  // --- API Calls (Moved to separate methods) ---
+
+  Future<void> _handleApiCall({
+    required String url,
+    required String method,
+    Map<String, dynamic>? body,
+    required Function(Map<String, dynamic>) onSuccess,
+    required Function(String) onError,
+  }) async {
+    try {
+      // Use _baseHeaders directly
+      final headers = _baseHeaders; // Use base headers
+      http.Response response;
+
+      final uri = Uri.parse('$apiUrl$url'); // Ensure API URL is correct
+
+      switch (method.toUpperCase()) {
+        case 'POST':
+          response =
+              await http.post(uri, headers: headers, body: json.encode(body));
+          break;
+        case 'PUT':
+          response =
+              await http.put(uri, headers: headers, body: json.encode(body));
+          break;
+        case 'DELETE':
+          response = await http.delete(uri, headers: headers);
+          break;
+        case 'GET':
+        default:
+          response = await http.get(uri, headers: headers);
+          break;
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        // Use utf8.decode for potentially non-ASCII characters
+        final responseBody = response.bodyBytes.isEmpty
+            ? {}
+            : json.decode(utf8.decode(response.bodyBytes));
+        onSuccess(responseBody is Map<String, dynamic>
+            ? responseBody
+            : {'data': responseBody});
+      } else {
+        final errorBody =
+            response.body.isNotEmpty ? response.body : 'No error details';
+        _logger.warning(
+            'API Error ($method $url): ${response.statusCode} - $errorBody');
+        onError('Error: ${response.statusCode} - $errorBody');
+      }
+    } catch (e) {
+      _logger.severe('API Exception ($method $url): $e');
+      onError('Network or parsing error: $e');
+    }
   }
 }

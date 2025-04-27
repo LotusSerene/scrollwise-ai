@@ -277,33 +277,40 @@ class _ScrollWiseAppState extends State<ScrollWiseApp>
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ScrollWise AI',
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
-      debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
-      // Go directly to ProjectsScreen, remove LandingScreen/Login logic
-      home: const ProjectsScreen(),
+      // Start directly at the ProjectsScreen (or HomeScreen if preferred)
+      initialRoute: '/projects',
       routes: {
-        // '/landing': (context) => const LandingScreen(), // Can remove landing if not needed
+        // Define routes, LoginScreen is removed
+        '/': (context) => const ProjectsScreen(), // Default route
         '/projects': (context) => const ProjectsScreen(),
-        '/home': (context) => const HomeScreen(), // Keep home if used
-        // Removed '/login' route
+        '/home': (context) => const HomeScreen(),
         '/editor': (context) => const EditorScreen(),
-        '/settings': (context) => const SettingsScreen(),
-        '/codex': (context) => CodexScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String),
-        '/validity': (context) => ValidityScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String),
-        '/knowledge_base': (context) => KnowledgeBaseScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String),
-        '/query': (context) => QueryScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String),
+        // Routes requiring projectId:
         '/chapters': (context) => ChaptersScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments
-                as String), // Added ChaptersScreen route
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        '/codex': (context) => CodexScreen(
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        '/knowledge-base': (context) => KnowledgeBaseScreen(
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        '/query': (context) => QueryScreen(
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        '/settings': (context) =>
+            const SettingsScreen(), // Settings might not need projectId
         '/timeline': (context) => TimelineScreen(
-            projectId: ModalRoute.of(context)!.settings.arguments as String),
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        '/validity': (context) => ValidityScreen(
+              projectId: ModalRoute.of(context)!.settings.arguments as String,
+            ),
+        // Removed '/login' route
       },
     );
   }
