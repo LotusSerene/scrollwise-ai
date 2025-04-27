@@ -80,8 +80,10 @@ Future<void> main() async {
         ServerManager.startServer().timeout(
           const Duration(seconds: 30),
           onTimeout: () {
-            log.warning('Server start timed out, continuing...');
-            throw TimeoutException('Server start timed out');
+            log.warning(
+                'ServerManager.startServer() timed out after 30 seconds.');
+            throw TimeoutException(
+                'Server did not start and respond within 30 seconds.');
           },
         ),
         // Removed Supabase initialization block

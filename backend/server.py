@@ -2596,44 +2596,6 @@ async def delete_relationship(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# This duplicates the /analyze endpoint above, removing this one.
-# @relationship_router.post("/analyze")
-# async def analyze_relationships(
-#     project_id: str,
-#     character_ids: List[str] = Body(...),
-#     current_user: User = Depends(get_current_active_user),
-# ):
-#     try:
-#         async with agent_manager_store.get_or_create_manager(
-#             current_user.id, project_id
-#         ) as agent_manager:
-#             # Get only the selected characters
-#             characters = []
-#             for char_id in character_ids:
-#                 character = await db_instance.get_characters(
-#                     current_user.id, project_id, character_id=char_id
-#                 )
-#                 if character and character["type"] == CodexItemType.CHARACTER.value:
-#                     characters.append(character)
-#
-#             if len(characters) < 2:
-#                 raise HTTPException(
-#                     status_code=404, detail="At least two valid characters are required"
-#                 )
-#
-#             # Analyze relationships for selected characters only
-#             relationships = await agent_manager.analyze_character_relationships(
-#                 characters
-#             )
-#
-#             return {"relationships": relationships}
-#     except ValueError as ve:
-#         return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
-#     except Exception as e:
-#         logger.error(f"Error analyzing relationships: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 # Event Connections
 
 
@@ -2768,37 +2730,6 @@ async def get_event_connections(
     except Exception as e:
         logger.error(f"Error fetching event connections: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# Update analyze event connections to save to knowledge base
-# This endpoint seems duplicated, removing this one.
-# @event_router.post("/analyze-connections")
-# async def analyze_event_connections(
-#     project_id: str, current_user: User = Depends(get_current_active_user)
-# ):
-#     try:
-#         async with agent_manager_store.get_or_create_manager(
-#             current_user.id, project_id
-#         ) as agent_manager:
-#             connections = await agent_manager.analyze_event_connections()
-#
-#             # Convert each connection to a dictionary before returning
-#             connection_dicts = [
-#                 {
-#                     "id": getattr(conn, "connection_id", None),
-#                     "event1_id": conn.event1_id,
-#                     "event2_id": conn.event2_id,
-#                     "connection_type": conn.connection_type,
-#                     "description": conn.description,
-#                     "impact": conn.impact,
-#                 }
-#                 for conn in connections
-#             ]
-#
-#             return {"event_connections": connection_dicts}
-#     except Exception as e:
-#         logger.error(f"Error analyzing event connections: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # Location Connections
@@ -2951,45 +2882,6 @@ async def delete_location_connection(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# This endpoint seems duplicated, removing this one.
-# @location_router.post("/analyze-connections")
-# async def analyze_location_connections(
-#     project_id: str, current_user: User = Depends(get_current_active_user)
-# ):
-#     try:
-#         locations = await db_instance.get_locations(current_user.id, project_id)
-#         if not locations or len(locations) < 2:
-#             return JSONResponse(
-#                 {"message": "Not enough locations to analyze connections", "skip": True}
-#             )
-#
-#         async with agent_manager_store.get_or_create_manager(
-#             current_user.id, project_id
-#         ) as agent_manager:
-#             connections = await agent_manager.analyze_location_connections()
-#
-#             # Convert each connection to a dictionary before returning
-#             connection_dicts = [
-#                 {
-#                     "id": connection.id,
-#                     "location1_id": connection.location1_id,
-#                     "location2_id": connection.location2_id,
-#                     "connection_type": connection.connection_type,
-#                     "description": connection.description,
-#                     "travel_route": connection.travel_route,
-#                     "cultural_exchange": connection.cultural_exchange,
-#                 }
-#                 for connection in connections
-#             ]
-#
-#             return {
-#                 "location_connections": connection_dicts,
-#             }
-#     except Exception as e:
-#         logger.error(f"Error analyzing location connections: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 @event_router.post("")
 async def create_event(
     project_id: str,
@@ -3136,57 +3028,6 @@ async def delete_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# This endpoint seems duplicated, removing this one.
-# @event_router.post("/analyze-chapter")
-# async def analyze_chapter_events(
-#     project_id: str, current_user: User = Depends(get_current_active_user)
-# ):
-#     try:
-#         async with agent_manager_store.get_or_create_manager(
-#             current_user.id, project_id
-#         ) as agent_manager:
-#             # Analyze and get unprocessed chapter events
-#             events = await agent_manager.analyze_unprocessed_chapter_events()
-
-#             # Add events to the knowledge base
-#             for event in events:
-#                 try:
-#                     # Create metadata with only the required fields
-#                     metadata = {
-#                         "id": event["id"],
-#                         "title": event["title"],
-#                         "type": "event",
-#                     }
-#
-#                     # Add optional fields if they exist
-#                     if "date" in event:
-#                         metadata["date"] = event["date"]
-#                     if "character_id" in event:
-#                         metadata["character_id"] = event["character_id"]
-#                     if "location_id" in event:
-#                         metadata["location_id"] = event["location_id"]
-#
-#                     # Add to knowledge base
-#                     await agent_manager.add_to_knowledge_base(
-#                         "event", event["description"], metadata
-#                     )
-#                 except Exception as e:
-#                     logger.error(
-#                         f"Error adding event to knowledge base for event {event.get('id', 'unknown')}: {str(e)}"
-#                     )
-#                     logger.error(
-#                         f"Event data: {event}"
-#                     )  # Log the event data for debugging
-#                     continue  # Continue with the next event if one fails
-#
-#             return {"events": events}
-#     except ValueError as ve:
-#         return JSONResponse({"message": str(ve), "alreadyAnalyzed": True})
-#     except Exception as e:
-#         logger.error(f"Error analyzing chapter events: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 # Location endpoints
 @location_router.get("")
 async def get_locations(
@@ -3219,52 +3060,6 @@ async def create_location(
     except Exception as e:
         logger.error(f"Error creating location: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# This endpoint seems duplicated, removing this one.
-# @location_router.post("/analyze-chapter")
-# async def analyze_chapter_locations(
-#     project_id: str, current_user: User = Depends(get_current_active_user)
-# ):
-#     try:
-#         # Check if there are any unprocessed chapters
-#         unprocessed_chapters = await db_instance.get_latest_unprocessed_chapter_content(
-#             project_id, current_user.id, PROCESS_TYPES["LOCATIONS"]
-#         )
-#
-#         if not unprocessed_chapters:
-#             return JSONResponse(
-#                 {
-#                     "message": "All chapters analyzed for locations",
-#                     "alreadyAnalyzed": True,
-#                 }
-#             )
-#
-#         async with agent_manager_store.get_or_create_manager(
-#             current_user.id, project_id
-#         ) as agent_manager:
-#             locations = await agent_manager.analyze_unprocessed_chapter_locations()
-#
-#             # Add each location to knowledge base
-#             for location in locations:
-#                 # Add to knowledge base
-#                 await agent_manager.add_to_knowledge_base(
-#                     "location",
-#                     f"{location['name']}: {location['description']}",
-#                     {
-#                         "item_id": location[
-#                             "id"
-#                         ],  # Now using id from the location returned by agent_manager
-#                         "name": location["name"],
-#                         "item_type": "location",
-#                         "coordinates": location.get("coordinates"),
-#                     },
-#                 )
-#
-#             return {"locations": locations}
-#     except Exception as e:
-#         logger.error(f"Error analyzing chapter locations: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @location_router.get("/{location_id}")
