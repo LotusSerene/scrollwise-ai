@@ -190,3 +190,7 @@
 ## 1.0.6
 
 - Removed Supabase
+
+## 1.0.7
+
+- Add Openrouter models
