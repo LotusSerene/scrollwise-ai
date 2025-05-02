@@ -20,3 +20,6 @@ langchain-qdrant
 psutil
 qdrant-client
 python-multipart
+langchain_openai
+httpx
+tiktoken

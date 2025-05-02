@@ -68,6 +68,9 @@ from docx import (
 
 import sys
 import signal
+import httpx  # Add httpx import at the top of the file if not already present
+
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
 def setup_logging():
@@ -2093,6 +2096,118 @@ async def remove_api_key():  # Removed current_user dependency
     except Exception as e:
         logger.error(f"Error removing API key: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# --- OpenRouter API Key Endpoints ---
+
+
+@settings_router.post("/openrouter-api-key")
+async def save_openrouter_api_key(
+    api_key_update: ApiKeyUpdate,  # Reusing the same model
+):
+    try:
+        await api_key_manager.save_openrouter_api_key(api_key_update.apiKey)
+        return {"message": "OpenRouter API key saved successfully"}
+    except Exception as e:
+        logger.error(f"Error saving OpenRouter API key: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@settings_router.get("/openrouter-api-key")
+async def check_openrouter_api_key():
+    try:
+        api_key = await api_key_manager.get_openrouter_api_key()
+        is_set = bool(api_key)
+        masked_key = "*" * (len(api_key) - 4) + api_key[-4:] if is_set else None
+        return {"isSet": is_set, "apiKey": masked_key}
+    except Exception as e:
+        logger.error(f"Error checking OpenRouter API key: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@settings_router.delete("/openrouter-api-key")
+async def remove_openrouter_api_key():
+    try:
+        await api_key_manager.remove_openrouter_api_key()
+        return {"message": "OpenRouter API key removed successfully"}
+    except Exception as e:
+        logger.error(f"Error removing OpenRouter API key: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@settings_router.get("/openrouter-models", response_model=List[Dict[str, str]])
+async def get_openrouter_models():
+    """Fetches the list of available models from OpenRouter."""
+    logger.info("Fetching OpenRouter models list...")
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:  # Added timeout
+            response = await client.get(OPENROUTER_MODELS_URL)
+            logger.debug(f"OpenRouter API response status: {response.status_code}")
+            response.raise_for_status()  # Raise exception for bad status codes (4xx or 5xx)
+
+            models_data = response.json()
+            logger.debug(
+                f"Received {len(models_data.get('data', []))} models from OpenRouter."
+            )
+
+            # Extract only id and name, prepend 'openrouter/' to id
+            simplified_models = [
+                {
+                    "id": f"openrouter/{model.get('id')}",  # Prepend 'openrouter/'
+                    "name": model.get("name", model.get("id")),
+                }
+                for model in models_data.get("data", [])
+                if model.get("id")  # Ensure model has an id
+            ]
+
+            # Sort models by name for better display
+            simplified_models.sort(key=lambda x: x.get("name", "").lower())
+            logger.info(
+                f"Returning {len(simplified_models)} simplified OpenRouter models."
+            )
+
+            return simplified_models
+
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"HTTP error fetching OpenRouter models: {e.response.status_code} - {e.response.text}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Error fetching models from OpenRouter: Status {e.response.status_code}",
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Network error fetching OpenRouter models: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=503, detail=f"Could not connect to OpenRouter to fetch models."
+        )
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"JSON decoding error fetching OpenRouter models: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=500, detail="Error decoding OpenRouter model list."
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error fetching OpenRouter models: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Internal server error while fetching models"
+        )
+
+
+@settings_router.get("/model")
+async def get_model_settings():  # Removed current_user dependency
+    # Model settings are now stored locally, not per-user
+    try:
+        settings = await db_instance.get_model_settings()
+        return settings
+    except Exception as e:
+        logger.error(f"Error fetching model settings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# --- End OpenRouter Endpoints ---
 
 
 @settings_router.get("/model")

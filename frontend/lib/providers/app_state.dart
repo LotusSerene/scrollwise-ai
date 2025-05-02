@@ -698,48 +698,69 @@ class AppState extends ChangeNotifier {
     required String description,
     required int numChapters,
     required String writingStyle,
-    required String additionalInstructions,
+    required Map<String, dynamic> instructions,
     required Function(List<dynamic>) onSuccess,
     required Function(String) onError,
   }) async {
+    // Set generating state *immediately* using the correct state map
+    updateGenerationProgress(isGenerating: true);
+    // Keep the original setGenerationState call in case it's used elsewhere
     setGenerationState('chapter', isGenerating: true, description: description);
-    await _handleApiCall(
-      url: '/projects/$projectId/chapters/generate',
-      method: 'POST',
-      body: {
-        'plot': description,
-        'numChapters': numChapters,
-        'writingStyle': writingStyle,
-        'instructions': additionalInstructions,
-      },
-      onSuccess: (data) {
-        final results = data['generation_results'] as List<dynamic>? ?? [];
-        List<dynamic> successfulChaptersData = [];
+    // setGenerationState calls notifyListeners(), queuing the UI update.
 
-        for (var chapterResult in results) {
-          if (chapterResult is Map<String, dynamic> &&
-              chapterResult['status'] == 'success') {
-            if (chapterResult.containsKey('id') &&
-                chapterResult['id'] != null) {
-              addChapter(chapterResult);
-              successfulChaptersData.add(chapterResult);
-            } else {
-              _logger.warning(
-                  'Chapter generation result marked success but missing ID: $chapterResult');
+    // Schedule the actual API call to run AFTER the current frame is built
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        // Perform the API call inside the post-frame callback
+        await _handleApiCall(
+          url: '/projects/$projectId/chapters/generate',
+          method: 'POST',
+          body: {
+            'plot': description,
+            'numChapters': numChapters,
+            'writingStyle': writingStyle,
+            'instructions': instructions,
+          },
+          onSuccess: (data) {
+            final results = data['generation_results'] as List<dynamic>? ?? [];
+            List<dynamic> successfulChaptersData = [];
+            for (var chapterResult in results) {
+              if (chapterResult is Map<String, dynamic> &&
+                  chapterResult['status'] == 'success') {
+                if (chapterResult.containsKey('id') &&
+                    chapterResult['id'] != null) {
+                  addChapter(chapterResult);
+                  successfulChaptersData.add(chapterResult);
+                } else {
+                  _logger.warning(
+                      'Chapter generation result marked success but missing ID: $chapterResult');
+                }
+              } else if (chapterResult is Map<String, dynamic>) {
+                _logger.warning(
+                    'Chapter generation failed or had unexpected status: ${chapterResult['status']}, Error: ${chapterResult['error']}');
+              }
             }
-          } else if (chapterResult is Map<String, dynamic>) {
-            _logger.warning(
-                'Chapter generation failed or had unexpected status: ${chapterResult['status']}, Error: ${chapterResult['error']}');
-          }
-        }
-        setGenerationState('chapter',
-            isGenerating: false, lastGeneratedItem: successfulChaptersData);
-        onSuccess(successfulChaptersData);
-      },
-      onError: (error) {
+            // Update both state mechanisms on success
+            updateGenerationProgress(isGenerating: false);
+            setGenerationState('chapter',
+                isGenerating: false, lastGeneratedItem: successfulChaptersData);
+            onSuccess(successfulChaptersData);
+          },
+          onError: (error) {
+            // Also ensure state is set back on API call error
+            updateGenerationProgress(isGenerating: false);
+            setGenerationState('chapter', isGenerating: false);
+            onError(error);
+          },
+        );
+      } catch (e) {
+        // Catch potential exceptions from _handleApiCall itself
+        _logger.severe("Exception during chapter generation API call: $e");
+        // Ensure state is reset on exception
+        updateGenerationProgress(isGenerating: false);
         setGenerationState('chapter', isGenerating: false);
-        onError(error);
-      },
-    );
+        onError("An unexpected error occurred during chapter generation.");
+      }
+    });
   }
 }

@@ -35,7 +35,6 @@ class _CreateChapterState extends State<CreateChapter> {
   late final PresetProvider _presetProvider;
 
   int _numChapters = 1;
-  bool _isGenerating = false;
   String _currentChapterContent = '';
   List<String> _generatedChapterIds = [];
   int _displayedChapterIndex = 0;
@@ -165,23 +164,27 @@ class _CreateChapterState extends State<CreateChapter> {
 
     if (_formKey.currentState!.validate()) {
       setState(() {
-        _isGenerating = true;
         _generatedChapterIds = [];
         _currentChapterContent = '';
+        _displayedChapterIndex = 0;
       });
 
       final plot = _plotController.text;
       final numChapters = _numChapters;
       final writingStyle = _writingStyleController.text;
-      final additionalInstructions =
-          'Style Guide:\n${_styleGuideController.text}\n\nAdditional Instructions:\n${_additionalInstructionsController.text}\n\nTarget Word Count: ${_wordCountController.text}';
+
+      final instructionsMap = {
+        'styleGuide': _styleGuideController.text,
+        'additionalInstructions': _additionalInstructionsController.text,
+        'wordCount': int.tryParse(_wordCountController.text) ?? 1000,
+      };
 
       await appState.generateChapter(
         projectId: widget.projectId,
         description: plot,
         numChapters: numChapters,
         writingStyle: writingStyle,
-        additionalInstructions: additionalInstructions,
+        instructions: instructionsMap,
         onSuccess: (List<dynamic> successfulChaptersData) async {
           final chapterIds = successfulChaptersData
               .map((chapterData) => chapterData['id'] as String?)
@@ -204,22 +207,11 @@ class _CreateChapterState extends State<CreateChapter> {
           } else {
             _showError(scaffoldMessenger,
                 'No valid chapter data received after generation.');
-            setState(() {
-              _isGenerating = false;
-            });
-          }
-          if (mounted) {
-            setState(() {
-              _isGenerating = false;
-            });
           }
         },
         onError: (String error) {
           if (!mounted) return;
           _showError(scaffoldMessenger, 'Error generating chapters: $error');
-          setState(() {
-            _isGenerating = false;
-          });
         },
       );
     }
@@ -529,8 +521,13 @@ class _CreateChapterState extends State<CreateChapter> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
-        final generationState = appState.chapterCreationState;
-        _isGenerating = generationState['isGenerating'];
+        final isGenerating =
+            appState.chapterCreationState['isGenerating'] ?? false;
+        final generationProgress =
+            appState.chapterCreationState['progress'] as double? ?? 0.0;
+        final currentChapterNum =
+            appState.chapterCreationState['currentChapter'] as int? ?? 0;
+        final totalChaptersToGen = _numChapters;
 
         Widget content = Container(
           padding: const EdgeInsets.all(20),
@@ -751,11 +748,13 @@ class _CreateChapterState extends State<CreateChapter> {
                                   minLines: 3,
                                 ),
                                 const SizedBox(height: 20),
-                                if (_isGenerating)
-                                  const Column(
+                                if (isGenerating)
+                                  Column(
                                     children: [
                                       LinearProgressIndicator(
-                                        value: 1,
+                                        value: totalChaptersToGen > 1
+                                            ? generationProgress
+                                            : null,
                                         backgroundColor: Color(0xFF343a40),
                                         valueColor:
                                             AlwaysStoppedAnimation<Color>(
@@ -763,7 +762,9 @@ class _CreateChapterState extends State<CreateChapter> {
                                       ),
                                       SizedBox(height: 10),
                                       Text(
-                                        'Generating chapter...',
+                                        totalChaptersToGen > 1
+                                            ? 'Generating chapter ${currentChapterNum + 1} of $totalChaptersToGen...'
+                                            : 'Generating chapter...',
                                         style:
                                             TextStyle(color: Color(0xFFf8f9fa)),
                                       ),
@@ -771,14 +772,18 @@ class _CreateChapterState extends State<CreateChapter> {
                                   )
                                 else
                                   ElevatedButton(
-                                    onPressed: () => _handleSubmit(context),
+                                    onPressed: isGenerating
+                                        ? null
+                                        : () => _handleSubmit(context),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF007bff),
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 20, vertical: 10),
                                       textStyle: const TextStyle(fontSize: 18),
                                     ),
-                                    child: const Text('Generate Chapter'),
+                                    child: Text(isGenerating
+                                        ? 'Generation in progress...'
+                                        : 'Generate Chapter'),
                                   )
                               ],
                             ),

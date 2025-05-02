@@ -3,6 +3,8 @@ import os
 from typing import Dict, Any, List, Tuple, Optional, Union, TypedDict
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
@@ -207,8 +209,8 @@ class ChapterGenerationState(TypedDict):
     instructions: Dict[str, Any]
 
     # Dynamic values
-    llm: ChatGoogleGenerativeAI  # Main LLM
-    check_llm: ChatGoogleGenerativeAI  # LLM for validation/extraction
+    llm: BaseChatModel  # Use generic BaseChatModel
+    check_llm: BaseChatModel  # Use generic BaseChatModel
     vector_store: VectorStore
     summarize_chain: Any  # Type hint could be improved
 
@@ -356,8 +358,11 @@ class AgentManager:
             (Exception, ResourceExhausted)
         ),  # Retry on general exceptions and specifically on ResourceExhausted (429)
     )
-    async def _get_llm(self, model_name: str) -> ChatGoogleGenerativeAI:
-        """Gets or creates a ChatGoogleGenerativeAI instance with caching, rate limiting, and retry logic."""
+    async def _get_llm(self, model_name: str) -> BaseChatModel:
+        """Gets or creates a LLM instance with caching, rate limiting, and retry logic.
+
+        Handles both Google Gemini and OpenRouter models.
+        """
         async with self._lock:  # Protect access to the class-level cache
             if model_name in self._llm_cache:
                 self.logger.debug(f"LLM Cache HIT for model: {model_name}")
@@ -367,45 +372,108 @@ class AgentManager:
                 f"LLM Cache MISS for model: {model_name}. Creating new instance."
             )
 
-            is_pro_model = "pro" in model_name
-            rpm = GEMINI_PRO_RPM if is_pro_model else GEMINI_FLASH_RPM
-            tpm = GEMINI_PRO_TPM if is_pro_model else GEMINI_FLASH_TPM
-            rpd = GEMINI_PRO_RPD if is_pro_model else GEMINI_FLASH_RPD
+            llm_instance: BaseChatModel
+            api_key_to_use: Optional[str]
 
-            rate_limiter = StreamingRateLimiter(rpm, tpm, rpd)
+            if model_name.startswith("openrouter/"):
+                # --- Handle OpenRouter Models ---
+                api_key_to_use = await self.api_key_manager.get_openrouter_api_key()
+                if not api_key_to_use:
+                    self.logger.error("OpenRouter API key not set.")
+                    raise ValueError(
+                        "OpenRouter API key not set. Please set it in the settings."
+                    )
 
-            try:
-                llm = ChatGoogleGenerativeAI(
-                    model=model_name,
-                    google_api_key=self.api_key,
-                    temperature=float(
-                        self.model_settings.get("temperature", 0.7)
-                    ),  # Ensure float
-                    max_output_tokens=self.MAX_OUTPUT_TOKENS,
-                    # max_input_tokens not directly supported, handled via context truncation
-                    convert_system_message_to_human=True,  # Often needed for Gemini
-                    streaming=True,  # Keep streaming enabled
-                    callbacks=[rate_limiter],
-                    # Caching enabled globally via set_llm_cache
-                )
-                self._llm_cache[model_name] = llm
-                self.logger.info(
-                    f"LLM instance created and cached for model: {model_name}"
-                )
-                return llm
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to create LLM instance for {model_name}: {e}",
-                    exc_info=True,
-                )
-                raise  # Re-raise the exception after logging
+                openrouter_model_name = model_name.split("/", 1)[
+                    1
+                ]  # e.g., openai/gpt-4o
+                openrouter_base_url = "https://openrouter.ai/api/v1"
+                # Optional headers for OpenRouter ranking
+                # TODO: Make these configurable if desired
+                site_url = os.getenv(
+                    "YOUR_SITE_URL", "https://www.op.scrllwise.com/"
+                )  # Placeholder
+                site_name = os.getenv("YOUR_SITE_NAME", "Scrollwise AI")  # Placeholder
+                extra_headers = {
+                    "HTTP-Referer": site_url,
+                    "X-Title": site_name,
+                }
+
+                try:
+                    llm_instance = ChatOpenAI(
+                        model=openrouter_model_name,
+                        openai_api_key=api_key_to_use,
+                        openai_api_base=openrouter_base_url,
+                        temperature=float(self.model_settings.get("temperature", 0.7)),
+                        max_tokens=self.MAX_OUTPUT_TOKENS,  # Corresponds to max_tokens for OpenAI
+                        streaming=True,  # Keep streaming enabled
+                        # Pass extra headers via model_kwargs
+                        model_kwargs={"extra_headers": extra_headers},
+                        # Caching enabled globally via set_llm_cache
+                        # No specific rate limiter applied here yet, OpenRouter handles its own limits.
+                        # callbacks=[],
+                    )
+                    self.logger.info(
+                        f"ChatOpenAI instance created for OpenRouter model: {openrouter_model_name}"
+                    )
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to create ChatOpenAI instance for {model_name}: {e}",
+                        exc_info=True,
+                    )
+                    raise
+
+            else:
+                # --- Handle Google Gemini Models (Existing Logic) ---
+                api_key_to_use = await self.api_key_manager.get_api_key()
+                if not api_key_to_use:
+                    self.logger.error("Google API key not set.")
+                    raise ValueError(
+                        "Google API key not set. Please set it in the settings."
+                    )
+
+                is_pro_model = "pro" in model_name
+                rpm = GEMINI_PRO_RPM if is_pro_model else GEMINI_FLASH_RPM
+                tpm = GEMINI_PRO_TPM if is_pro_model else GEMINI_FLASH_TPM
+                rpd = GEMINI_PRO_RPD if is_pro_model else GEMINI_FLASH_RPD
+
+                rate_limiter = StreamingRateLimiter(rpm, tpm, rpd)
+
+                try:
+                    llm_instance = ChatGoogleGenerativeAI(
+                        model=model_name,
+                        google_api_key=api_key_to_use,
+                        temperature=float(
+                            self.model_settings.get("temperature", 0.7)
+                        ),  # Ensure float
+                        max_output_tokens=self.MAX_OUTPUT_TOKENS,
+                        convert_system_message_to_human=True,  # Keep for Gemini
+                        streaming=True,  # Keep streaming enabled
+                        callbacks=[rate_limiter],
+                        # Caching enabled globally via set_llm_cache
+                    )
+                    self.logger.info(
+                        f"ChatGoogleGenerativeAI instance created for model: {model_name}"
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to create LLM instance for {model_name}: {e}",
+                        exc_info=True,
+                    )
+                    raise
+
+            # Add the created instance to the cache
+            self._llm_cache[model_name] = llm_instance
+            return llm_instance
 
     async def _get_api_key(self) -> str:
+        # This method specifically gets the GOOGLE key now
         api_key = await self.api_key_manager.get_api_key()  # Removed user_id
         if not api_key:
-            self.logger.error(f"API key not found for local instance.")
+            self.logger.error(f"Google API key not found for local instance.")
             raise ValueError(
-                "API key not set. Please set your API key in the settings."
+                "Google API key not set. Please set your API key in the settings."
             )
         return api_key
 
