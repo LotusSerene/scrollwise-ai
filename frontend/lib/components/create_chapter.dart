@@ -755,18 +755,18 @@ class _CreateChapterState extends State<CreateChapter> {
                                         value: totalChaptersToGen > 1
                                             ? generationProgress
                                             : null,
-                                        backgroundColor: Color(0xFF343a40),
+                                        backgroundColor: const Color(0xFF343a40),
                                         valueColor:
-                                            AlwaysStoppedAnimation<Color>(
+                                            const AlwaysStoppedAnimation<Color>(
                                                 Color(0xFF007bff)),
                                       ),
-                                      SizedBox(height: 10),
+                                      const SizedBox(height: 10),
                                       Text(
                                         totalChaptersToGen > 1
                                             ? 'Generating chapter ${currentChapterNum + 1} of $totalChaptersToGen...'
                                             : 'Generating chapter...',
                                         style:
-                                            TextStyle(color: Color(0xFFf8f9fa)),
+                                            const TextStyle(color: Color(0xFFf8f9fa)),
                                       ),
                                     ],
                                   )

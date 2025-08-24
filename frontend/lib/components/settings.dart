@@ -331,13 +331,13 @@ class _SettingsState extends State<Settings> {
     final availableEmbeddingIds = _embeddingsOptions.map((m) => m.id).toSet();
     bool changed = false;
 
-    [
+    for (var key in [
       'mainLLM',
       'checkLLM',
       'titleGenerationLLM',
       'extractionLLM',
       'knowledgeBaseQueryLLM'
-    ].forEach((key) {
+    ]) {
       if (!_modelSettings.containsKey(key) ||
           !availableModelIds.contains(_modelSettings[key])) {
         _logger.warning(
@@ -346,7 +346,7 @@ class _SettingsState extends State<Settings> {
             _availableModels.first.id; // Default to first available model ID
         changed = true;
       }
-    });
+    }
 
     if (!_modelSettings.containsKey('embeddingsModel') ||
         !availableEmbeddingIds.contains(_modelSettings['embeddingsModel'])) {
