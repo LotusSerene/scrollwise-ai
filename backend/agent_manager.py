@@ -486,7 +486,7 @@ class AgentManager:
             defaults = {
                 "mainLLM": "gemini-1.5-flash-latest",  # Default to Flash for cost/speed
                 "checkLLM": "gemini-1.5-flash-latest",
-                "embeddingsModel": "models/text-embedding-004",
+                "embeddingsModel": "models/gemini-embedding-001",
                 "titleGenerationLLM": "gemini-1.5-flash-latest",
                 "extractionLLM": "gemini-1.5-flash-latest",
                 "knowledgeBaseQueryLLM": "gemini-1.5-flash-latest",

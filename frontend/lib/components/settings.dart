@@ -59,7 +59,7 @@ class _SettingsState extends State<Settings> {
   Map<String, dynamic> _modelSettings = {
     'mainLLM': 'gemini-1.5-pro-latest', // Default will be updated after fetch
     'checkLLM': 'gemini-1.5-flash-latest',
-    'embeddingsModel': 'models/text-embedding-004',
+    'embeddingsModel': 'models/gemini-embedding-001',
     'titleGenerationLLM': 'gemini-1.5-flash-latest',
     'extractionLLM': 'gemini-1.5-flash-latest',
     'knowledgeBaseQueryLLM': 'gemini-1.5-flash-latest',
@@ -74,7 +74,7 @@ class _SettingsState extends State<Settings> {
   // Hardcoded Embedding Options
   final List<ModelInfo> _embeddingsOptions = [
     ModelInfo(
-        id: 'models/text-embedding-004', name: 'Google: text-embedding-004'),
+        id: 'models/gemini-embedding-001', name: 'Google: text-embedding-001'),
     ModelInfo(
         id: 'models/embedding-001', name: 'Google: embedding-001 (Legacy)'),
   ];

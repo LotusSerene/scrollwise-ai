@@ -944,7 +944,7 @@ class Database:
         default_settings = {
             "mainLLM": "gemini-1.5-pro-002",
             "checkLLM": "gemini-1.5-pro-002",
-            "embeddingsModel": "models/text-embedding-004",
+            "embeddingsModel": "models/gemini-embedding-001",
             "titleGenerationLLM": "gemini-1.5-pro-002",
             "extractionLLM": "gemini-1.5-pro-002",
             "knowledgeBaseQueryLLM": "gemini-1.5-pro-002",
