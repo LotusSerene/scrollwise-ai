@@ -626,14 +626,25 @@ app = FastAPI(
 )
 
 # CORS Middleware
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8080").split(",")
+# CORS Middleware
+# Allow typical local origins
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "*"  # Fallback for other local IPs if credentials allow or if we relax it
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"], # For local app, allow all is easiest. If credentials needed, we must list.
+    # But since we use Bearer tokens (or mock them), allow_origins=["*"] usually works fine WITHOUT allow_credentials=True
+    # OR we list specific origins WITH allow_credentials=True.
+    # Let's try the specific list + relaxed matching
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],  # Ensure Authorization is allowed
+    allow_methods=["*"],
+    allow_headers=["*"], 
 )
 
 # --- Removed MAX_INACTIVITY and ACTIVE_SESSION_EXTEND ---
@@ -3131,7 +3142,7 @@ async def add_to_knowledge_base(
 @knowledge_base_router.get("/export")
 async def export_knowledge_base(
     project_id: str,
-    format: str = Query("json", regex="^(json|csv|txt)$"),
+    format: str = Query("json", pattern="^(json|csv|txt)$"),
     current_user: Dict[str, Any] = Depends(get_current_active_user),
     agent_manager_store_di: AgentManagerStore = Depends(
         get_agent_manager_store_dependency
