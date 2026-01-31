@@ -102,7 +102,8 @@ Set-Location "frontend"
 
 if (-not (Test-Path "node_modules")) {
     Write-Host "[INFO] Installing frontend dependencies..."
-    cmd /c "npm install"
+    # Use --legacy-peer-deps to handle React 19 conflicts with older libs
+    cmd /c "npm install --legacy-peer-deps"
 }
 
 Write-Host "[INFO] Building Frontend for Production..."
