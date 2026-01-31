@@ -39,8 +39,6 @@ import re
 from langchain_classic.output_parsers import OutputFixingParser
 from pydantic import BaseModel, Field, ValidationError
 from datetime import timezone, timedelta
-import google.generativeai as genai
-from google.generativeai import caching
 from api_key_manager import ApiKeyManager
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -429,21 +427,23 @@ class AgentManager:
         ttl_minutes: int = 60,
     ) -> str:
         """
-        Creates or retrieves a Gemini context cache.
+        Creates or retrieves a Gemini context cache using google-genai SDK.
         Returns the cache name (resource name).
         """
         try:
-            # Check if cache exists (by name)
-            # The name must be unique per project/context.
-            # We can try to get it.
-            # Note: The client library doesn't have a simple "get by name" that returns None if not found easily without listing.
-            # We will try to create it. If it exists, we might want to update it or just use it.
-            # For simplicity, we'll assume we create a new one if the TTL is expired or just create one.
-            # Actually, we should list caches to find if one exists with the display_name.
+            from google import genai
+            from google.genai import types
+            
+            # Use the API key stored in the instance
+            client = genai.Client(api_key=self.api_key)
 
             # List caches to find one with the matching display_name
+            # Note: The new SDK listing might be synchronous or async depending on client configuration.
+            # Assuming standard sync usage for now as per common migration patterns, or wrapping if needed.
+            
             existing_cache = None
-            async for c in caching.CachedContent.list_async():
+            # Using the list method which returns an iterable
+            for c in client.caches.list():
                 if c.display_name == cache_name:
                     existing_cache = c
                     break
@@ -451,18 +451,25 @@ class AgentManager:
             if existing_cache:
                 self.logger.info(f"Found existing Gemini cache: {existing_cache.name}")
                 # Update TTL
-                existing_cache.update(ttl=timedelta(minutes=ttl_minutes))
+                client.caches.update(
+                    name=existing_cache.name,
+                    config=types.UpdateCachedContentConfig(
+                        ttl=f"{ttl_minutes * 60}s" # TTL in seconds as string with 's' suffix
+                    )
+                )
                 return existing_cache.name
 
             self.logger.info(f"Creating new Gemini cache: {cache_name}")
             
             # Create the cache
-            cached_content = await caching.CachedContent.create_async(
-                model="models/gemini-1.5-pro-001", # Default or passed in?
-                display_name=cache_name,
-                system_instruction=system_instruction,
-                contents=contents if contents else [],
-                ttl=timedelta(minutes=ttl_minutes),
+            cached_content = client.caches.create(
+                model="models/gemini-flash-latest",
+                config=types.CreateCachedContentConfig(
+                    display_name=cache_name,
+                    system_instruction=system_instruction,
+                    contents=[types.Content(parts=[types.Part(text=c)]) for c in contents] if contents else [],
+                    ttl=f"{ttl_minutes * 60}s",
+                )
             )
             return cached_content.name
 

@@ -30,6 +30,6 @@ ebooklib
 striprtf
 networkx
 fastembed
-google-generativeai
+google-genai
 pystray
 Pillow

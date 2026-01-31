@@ -4,8 +4,6 @@ import asyncio
 import httpx
 from typing import Dict, Any, List, Optional, Annotated
 from langchain_google_genai import ChatGoogleGenerativeAI
-import google.generativeai as genai
-from google.generativeai import caching
 from datetime import timedelta
 from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -317,17 +315,29 @@ class ArchitectAgent:
         self,
         cache_name: str,
         system_instruction: str,
+        api_key: str,
         contents: List[str] = None,
         ttl_minutes: int = 60,
     ) -> str:
         """
-        Creates or retrieves a Gemini context cache.
+        Creates or retrieves a Gemini context cache using google-genai SDK.
         Returns the cache name (resource name).
         """
         try:
+            from google import genai
+            from google.genai import types
+            
+            client = genai.Client(api_key=api_key)
+
             # List caches to find one with the matching display_name
+            # Note: The new SDK listing might be synchronous or async depending on client configuration.
+            # Assuming standard sync usage for now as per common migration patterns, or wrapping if needed.
+            # Ideally we'd use an async client if available, but for migration safety we'll use the sync client
+            # inside this async method. If strict async is needed, we'd wrap in run_in_executor.
+            
             existing_cache = None
-            async for c in caching.CachedContent.list_async():
+            # Using the list method which returns an iterable
+            for c in client.caches.list():
                 if c.display_name == cache_name:
                     existing_cache = c
                     break
@@ -335,18 +345,25 @@ class ArchitectAgent:
             if existing_cache:
                 self.logger.info(f"Found existing Gemini cache: {existing_cache.name}")
                 # Update TTL
-                existing_cache.update(ttl=timedelta(minutes=ttl_minutes))
+                client.caches.update(
+                    name=existing_cache.name,
+                    config=types.UpdateCachedContentConfig(
+                        ttl=f"{ttl_minutes * 60}s" # TTL in seconds as string with 's' suffix often required
+                    )
+                )
                 return existing_cache.name
 
             self.logger.info(f"Creating new Gemini cache: {cache_name}")
             
             # Create the cache
-            cached_content = await caching.CachedContent.create_async(
-                model="models/gemini-1.5-pro-001", # Default or passed in?
-                display_name=cache_name,
-                system_instruction=system_instruction,
-                contents=contents if contents else [],
-                ttl=timedelta(minutes=ttl_minutes),
+            cached_content = client.caches.create(
+                model="models/gemini-flash-latest",
+                config=types.CreateCachedContentConfig(
+                    display_name=cache_name,
+                    system_instruction=system_instruction,
+                    contents=[types.Content(parts=[types.Part(text=c)]) for c in contents] if contents else [],
+                    ttl=f"{ttl_minutes * 60}s",
+                )
             )
             return cached_content.name
 
@@ -398,7 +415,7 @@ class ArchitectAgent:
                 f"- `get_project_details_tool`: Get overall project details and context.\\n"
                 f"- `get_chapter_list_tool`: Get a list of all chapters in the project.\\n"
                 f"- `read_chapter_tool`: Read a specific chapter by number.\\n"
-                f"- `get_recent_chapters_summary_tool`: Get a summary of recent chapters (default: last 3).\\n"
+                f"- `get_recent_chapters_summary_tool`: Get a summary of recent chapters (default is 3).\\n"
                 f"- `generate_chapter_tool`: Generate a new chapter draft based on provided details.\\n"
                 f"- `query_codex_tool`: Search the project's knowledge base (characters, worldbuilding, etc).\\n"
                 f"- `get_project_structure_tool`: Get the project's folder structure for organizing chapters.\\n"
@@ -431,7 +448,8 @@ class ArchitectAgent:
                 
                 cached_content_name = await self._get_or_create_gemini_cache(
                     cache_name=cache_display_name,
-                    system_instruction=system_message
+                    system_instruction=system_message,
+                    api_key=gemini_api_key
                 )
 
             self.llm = await self._get_llm_instance(

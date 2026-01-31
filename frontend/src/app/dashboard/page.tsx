@@ -452,12 +452,7 @@ export default function DashboardPage() {
 
         {/* Main Content */}
         <main className="flex-1 p-8 overflow-y-auto z-10 relative">
-          <div className="bg-destructive text-destructive-foreground px-4 py-3 text-center border-b border-destructive-foreground/10 rounded-md mb-6 relative z-50">
-            <p className="text-sm font-bold flex items-center justify-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              Scrollwise will shut down on February 25, thank you for using our service!
-            </p>
-          </div>
+
           {!isApiKeySet && (
             <div className="relative bg-red-50 border-l-4 border-red-400 p-4 mb-6 rounded-r-lg shadow-md">
               <div className="flex">

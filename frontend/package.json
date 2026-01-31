@@ -57,7 +57,7 @@
     "framer-motion": "^12.9.4",
     "glob": "^11.0.2",
     "html2pdf.js": "^0.10.3",
-    "inflight": "^1.0.6",
+
     "input-otp": "^1.4.2",
     "lucide-react": "^0.487.0",
     "marked": "^15.0.12",
