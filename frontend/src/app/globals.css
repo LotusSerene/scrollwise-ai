@@ -1,0 +1,169 @@
+/* global.css */
+@import "tailwindcss";
+@import "tw-animate-css"; /* Ensure this plugin is installed and configured */
+
+/* Consider standard darkMode: 'class' in tailwind.config.js if this causes issues */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* CSS Variables mapped from :root/.dark for component/utility use */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(
+    --font-playfair-display
+  ); /* Ensure 'Playfair Display' is loaded */
+  --font-body: var(--font-lato); /* Ensure 'Lato' is loaded */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+/* Base variable definitions */
+:root {
+  /* Ensure these fonts are loaded via <link>, @font-face, etc. */
+  --font-playfair-display: "Playfair Display", serif;
+  --font-lato: "Lato", sans-serif;
+
+  /* Light theme (adjust if needed later) */
+  --radius: 0.5rem;
+  --background: oklch(0.98 0.01 90);
+  --foreground: oklch(0.25 0.03 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.25 0.03 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.25 0.03 250);
+  --primary: oklch(0.65 0.15 80);
+  --primary-foreground: oklch(0.15 0.03 250);
+  --secondary: oklch(0.9 0.02 90);
+  --secondary-foreground: oklch(0.65 0.15 80);
+  --muted: oklch(0.9 0.02 90);
+  --muted-foreground: oklch(0.45 0.03 250);
+  --accent: oklch(0.85 0.05 250);
+  --accent-foreground: oklch(0.25 0.03 250);
+  --destructive: oklch(0.6 0.2 25);
+  --border: oklch(0.85 0.02 90);
+  --input: oklch(0.85 0.02 90);
+  --ring: oklch(0.65 0.15 80); /* Ring color primarily for focus states */
+  /* Chart colors */
+  --chart-1: oklch(0.65 0.15 80);
+  --chart-2: oklch(0.6 0.1 250);
+  --chart-3: oklch(0.6 0.1 150);
+  --chart-4: oklch(0.7 0.1 40);
+  --chart-5: oklch(0.5 0.1 300);
+  /* Sidebar colors */
+  --sidebar: oklch(0.98 0.01 90);
+  --sidebar-foreground: oklch(0.25 0.03 250);
+  --sidebar-primary: oklch(0.65 0.15 80);
+  --sidebar-primary-foreground: oklch(0.15 0.03 250);
+  --sidebar-accent: oklch(0.9 0.02 90);
+  --sidebar-accent-foreground: oklch(0.65 0.15 80);
+  --sidebar-border: oklch(0.85 0.02 90);
+  --sidebar-ring: oklch(0.65 0.15 80 / 0.5);
+}
+
+.dark {
+  /* Vintage Dark Theme */
+  --background: oklch(0.18 0.03 250);
+  --foreground: oklch(0.95 0.01 90);
+  --card: oklch(0.25 0.03 250);
+  --card-foreground: oklch(0.95 0.01 90);
+  --popover: oklch(0.22 0.03 250);
+  --popover-foreground: oklch(0.95 0.01 90);
+  --primary: oklch(0.7 0.15 85);
+  --primary-foreground: oklch(0.15 0.03 250);
+  --secondary: oklch(0.35 0.03 250);
+  --secondary-foreground: oklch(0.85 0.01 90);
+  --muted: oklch(0.3 0.03 250);
+  --muted-foreground: oklch(0.65 0.02 250);
+  --accent: oklch(0.4 0.03 250);
+  --accent-foreground: oklch(0.95 0.01 90);
+  --destructive: oklch(0.65 0.18 25);
+  --border: oklch(0.4 0.03 250 / 0.8);
+  --input: oklch(0.35 0.03 250 / 0.7);
+  --ring: oklch(0.7 0.15 85); /* Ring color primarily for focus states */
+  /* Chart colors (dark theme) */
+  --chart-1: oklch(0.7 0.15 85);
+  --chart-2: oklch(0.65 0.1 250);
+  --chart-3: oklch(0.65 0.1 150);
+  --chart-4: oklch(0.75 0.1 40);
+  --chart-5: oklch(0.55 0.1 300);
+  /* Sidebar colors (dark theme) */
+  --sidebar: oklch(0.18 0.03 250);
+  --sidebar-foreground: oklch(0.95 0.01 90);
+  --sidebar-primary: oklch(0.7 0.15 85);
+  --sidebar-primary-foreground: oklch(0.15 0.03 250);
+  --sidebar-accent: oklch(0.35 0.03 250);
+  --sidebar-accent-foreground: oklch(0.85 0.01 90);
+  --sidebar-border: oklch(0.4 0.03 250 / 0.8);
+  --sidebar-ring: oklch(0.7 0.15 85 / 0.6);
+}
+
+/* Base layer customizations */
+@layer base {
+  body {
+    @apply bg-background text-foreground font-body; /* Apply body font */
+    /* Add a subtle texture? Optional */
+    /* background-image: url('/path/to/subtle-noise.png'); */
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display; /* Apply display font to headings */
+  }
+  .ProseMirror p {
+    margin-bottom: 1rem; /* Adjust the value as needed */
+  }
+}
