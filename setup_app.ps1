@@ -106,6 +106,11 @@ if (-not (Test-Path "node_modules")) {
     cmd /c "npm install --legacy-peer-deps"
 }
 
+# Ensure .env.production exists for the build
+Write-Host "[INFO] Configuring frontend environment..."
+$envContent = "NEXT_PUBLIC_BACKEND_URL=http://localhost:8080"
+Set-Content -Path ".env.production" -Value $envContent
+
 Write-Host "[INFO] Building Frontend for Production..."
 cmd /c "npm run build"
 if ($LASTEXITCODE -ne 0) {
