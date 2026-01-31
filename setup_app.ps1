@@ -6,29 +6,36 @@ Write-Host ""
 # --- Git Auto-Update ---
 Write-Host "[INFO] Checking for updates..." -ForegroundColor Yellow
 if (-not (Test-Path ".git")) {
-    Write-Host "[INFO] Repository not found. Cloning from GitHub..."
-    git clone https://github.com/LotusSerene/scrollwise-ai .
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Git clone failed. Please check your internet connection." -ForegroundColor Red
-        Read-Host "Press Enter to exit..."
-        exit 1
+    Write-Host "[INFO] Initializing Git repository..."
+    try {
+        git init
+        git remote add origin https://github.com/LotusSerene/scrollwise-ai
+        git fetch origin
+        # Force local state to match remote master (safest for "installer" mode)
+        git reset --hard origin/master
+        git branch --set-upstream-to=origin/master master
+        if ($LASTEXITCODE -ne 0) { throw "Git setup failed" }
+        Write-Host "[SUCCESS] Repository initialized and updated." -ForegroundColor Green
+    } catch {
+        Write-Host "[WARNING] Failed to initialize Git. Continuing with local files..." -ForegroundColor DarkYellow
+        Write-Host "Error: $_"
     }
 } else {
     Write-Host "[INFO] Checking for latest changes..."
-    git fetch origin master
-    $localHash = git rev-parse HEAD
-    $remoteHash = git rev-parse origin/master
+    try {
+        git fetch origin master
+        $localHash = git rev-parse HEAD
+        $remoteHash = git rev-parse origin/master
 
-    if ($localHash -ne $remoteHash) {
-        Write-Host "[INFO] Update found! Pulling latest code..." -ForegroundColor Green
-        git pull origin master
-        if ($LASTEXITCODE -ne 0) {
-           Write-Host "[WARNING] Git pull failed. Continuing with current version..." -ForegroundColor DarkYellow
+        if ($localHash -ne $remoteHash) {
+            Write-Host "[INFO] Update found! Syncing..." -ForegroundColor Green
+            git reset --hard origin/master
+            Write-Host "[SUCCESS] Updated to latest version." -ForegroundColor Green
         } else {
-           Write-Host "[SUCCESS] Updated to latest version." -ForegroundColor Green
+            Write-Host "[INFO] You are already on the latest version." -ForegroundColor Gray
         }
-    } else {
-        Write-Host "[INFO] You are already on the latest version." -ForegroundColor Gray
+    } catch {
+        Write-Host "[WARNING] Git update failed. Continuing with local version..." -ForegroundColor DarkYellow
     }
 }
 
