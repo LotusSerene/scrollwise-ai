@@ -229,7 +229,7 @@ export function ArchitectChat({
 
       // Update message list with the actual response
       const updatedMessages = [
-        ...messages.slice(0, -1),
+        ...messages,
         newUserMessage,
         assistantMessage,
       ];
@@ -249,8 +249,7 @@ export function ArchitectChat({
           // For each tool call, add a message showing the tool usage
           for (const [index, toolCall] of response.tool_calls.entries()) {
             setToolStatus(
-              `Processing tool: ${toolCall.name} (${index + 1}/${
-                response.tool_calls.length
+              `Processing tool: ${toolCall.name} (${index + 1}/${response.tool_calls.length
               })`
             );
 
@@ -635,8 +634,8 @@ export function ArchitectChat({
                                 ? msg.isToolError
                                   ? "Tool Error"
                                   : msg.isToolProcessing
-                                  ? "Processing Tool Call"
-                                  : "Tool Result"
+                                    ? "Processing Tool Call"
+                                    : "Tool Result"
                                 : "Architect"}
                             </TooltipContent>
                           </Tooltip>
@@ -647,12 +646,12 @@ export function ArchitectChat({
                             msg.role === "user"
                               ? "bg-primary text-primary-foreground"
                               : msg.isToolCall
-                              ? msg.isToolError
-                                ? "bg-destructive/10 border border-destructive/20"
-                                : msg.isToolProcessing
-                                ? "bg-amber-50/80 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-800/30"
-                                : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50"
-                              : "bg-muted/80 border border-muted-foreground/10"
+                                ? msg.isToolError
+                                  ? "bg-destructive/10 border border-destructive/20"
+                                  : msg.isToolProcessing
+                                    ? "bg-amber-50/80 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-800/30"
+                                    : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50"
+                                : "bg-muted/80 border border-muted-foreground/10"
                           )}
                         >
                           <div className="overflow-hidden max-w-full">

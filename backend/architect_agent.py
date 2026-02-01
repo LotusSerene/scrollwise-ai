@@ -355,13 +355,19 @@ class ArchitectAgent:
 
             self.logger.info(f"Creating new Gemini cache: {cache_name}")
             
+            if not contents:
+                self.logger.warning(
+                    f"Skipping Gemini cache creation for {cache_name} because no contents were provided."
+                )
+                return None
+
             # Create the cache
             cached_content = client.caches.create(
                 model="models/gemini-flash-latest",
                 config=types.CreateCachedContentConfig(
                     display_name=cache_name,
                     system_instruction=system_instruction,
-                    contents=[types.Content(parts=[types.Part(text=c)]) for c in contents] if contents else [],
+                    contents=[types.Content(parts=[types.Part(text=c)]) for c in contents],
                     ttl=f"{ttl_minutes * 60}s",
                 )
             )
