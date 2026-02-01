@@ -556,6 +556,7 @@ class ArchitectAgent:
                     temperature=temperature,
                     cached_content=cached_content_name,
                     convert_system_message_to_human=True,
+                    max_output_tokens=8192,
                 )
             self.logger.info(f"Architect LLM instance created: {model_name}")
             return llm_instance
