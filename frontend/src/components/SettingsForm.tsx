@@ -749,7 +749,7 @@ export function SettingsForm({ isProUser }: SettingsFormProps) {
         {isProUser && (
           <>
             <FormDescription className="text-muted-foreground">
-              Pro Feature: Needed for OpenRouter models.{" "}
+              Needed for OpenRouter models.{" "}
               <a
                 href="https://openrouter.ai/keys"
                 target="_blank"
@@ -837,7 +837,7 @@ export function SettingsForm({ isProUser }: SettingsFormProps) {
         {true && (
           <>
             <FormDescription className="text-muted-foreground">
-              Pro Feature: Needed for Anthropic (Claude) models.
+              Needed for Anthropic (Claude) models.
             </FormDescription>
             {anthropicApiKeyStatus.isSet && !showAnthropicApiKey ? (
               <div className="flex items-center gap-4 p-3 bg-accent/50 rounded-md border border-border">
@@ -916,7 +916,7 @@ export function SettingsForm({ isProUser }: SettingsFormProps) {
         {true && (
           <>
             <FormDescription className="text-muted-foreground">
-              Pro Feature: Needed for direct OpenAI models.
+              Needed for direct OpenAI models.
             </FormDescription>
             {openaiApiKeyStatus.isSet && !showOpenaiApiKey ? (
               <div className="flex items-center gap-4 p-3 bg-accent/50 rounded-md border border-border">

@@ -311,7 +311,7 @@ export default function ProjectSettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            Architect Mode (Pro Feature)
+            Architect Mode
           </CardTitle>
           <CardDescription>
             Enable the advanced AI Architect for this project, providing

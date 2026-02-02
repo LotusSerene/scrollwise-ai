@@ -1352,7 +1352,7 @@ class AgentManager:
 
                         if temp_profile_strings:
                             character_voice_profiles_context_list.append(
-                                "\nCharacter Voice Profiles (Pro Feature - Active for this session):"
+                                "\n"
                             )
                             character_voice_profiles_context_list.extend(
                                 temp_profile_strings
