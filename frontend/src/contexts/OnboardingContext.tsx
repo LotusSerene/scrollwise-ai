@@ -150,27 +150,28 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
       if (!currentProjectId) {
         console.log(`[Onboarding] Step ${currentStep}: Waiting for project ID...`);
         // Navigate back to dashboard if we don't have a project ID
-        if (pathname !== "/dashboard") {
-          router.push("/dashboard");
-        }
-        return;
+        targetPath = "/dashboard";
+      } else {
+        targetPath = `/project-dashboard/${currentProjectId}`;
+        if (targetPage === "project-dashboard-editor") targetPath += "/editor";
+        else if (targetPage === "project-dashboard-codex") targetPath += "/codex";
+        else if (targetPage === "project-dashboard-generate") targetPath += "/generate";
+        else if (targetPage === "project-dashboard-query") targetPath += "/query";
+        else if (targetPage === "project-dashboard-outliner") targetPath += "/outliner";
       }
-
-      targetPath = `/project-dashboard/${currentProjectId}`;
-      if (targetPage === "project-dashboard-editor") targetPath += "/editor";
-      else if (targetPage === "project-dashboard-codex") targetPath += "/codex";
-      else if (targetPage === "project-dashboard-generate") targetPath += "/generate";
-      else if (targetPage === "project-dashboard-query") targetPath += "/query";
-      else if (targetPage === "project-dashboard-outliner") targetPath += "/outliner";
     } else {
       targetPath = "/dashboard";
     }
 
-    // Navigate to the target path
-    if (targetPath) {
-      router.push(targetPath);
+    // Navigate to the target path if we're not already there
+    // We remove pathname from dependencies to avoid "trapping" the user
+    // if they manually navigate during a tour.
+    const currentPath = window.location.pathname;
+    if (targetPath && currentPath !== targetPath) {
+      // Use replace for tour steps to avoid polluting history stack
+      router.replace(targetPath);
     }
-  }, [isOnboardingActive, currentStep, currentProjectId, getTargetPageForStep, router, pathname]);
+  }, [isOnboardingActive, currentStep, currentProjectId, getTargetPageForStep, router]);
 
 
   const startOnboarding = () => {

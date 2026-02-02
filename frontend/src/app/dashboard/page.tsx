@@ -89,13 +89,6 @@ interface CreativeItem {
 
 type FilterType = "all" | "projects" | "universes";
 
-// Constants for survey local/session storage
-const SURVEY_NEVER_ASK_AGAIN_KEY = "scrollwise_survey_never_ask_again_v1"; // Added versioning
-const SURVEY_ASK_LATER_KEY = "scrollwise_survey_ask_later_session_v1";
-
-// --- Helper Function to get Auth Token (Placeholder) ---
-// REMOVED: getAuthToken function
-// --- End Placeholder ---
 
 export default function DashboardPage() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
@@ -107,7 +100,6 @@ export default function DashboardPage() {
     useState(false);
   const [isCreateUniverseDialogOpen, setIsCreateUniverseDialogOpen] =
     useState(false); // State for Universe dialog
-  const [showSurveySlider, setShowSurveySlider] = useState(false); // State for survey slider
   const [isApiKeySet, setIsApiKeySet] = useState(true); // State for API key status
   // No longer need userDetails state here if only used for onboarding flag
   // const [userDetails, setUserDetails] = useState<UserDetails | null>(null); // State for user details
@@ -220,62 +212,6 @@ export default function DashboardPage() {
     // Dependency array: react to changes in auth state
   }, [auth.isLoading, auth.isAuthenticated, auth.user, fetchData, router]);
 
-  // Effect to determine if survey slider should be shown
-  useEffect(() => {
-    if (isLoading || !auth.isAuthenticated) {
-      return; // Don't proceed if data is loading or user is not authenticated
-    }
-
-    const neverAskAgain = localStorage.getItem(SURVEY_NEVER_ASK_AGAIN_KEY);
-    const askLaterThisSession = sessionStorage.getItem(SURVEY_ASK_LATER_KEY);
-
-    if (neverAskAgain === "true" || askLaterThisSession === "true") {
-      setShowSurveySlider(false); // Keep it hidden if dismissed
-      return;
-    }
-
-    // Show survey only if user has 2 or more projects
-    if (projects.length >= 2) {
-      setShowSurveySlider(true);
-    } else {
-      setShowSurveySlider(false); // Ensure it's hidden if conditions change (e.g., project deleted)
-    }
-  }, [projects, auth.isAuthenticated, isLoading]); // Dependencies
-
-  useEffect(() => {
-    const handleSurveyYes = () => {
-      window.open("https://form.typeform.com/to/Qh6uhiMP", "_blank");
-      localStorage.setItem(SURVEY_NEVER_ASK_AGAIN_KEY, "true");
-      setShowSurveySlider(false);
-    };
-
-    const handleSurveyLater = () => {
-      sessionStorage.setItem(SURVEY_ASK_LATER_KEY, "true");
-      setShowSurveySlider(false);
-    };
-
-    const handleSurveyNever = () => {
-      localStorage.setItem(SURVEY_NEVER_ASK_AGAIN_KEY, "true");
-      setShowSurveySlider(false);
-    };
-
-    const yesButton = document.getElementById("survey-yes");
-    const laterButton = document.getElementById("survey-later");
-    const neverButton = document.getElementById("survey-never");
-
-    if (yesButton) yesButton.addEventListener("click", handleSurveyYes);
-    if (laterButton) laterButton.addEventListener("click", handleSurveyLater);
-    if (neverButton) neverButton.addEventListener("click", handleSurveyNever);
-
-    return () => {
-      if (yesButton) yesButton.removeEventListener("click", handleSurveyYes);
-      if (laterButton)
-        laterButton.removeEventListener("click", handleSurveyLater);
-      if (neverButton)
-        neverButton.removeEventListener("click", handleSurveyNever);
-    };
-  }, []);
-
   const allItems = useMemo((): CreativeItem[] => {
     const mappedProjects = projects.map((p) => ({
       id: p.id,
@@ -309,7 +245,6 @@ export default function DashboardPage() {
     return allItems;
   }, [activeFilter, allItems]);
 
-  // Handler for successful project creation
   const handleProjectCreated = (newProject: Project) => {
     console.log("New project created:", newProject);
     setProjects((prev) =>
@@ -319,7 +254,7 @@ export default function DashboardPage() {
     setActiveFilter("projects");
 
     // If user is in onboarding and on the "create first project" step, advance to next step and navigate to project
-    if (isOnboardingActive && currentStep === 6) { // Step 6 is "create-first-project"
+    if (isOnboardingActive && currentStep === 5) { // Step 5 is "create-first-project"
       // Set the project ID for the onboarding context
       setCurrentProjectId(newProject.id);
       // Navigate to the project dashboard
@@ -900,58 +835,6 @@ export default function DashboardPage() {
         </Dialog>
       </div>{" "}
       {/* End of main layout div */}
-      {/* Feedback Survey Slider */}
-      {showSurveySlider && (
-        <div
-          className={`fixed bottom-0 left-0 right-0 bg-card border-t-2 border-primary/30 p-6 shadow-2xl transform transition-all duration-500 ease-in-out z-[100] ${showSurveySlider ? "translate-y-0" : "translate-y-full"
-            }`}
-          role="dialog"
-          aria-labelledby="survey-title"
-          aria-describedby="survey-description"
-        >
-          <div className="container mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-start sm:items-center gap-3">
-              <MessageSquare className="h-8 w-8 text-primary flex-shrink-0 mt-1 sm:mt-0" />
-              <div>
-                <h3
-                  id="survey-title"
-                  className="text-lg font-semibold font-display text-foreground"
-                >
-                  Help Us Improve ScrollWise!
-                </h3>
-                <p
-                  id="survey-description"
-                  className="text-sm text-muted-foreground"
-                >
-                  Your feedback is valuable. Would you mind taking a quick
-                  2-minute survey?
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 mt-4 sm:mt-0 flex-shrink-0">
-              <Button
-                variant="default"
-                size="sm"
-                id="survey-yes"
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                Yes, Take Survey
-              </Button>
-              <Button variant="outline" size="sm" id="survey-later">
-                Later
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                id="survey-never"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                Never Ask Again
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Define our CSS animations */}
       <style jsx global>{`
         @keyframes fade-in {

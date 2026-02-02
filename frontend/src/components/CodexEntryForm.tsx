@@ -317,7 +317,7 @@ export function CodexEntryForm({
             <div className="flex items-center mb-3">
               <Sparkles className="h-5 w-5 mr-2 text-purple-500" />
               <h4 className="font-semibold text-purple-600">
-                Character Voice Profile (Pro Feature)
+                Character Voice Profile
               </h4>
             </div>
             <div className="space-y-4">
