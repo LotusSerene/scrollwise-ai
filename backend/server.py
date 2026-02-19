@@ -1343,6 +1343,11 @@ async def run_chapter_generation_background(
             user_id, project_id
         ) as agent_manager:
             for i in range(gen_request.numChapters):
+                # Rate Limiting Mitigation: Add a small delay between chapters to avoid Gemini errors
+                if i > 0:
+                    logger.info(f"Rate limiting delay: Waiting 2 seconds before generating next chapter...")
+                    await asyncio.sleep(2)
+
                 chapter_number = chapter_count + i + 1
                 logger.info(
                     f"Background task: Initiating generation for Chapter {chapter_number}..."
@@ -1464,6 +1469,33 @@ async def run_chapter_generation_background(
                 actual_chapter_number = new_chapter_db[
                     "chapter_number"
                 ]  # Get actual number from DB
+
+                # 1.5. Update Project Structure (Prevent Orphaned Chapters)
+                try:
+                    structure_data = await db_instance.get_project_structure(
+                        project_id=project_id, user_id=user_id
+                    )
+                    
+                    final_structure_list = []
+                    if isinstance(structure_data, dict):
+                        final_structure_list = structure_data.get("project_structure", [])
+                    
+                    # Check if chapter already in structure to avoid duplicates (though unlikely for new chapters)
+                    if not any(item.get("id") == str(chapter_id) for item in final_structure_list):
+                        new_item = {
+                            "id": str(chapter_id),
+                            "type": "chapter",
+                            "title": chapter_title
+                        }
+                        final_structure_list.append(new_item)
+                        await db_instance.update_project_structure(
+                            project_id=project_id, 
+                            structure=final_structure_list, 
+                            user_id=user_id
+                        )
+                        logger.info(f"Successfully updated project structure with new chapter {chapter_id}.")
+                except Exception as structure_err:
+                    logger.error(f"Failed to update project structure for chapter {chapter_id}: {structure_err}")
 
                 # 2. Add Chapter to Knowledge Base
                 chapter_metadata = {

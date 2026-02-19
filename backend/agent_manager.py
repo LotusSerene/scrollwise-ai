@@ -1909,7 +1909,9 @@ class AgentManager:
                         json_parser = JsonOutputParser()
                         parsed_json = json_parser.parse(llm_output_text)
                         
-                        raw_items_list = parsed_json.get("new_items", [])
+                        raw_items_list = []
+                        if parsed_json:
+                            raw_items_list = parsed_json.get("new_items", [])
                         valid_items_buffer = []
 
                         for raw_item in raw_items_list:
