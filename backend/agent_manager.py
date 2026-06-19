@@ -1019,7 +1019,7 @@ class AgentManager:
                     and subscription_info.get("status") == "active"
                 )
                 self.logger.info(
-                    f"User {user_id} subscription for voice profile feature: Plan='{subscription_info.get("plan")}', Status='{subscription_info.get("status")}'. Voice Active: {is_pro_user_for_voice}"
+                    f"User {user_id} subscription for voice profile feature: Plan='{subscription_info.get('plan')}', Status='{subscription_info.get('status')}'. Voice Active: {is_pro_user_for_voice}"
                 )
             else:
                 self.logger.warning(
