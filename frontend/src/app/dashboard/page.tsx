@@ -42,8 +42,7 @@ import {
   Archive,
   ScrollText,
   Home,
-  MessageSquare,
-} from "lucide-react"; // Added Feather, Archive, ScrollText, Home, MessageSquare, X icons
+} from "lucide-react"; // Removed unused MessageSquare icon
 import { fetchApi } from "@/lib/api";
 import { CreateProjectForm } from "@/components/CreateProjectForm";
 import { CreateUniverseForm } from "@/components/CreateUniverseForm";
@@ -441,7 +440,7 @@ export default function DashboardPage() {
                 {/* Use primary button style with vintage effects */}
                 <Button
                   size="lg"
-                  className="group bg-primary text-primary-foreground hover:bg-primary/90 rounded-md border border-primary/20 shadow-sm hover:shadow transition-all overflow-hidden relative create-new-button"
+                  className="group bg-primary text-primary-foreground hover:bg-primary/90 rounded-md border border-primary/20 shadow-sm hover:shadow transition-all overflow-hidden relative"
                 >
                   <span className="relative z-10">
                     <PlusCircle className="mr-2 h-5 w-5 inline-block" /> Create
@@ -533,7 +532,8 @@ export default function DashboardPage() {
                     // Style cards with theme colors and vintage hover
                     <Card
                       key={item.id}
-                      className={`relative overflow-hidden transition-all duration-300 hover:shadow-lg transform hover:-translate-y-1 bg-card border border-border text-card-foreground animate-slide-up ${index === 0
+                      className={`relative overflow-hidden transition-all duration-300 hover:shadow-lg transform hover:-translate-y-1 bg-card border border-border text-card-foreground animate-slide-up ${
+                        index === 0
                         ? "animation-delay-100"
                         : index === 1
                           ? "animation-delay-200"
